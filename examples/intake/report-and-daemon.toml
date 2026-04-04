@@ -7,6 +7,7 @@ working_directory = "%h"
 exec_start = "/bin/bash -lc 'until /usr/bin/python3 -c \"import intake.cli\" >/dev/null 2>&1; do echo \"intake daemon: waiting for intake module path to become available\"; sleep 30; done; exec /usr/bin/python3 -m intake.cli daemon'"
 after = ["network-online.target"]
 wants = ["network-online.target"]
+start_limit_interval_sec = "0"
 service_install_wanted_by = ["default.target"]
 restart = "always"
 restart_sec = "30"

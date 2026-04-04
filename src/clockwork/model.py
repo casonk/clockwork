@@ -60,6 +60,7 @@ class JobSpec:
     working_directory: str | None = None
     after: tuple[str, ...] = ()
     wants: tuple[str, ...] = ()
+    start_limit_interval_sec: str | None = None
     environment: dict[str, str] = field(default_factory=dict)
     environment_files: tuple[str, ...] = ()
     user: str | None = None

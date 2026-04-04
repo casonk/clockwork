@@ -10,6 +10,7 @@ def test_load_intake_manifest_parses_daemon_and_timer_examples():
 
     assert len(manifest.jobs) == 2
     assert manifest.jobs[0].name == "intake-daemon"
+    assert manifest.jobs[0].start_limit_interval_sec == "0"
     assert manifest.jobs[0].service_install_wanted_by == ("default.target",)
     assert manifest.jobs[1].timer is not None
     assert manifest.jobs[1].timer.on_calendar == "*-*-* 12:00:00"
