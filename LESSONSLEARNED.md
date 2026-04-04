@@ -14,6 +14,9 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
+- Keep tracked example manifests generic: use placeholder paths, usernames, and
+  local config locations instead of publishing a real host's filesystem layout
+  or service-account names.
 - Document the repository around its real execution, curation, or integration
   flow instead of only the top-level folder list.
 - Keep local-only, private, reference-only, or generated boundaries explicit so

@@ -99,8 +99,8 @@ def handle_install(args: argparse.Namespace) -> int:
         print("Next steps:")
         print("  systemctl daemon-reload")
 
-    service_units = [path.stem for path in written if path.suffix == ".service"]
-    timer_units = [path.stem for path in written if path.suffix == ".timer"]
+    service_units = [path.name for path in written if path.suffix == ".service"]
+    timer_units = [path.name for path in written if path.suffix == ".timer"]
     if args.target == "systemd-user":
         if timer_units:
             print(f"  systemctl --user enable --now {' '.join(timer_units)}")
