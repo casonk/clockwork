@@ -27,3 +27,19 @@ def test_load_personal_finance_manifest_parses_cron_example():
     assert len(manifest.jobs) == 1
     assert manifest.jobs[0].cron is not None
     assert manifest.jobs[0].cron.timezone == "America/New_York"
+
+
+def test_load_personal_finance_intraday_manifest_parses_three_jobs():
+    manifest = load_manifest(
+        Path(__file__).resolve().parent.parent
+        / "examples"
+        / "personal-finance"
+        / "intraday-snapshots.toml"
+    )
+
+    assert len(manifest.jobs) == 3
+    assert manifest.jobs[0].service_unit_name() == "pf-intraday-snapshot@market-open.service"
+    assert manifest.jobs[0].timer is not None
+    assert manifest.jobs[0].timer.on_calendar == "*-*-* 09:35"
+    assert manifest.jobs[0].cron is not None
+    assert manifest.jobs[0].cron.expression == "35 9 * * *"
