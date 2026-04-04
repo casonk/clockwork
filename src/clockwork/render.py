@@ -22,6 +22,8 @@ def render_service_unit(job: JobSpec) -> str:
         lines.append(f"After={' '.join(job.after)}")
     if job.wants:
         lines.append(f"Wants={' '.join(job.wants)}")
+    if job.start_limit_interval_sec:
+        lines.append(f"StartLimitIntervalSec={job.start_limit_interval_sec}")
 
     lines.extend(["", "[Service]", f"Type={job.service_type}"])
     if job.user:

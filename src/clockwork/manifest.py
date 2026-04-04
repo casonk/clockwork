@@ -82,6 +82,7 @@ def _parse_job(value: Any) -> JobSpec:
         working_directory=value.get("working_directory"),
         after=_as_str_tuple(value.get("after")),
         wants=_as_str_tuple(value.get("wants")),
+        start_limit_interval_sec=value.get("start_limit_interval_sec"),
         environment=_as_str_dict(value.get("environment")),
         environment_files=_as_str_tuple(value.get("environment_files")),
         user=value.get("user"),

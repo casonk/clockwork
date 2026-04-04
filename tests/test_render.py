@@ -20,6 +20,16 @@ def test_render_user_systemd_units_for_archility_example():
     assert "RandomizedDelaySec=600" in rendered["archility-weekly.timer"]
 
 
+def test_render_intake_daemon_preserves_start_limit_override():
+    manifest = load_manifest(
+        Path(__file__).resolve().parent.parent / "examples" / "intake" / "report-and-daemon.toml"
+    )
+
+    rendered = render_target(manifest, "systemd-user")
+
+    assert "StartLimitIntervalSec=0" in rendered["intake-daemon.service"]
+
+
 def test_render_system_scope_interval_timer_for_snowbridge_example():
     manifest = load_manifest(
         Path(__file__).resolve().parent.parent

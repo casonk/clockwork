@@ -66,6 +66,7 @@ service_type = "oneshot"
 working_directory = "/path/to/portfolio/util-repos/traction-control"
 exec_start = "/path/to/portfolio/util-repos/traction-control/scripts/archility-weekly.sh"
 after = ["network.target"]
+start_limit_interval_sec = "0"
 
 [jobs.environment]
 PORTFOLIO_ROOT = "/path/to/portfolio"
@@ -80,6 +81,9 @@ persistent = true
 Supported manifest sections:
 
 - `[[jobs]]`: one logical scheduled job
+- service keys support standard execution metadata such as `working_directory`,
+  `after`, `wants`, restart policy, environment variables, and
+  `start_limit_interval_sec`
 - `[jobs.environment]`: service environment variables
 - `[jobs.timer]`: optional systemd timer metadata
 - `[jobs.cron]`: optional cron rendering metadata
