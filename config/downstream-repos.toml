@@ -1,0 +1,17 @@
+# Known downstream repositories for clockwork.
+# Paths are relative to the portfolio root.
+# Track repos whose current scheduler behavior is a migration target for the
+# shared scheduler abstraction.
+
+[utility_repo]
+path = "./util-repos/clockwork"
+
+[downstream_repos]
+tracking_basis = "repo-local scheduler patterns targeted for clockwork migration"
+paths = [
+  "./health-repos/example-orchestrator",        # repo-root orchestrator service conventions
+  "./example-scheduler",            # cron examples + scheduled refresh wrappers
+  "./util-repos/intake",           # generated user-level daemon and report timers
+  "./util-repos/snowbridge",       # installed system service + interval timer
+  "./util-repos/traction-control", # tracked weekly archility timer
+]

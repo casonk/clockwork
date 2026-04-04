@@ -1,0 +1,18 @@
+[[jobs]]
+name = "snowbridge-wireguard-endpoint-monitor"
+description = "Refresh snowbridge WireGuard endpoint artifacts when the WAN IP changes"
+scope = "system"
+service_type = "oneshot"
+working_directory = "/path/to/portfolio/util-repos/snowbridge"
+exec_start = "/usr/bin/python3 /path/to/portfolio/util-repos/snowbridge/scripts/check_wireguard_endpoint.py --config /path/to/portfolio/util-repos/snowbridge/config/access/wireguard/endpoint-monitor.local.toml"
+after = ["network-online.target"]
+wants = ["network-online.target"]
+user = "service-user"
+group = "service-group"
+timer_description = "Periodically check for snowbridge WireGuard endpoint drift"
+
+[jobs.timer]
+kind = "interval"
+on_boot_sec = "5m"
+on_unit_active_sec = "15m"
+persistent = true

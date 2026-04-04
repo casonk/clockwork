@@ -1,0 +1,38 @@
+[[jobs]]
+name = "intake-daemon"
+description = "intake receipt processor daemon"
+scope = "user"
+service_type = "simple"
+working_directory = "%h"
+exec_start = "/bin/bash -lc 'until /usr/bin/python3 -c \"import intake.cli\" >/dev/null 2>&1; do echo \"intake daemon: waiting for intake module path to become available\"; sleep 30; done; exec /usr/bin/python3 -m intake.cli daemon'"
+after = ["network-online.target"]
+wants = ["network-online.target"]
+service_install_wanted_by = ["default.target"]
+restart = "always"
+restart_sec = "30"
+standard_output = "journal"
+standard_error = "journal"
+
+[jobs.environment]
+PYTHONUNBUFFERED = "1"
+
+[[jobs]]
+name = "intake-report"
+description = "intake report generator"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h"
+exec_start = "/bin/bash -lc 'until /usr/bin/python3 -c \"import intake.cli\" >/dev/null 2>&1; do echo \"intake report timer: waiting for intake module path to become available\"; sleep 30; done; exec /usr/bin/python3 -m intake.cli report'"
+after = ["network-online.target"]
+wants = ["network-online.target"]
+standard_output = "journal"
+standard_error = "journal"
+timer_description = "Run intake report on schedule"
+
+[jobs.environment]
+PYTHONUNBUFFERED = "1"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "*-*-* 12:00:00"
+persistent = true

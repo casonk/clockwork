@@ -1,0 +1,16 @@
+[[jobs]]
+name = "pf-monthly-controller"
+description = "example-scheduler monthly all-accounts pipeline"
+scope = "user"
+service_type = "oneshot"
+working_directory = "/path/to/portfolio/example-scheduler"
+exec_start = "/usr/bin/env python3 /path/to/portfolio/example-scheduler/scripts/all/monthly_controller.py"
+
+[jobs.cron]
+expression = "0 8 2 * *"
+timezone = "America/New_York"
+command = "cd /path/to/portfolio/example-scheduler && /usr/bin/env python3 scripts/all/monthly_controller.py >> artifacts/all/runs/cron.log 2>&1"
+comments = [
+  "Runs at 08:00 on the 2nd day of every month.",
+  "Update the repo path if your local checkout differs.",
+]

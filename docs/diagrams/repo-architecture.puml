@@ -1,0 +1,32 @@
+@startuml
+!pragma layout elk
+title clockwork repository architecture
+
+package "clockwork" {
+  component "cli.py\nrender/install entrypoint" as CLI
+  component "manifest.py\nTOML loading + validation" as MANIFEST
+  component "model.py\nscheduler dataclasses" as MODEL
+  component "render.py\nsystemd + cron renderers" as RENDER
+}
+
+folder "examples/" as EXAMPLES
+database "downstream manifests" as MANIFESTS
+artifact "systemd units\nservice + timer files" as SYSTEMD
+artifact "cron snippets" as CRON
+
+CLI --> MANIFEST
+MANIFEST --> MODEL
+CLI --> RENDER
+RENDER --> MODEL
+EXAMPLES --> MANIFESTS
+MANIFESTS --> MANIFEST
+RENDER --> SYSTEMD
+RENDER --> CRON
+
+note right of EXAMPLES
+Examples mirror current
+portfolio scheduler
+patterns for migration.
+end note
+
+@enduml
