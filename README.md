@@ -44,6 +44,7 @@ Render planned scheduler artifacts to stdout:
 
 ```bash
 clockwork render --manifest examples/traction-control/archility-weekly.toml --target systemd-user
+clockwork render --manifest examples/example-scheduler/intraday-snapshots.toml --target systemd-user
 clockwork render --manifest examples/example-scheduler/monthly-controller.toml --target cron
 ```
 
@@ -95,6 +96,8 @@ See `examples/` for mappings from current portfolio repos.
 The first migration targets are the repos where scheduling is already explicit:
 
 - `example-scheduler`: cron examples and systemd-backed refresh flows
+  - `examples/example-scheduler/intraday-snapshots.toml` covers the daily intraday snapshot timers plus matching cron snippets
+  - `examples/example-scheduler/monthly-controller.toml` keeps the monthly all-accounts cron example
 - `intake`: generated user-level daemon and report timer units
 - `snowbridge`: installed system service + interval timer
 - `traction-control`: tracked weekly `archility` timer

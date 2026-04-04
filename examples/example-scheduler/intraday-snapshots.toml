@@ -1,0 +1,80 @@
+[[jobs]]
+name = "pf-intraday-snapshot-market-open"
+service_name = "pf-intraday-snapshot@market-open.service"
+timer_name = "pf-intraday-snapshot-market-open.timer"
+description = "Personal Finance intraday holdings snapshot (market-open)"
+scope = "user"
+service_type = "oneshot"
+working_directory = "/path/to/portfolio/example-scheduler"
+exec_start = "/usr/bin/env bash /path/to/portfolio/example-scheduler/scripts/all/scheduled_intraday_snapshot.sh market-open"
+after = ["network-online.target"]
+wants = ["network-online.target"]
+timer_description = "Personal Finance intraday snapshot timer (market-open)"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "*-*-* 09:35"
+accuracy_sec = "1m"
+
+[jobs.cron]
+expression = "35 9 * * *"
+timezone = "America/New_York"
+command = "cd /path/to/portfolio/example-scheduler && /usr/bin/env bash scripts/all/scheduled_intraday_snapshot.sh market-open >> artifacts/all/intraday-snapshots/runs/cron.log 2>&1"
+comments = [
+  "Market open snapshot (09:35 ET, daily)",
+  "Update the repo path placeholder before installing.",
+]
+
+[[jobs]]
+name = "pf-intraday-snapshot-midday"
+service_name = "pf-intraday-snapshot@midday.service"
+timer_name = "pf-intraday-snapshot-midday.timer"
+description = "Personal Finance intraday holdings snapshot (midday)"
+scope = "user"
+service_type = "oneshot"
+working_directory = "/path/to/portfolio/example-scheduler"
+exec_start = "/usr/bin/env bash /path/to/portfolio/example-scheduler/scripts/all/scheduled_intraday_snapshot.sh midday"
+after = ["network-online.target"]
+wants = ["network-online.target"]
+timer_description = "Personal Finance intraday snapshot timer (midday)"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "*-*-* 12:30"
+accuracy_sec = "1m"
+
+[jobs.cron]
+expression = "30 12 * * *"
+timezone = "America/New_York"
+command = "cd /path/to/portfolio/example-scheduler && /usr/bin/env bash scripts/all/scheduled_intraday_snapshot.sh midday >> artifacts/all/intraday-snapshots/runs/cron.log 2>&1"
+comments = [
+  "Midday snapshot (12:30 ET, daily)",
+  "Update the repo path placeholder before installing.",
+]
+
+[[jobs]]
+name = "pf-intraday-snapshot-market-close"
+service_name = "pf-intraday-snapshot@market-close.service"
+timer_name = "pf-intraday-snapshot-market-close.timer"
+description = "Personal Finance intraday holdings snapshot (market-close)"
+scope = "user"
+service_type = "oneshot"
+working_directory = "/path/to/portfolio/example-scheduler"
+exec_start = "/usr/bin/env bash /path/to/portfolio/example-scheduler/scripts/all/scheduled_intraday_snapshot.sh market-close"
+after = ["network-online.target"]
+wants = ["network-online.target"]
+timer_description = "Personal Finance intraday snapshot timer (market-close)"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "*-*-* 16:10"
+accuracy_sec = "1m"
+
+[jobs.cron]
+expression = "10 16 * * *"
+timezone = "America/New_York"
+command = "cd /path/to/portfolio/example-scheduler && /usr/bin/env bash scripts/all/scheduled_intraday_snapshot.sh market-close >> artifacts/all/intraday-snapshots/runs/cron.log 2>&1"
+comments = [
+  "Market close snapshot (16:10 ET, daily)",
+  "Update the repo path placeholder before installing.",
+]

@@ -61,3 +61,25 @@ def test_render_crontab_for_personal_finance_example():
     assert "CRON_TZ=America/New_York" in output
     assert "0 8 2 * *" in output
     assert "scripts/all/monthly_controller.py" in output
+
+
+def test_render_personal_finance_intraday_systemd_and_cron_examples():
+    manifest = load_manifest(
+        Path(__file__).resolve().parent.parent
+        / "examples"
+        / "example-scheduler"
+        / "intraday-snapshots.toml"
+    )
+
+    systemd_rendered = render_target(manifest, "systemd-user")
+    cron_rendered = render_target(manifest, "cron")
+    cron_output = next(iter(cron_rendered.values()))
+
+    assert "pf-intraday-snapshot@market-open.service" in systemd_rendered
+    assert "pf-intraday-snapshot-market-close.timer" in systemd_rendered
+    assert (
+        "ExecStart=/usr/bin/env bash /path/to/portfolio/example-scheduler/scripts/all/"
+        "scheduled_intraday_snapshot.sh market-open"
+    ) in systemd_rendered["pf-intraday-snapshot@market-open.service"]
+    assert "10 16 * * *" in cron_output
+    assert "scheduled_intraday_snapshot.sh market-close" in cron_output
