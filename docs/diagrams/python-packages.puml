@@ -1,0 +1,16 @@
+@startuml packages_clockwork
+set namespaceSeparator none
+top to bottom direction
+skinparam componentStyle rectangle
+rectangle "clockwork\n0 child pkg, 5 modules\n6 python files\nexamples: __main__, cli, manifest" as clockwork
+rectangle "clockwork.__main__\n1 python file" as clockwork.__main__
+rectangle "clockwork.cli\n1 python file" as clockwork.cli
+rectangle "clockwork.manifest\n1 python file" as clockwork.manifest
+rectangle "clockwork.model\n1 python file" as clockwork.model
+rectangle "clockwork.render\n1 python file" as clockwork.render
+clockwork.__main__ --> clockwork.cli
+clockwork.cli --> clockwork.manifest
+clockwork.cli --> clockwork.render
+clockwork.manifest --> clockwork.model
+clockwork.render --> clockwork.model
+@enduml

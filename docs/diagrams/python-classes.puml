@@ -1,0 +1,55 @@
+@startuml classes_clockwork
+set namespaceSeparator none
+class "CronSpec" as clockwork.model.CronSpec {
+  command : str
+  comments : tuple[str, ...]
+  expression : str
+  timezone : str | None
+  validate() -> None
+}
+class "JobSpec" as clockwork.model.JobSpec {
+  after : tuple[str, ...]
+  cron : CronSpec | None
+  description : str
+  environment : dict[str, str]
+  environment_files : tuple[str, ...]
+  exec_start : str
+  group : str | None
+  name : str
+  restart : str | None
+  restart_sec : str | None
+  scope : str
+  service_install_wanted_by : tuple[str, ...]
+  service_name : str | None
+  service_type : str
+  standard_error : str | None
+  standard_output : str | None
+  start_limit_interval_sec : str | None
+  timer : TimerSpec | None
+  timer_description : str | None
+  timer_name : str | None
+  user : str | None
+  wants : tuple[str, ...]
+  working_directory : str | None
+  service_unit_name() -> str
+  timer_unit_name() -> str
+  validate() -> None
+}
+class "Manifest" as clockwork.model.Manifest {
+  jobs : tuple[JobSpec, ...]
+  path : str
+  validate() -> None
+}
+class "TimerSpec" as clockwork.model.TimerSpec {
+  accuracy_sec : str | None
+  install_wanted_by : str
+  kind : str
+  on_boot_sec : str | None
+  on_calendar : str | None
+  on_unit_active_sec : str | None
+  persistent : bool
+  randomized_delay_sec : str | None
+  unit : str | None
+  validate() -> None
+}
+@enduml
