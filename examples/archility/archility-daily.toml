@@ -1,0 +1,26 @@
+[[jobs]]
+name = "archility-daily"
+description = "Daily architecture audit across util-repos"
+scope = "user"
+service_type = "oneshot"
+working_directory = "/mnt/4tb-m2/git/util-repos/archility"
+exec_start = "/usr/bin/python3 -m archility audit /mnt/4tb-m2/git/util-repos"
+after = ["network.target"]
+standard_output = "journal"
+standard_error = "journal"
+timer_description = "Run archility daily architecture audit"
+
+[jobs.environment]
+PORTFOLIO_ROOT = "/mnt/4tb-m2/git"
+LOG_DIR = "%h/.local/share/archility-daily"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "*-*-* 02:00:00"
+persistent = true
+randomized_delay_sec = "300"
+
+[jobs.cron]
+expression = "0 2 * * *"
+command = "mkdir -p $HOME/.local/share/archility-daily/runs && cd /mnt/4tb-m2/git/util-repos/archility && /usr/bin/python3 -m archility audit /mnt/4tb-m2/git/util-repos >> $HOME/.local/share/archility-daily/runs/cron.log 2>&1"
+comments = ["Auto-generated from systemd timer: *-*-* 02:00:00"]

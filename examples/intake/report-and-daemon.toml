@@ -37,3 +37,8 @@ PYTHONUNBUFFERED = "1"
 kind = "calendar"
 on_calendar = "*-*-* 12:00:00"
 persistent = true
+
+[jobs.cron]
+expression = "0 12 * * *"
+command = "mkdir -p $HOME/.local/share/intake-report/runs && /bin/bash -lc 'until /usr/bin/python3 -c \"import intake.cli\" >/dev/null 2>&1; do echo \"intake report timer: waiting for intake module path to become available\"; sleep 30; done; exec /usr/bin/python3 -m intake.cli report' >> $HOME/.local/share/intake-report/runs/cron.log 2>&1"
+comments = ["Auto-generated from systemd timer: *-*-* 12:00:00"]

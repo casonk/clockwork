@@ -1,0 +1,19 @@
+[[jobs]]
+name = "dyno-lab-self-test"
+description = "dyno-lab nightly self-test suite"
+scope = "user"
+service_type = "oneshot"
+working_directory = "/mnt/4tb-m2/git/util-repos/dyno-lab"
+exec_start = "/usr/bin/python3 -m pytest tests/ -q --tb=short"
+standard_output = "journal"
+standard_error = "journal"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "*-*-* 03:00:00"
+persistent = true
+
+[jobs.cron]
+expression = "0 3 * * *"
+command = "mkdir -p $HOME/.local/share/dyno-lab-self-test/runs && cd /mnt/4tb-m2/git/util-repos/dyno-lab && /usr/bin/python3 -m pytest tests/ -q --tb=short >> $HOME/.local/share/dyno-lab-self-test/runs/cron.log 2>&1"
+comments = ["Auto-generated from systemd timer: *-*-* 03:00:00"]

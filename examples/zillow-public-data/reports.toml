@@ -1,0 +1,22 @@
+[[jobs]]
+name = "zillow-public-data-refresh"
+description = "Weekly Zillow public-data report download and analysis refresh"
+scope = "user"
+service_type = "oneshot"
+working_directory = "/mnt/4tb-m2/git/research-repos/zillow-public-data"
+exec_start = "/usr/bin/python3 refresh.py"
+after = ["network-online.target"]
+wants = ["network-online.target"]
+standard_output = "journal"
+standard_error = "journal"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "Sat *-*-* 08:00:00"
+persistent = true
+randomized_delay_sec = "1800"
+
+[jobs.cron]
+expression = "0 8 * * 6"
+command = "mkdir -p $HOME/.local/share/zillow-public-data-refresh/runs && cd /mnt/4tb-m2/git/research-repos/zillow-public-data && /usr/bin/python3 refresh.py >> $HOME/.local/share/zillow-public-data-refresh/runs/cron.log 2>&1"
+comments = ["Auto-generated from systemd timer: Sat *-*-* 08:00:00"]

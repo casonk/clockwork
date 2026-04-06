@@ -15,16 +15,17 @@ rendered scheduler artifacts, and install-time guidance for cron plus systemd.
 - interval timers (`OnBootSec` / `OnUnitActiveSec`) and calendar timers
 - cron examples rendered from the same manifest shape
 - safe file installation into a unit directory or crontab snippet file
+- a Flask web UI for browsing, enabling, and disabling jobs across all example manifests
+- mTLS provisioning via `scripts/setup-mtls.sh` and `scripts/setup_caddy.py`
 
 `clockwork` does not yet try to own:
 
 - repo-specific workload wrappers such as notification hooks or env bootstrap
-- direct `systemctl enable --now` or `crontab` mutation
 - instance-template units such as `name@.service`
 
-The last item is intentional for the first cut. Repos with parameterized
-template units can either render concrete units through `clockwork` or keep the
-template local until `clockwork` grows first-class template support.
+Repos with parameterized template units can either render concrete units through
+`clockwork` or keep the template local until `clockwork` grows first-class
+template support.
 
 The tracked manifests under `examples/` use placeholder paths, usernames, and
 config locations on purpose. They show the scheduler shape without publishing
@@ -38,12 +39,41 @@ python3 -m venv .venv
 pip install -e .[dev]
 ```
 
+## Web UI
+
+A Flask app (`web/app.py`) provides a browser interface for enabling, disabling,
+and monitoring all jobs defined under `examples/`.  It is served behind Caddy
+with mTLS and proxied over WireGuard.
+
+```bash
+# Development
+python3 web/app.py
+
+# Production (systemd user service, managed by its own clockwork manifest)
+systemctl --user start clockwork-web.service
+```
+
+System-scope jobs (`scope = "system"`) require elevated writes.  The app uses a
+sudoers drop-in (`config/sudoers/clockwork-web`) and a wrapper script
+(`config/scripts/clockwork-system-install`) so only the specific commands needed
+run as root.
+
+## mTLS Setup
+
+```bash
+# Generate CA, server cert, and client cert; export iOS mobileconfig
+bash scripts/setup-mtls.sh
+
+# Install Caddyfile and certs system-wide, enable lingering, start clockwork-web
+sudo python3 scripts/setup_caddy.py --system-install
+```
+
 ## CLI
 
 Render planned scheduler artifacts to stdout:
 
 ```bash
-clockwork render --manifest examples/traction-control/archility-weekly.toml --target systemd-user
+clockwork render --manifest examples/archility/archility-weekly.toml --target systemd-user
 clockwork render --manifest examples/personal-finance/intraday-snapshots.toml --target systemd-user
 clockwork render --manifest examples/personal-finance/monthly-controller.toml --target cron
 ```
@@ -51,8 +81,8 @@ clockwork render --manifest examples/personal-finance/monthly-controller.toml --
 Write scheduler artifacts to a target directory or file:
 
 ```bash
-clockwork install --manifest examples/traction-control/archility-weekly.toml --target systemd-user
-clockwork install --manifest examples/snowbridge/wireguard-endpoint-monitor.toml --target systemd-system --unit-dir /etc/systemd/system
+clockwork install --manifest examples/archility/archility-weekly.toml --target systemd-user
+clockwork install --manifest examples/snowbridge/wireguard-endpoint-monitor.toml --target systemd-system
 clockwork install --manifest examples/personal-finance/monthly-controller.toml --target cron --output /tmp/personal-finance.crontab
 ```
 

@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clockwork</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f1117;
+      --surface:   #1a1d27;
+      --surface2:  #22263a;
+      --surface3:  #191c2a;
+      --border:    #2e3250;
+      --accent:    #5b7fff;
+      --accent-dim:#2d3f8a;
+      --green:     #3ecf6e;
+      --green-dim: #1a4d30;
+      --red:       #e05252;
+      --red-dim:   #4d1a1a;
+      --yellow:    #e0b832;
+      --yellow-dim:#4d3d0a;
+      --purple:    #a06fff;
+      --purple-dim:#3a1f70;
+      --text:      #e2e4f0;
+      --muted:     #8890b0;
+      --mono:      "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    header h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; }
+    header .subtitle { color: var(--muted); font-size: 12px; }
+
+    /* ── Global controls (in header) ── */
+    .global-controls {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .ctrl-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .ctrl-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--muted);
+    }
+
+    /* ── Pill toggle (systemd | cron) ── */
+    .pill {
+      display: inline-flex;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .pill-btn {
+      padding: 4px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .pill-btn.active {
+      background: var(--accent-dim);
+      color: var(--accent);
+    }
+    .pill-btn.active.cron-active {
+      background: var(--purple-dim);
+      color: var(--purple);
+    }
+    .pill-btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
+    /* ── Toggle button ── */
+    .toggle-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 12px;
+      border-radius: 6px;
+      border: 1px solid;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: filter 0.15s;
+      white-space: nowrap;
+    }
+    .toggle-btn.on  { background: var(--green-dim); color: var(--green); border-color: var(--green); }
+    .toggle-btn.off { background: var(--red-dim);   color: var(--red);   border-color: var(--red); }
+    .toggle-btn.neutral {
+      background: var(--surface2); color: var(--muted); border-color: var(--border);
+    }
+    .toggle-btn:hover { filter: brightness(1.2); }
+
+    /* ── Flash messages ── */
+    .flash-list {
+      max-width: 960px;
+      margin: 14px auto 0;
+      padding: 0 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .flash {
+      padding: 8px 12px;
+      border-radius: 7px;
+      font-size: 12px;
+      font-family: var(--mono);
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      word-break: break-all;
+    }
+    .flash.success { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+    .flash.error   { background: var(--red-dim);   color: var(--red);   border: 1px solid var(--red); }
+    .flash-close {
+      margin-left: auto; background: none; border: none; color: inherit;
+      cursor: pointer; font-size: 14px; line-height: 1; opacity: 0.7; flex-shrink: 0;
+    }
+    .flash-close:hover { opacity: 1; }
+
+    /* ── Layout ── */
+    main { max-width: 960px; margin: 0 auto; padding: 20px 16px 80px; }
+
+    /* ── Repo card ── */
+    .repo {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+    .repo.disabled { opacity: 0.5; }
+
+    .repo-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 18px;
+      cursor: pointer;
+      user-select: none;
+      gap: 12px;
+    }
+    .repo-header:hover { background: var(--surface2); }
+    .repo-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .repo-title h2 { font-size: 15px; font-weight: 600; }
+
+    .badge {
+      font-size: 11px; padding: 2px 8px; border-radius: 99px;
+      background: var(--surface2); color: var(--muted); border: 1px solid var(--border);
+    }
+
+    .repo-controls { display: flex; align-items: center; gap: 8px; }
+    .chevron { color: var(--muted); font-size: 11px; transition: transform 0.2s; }
+    .repo.open .chevron { transform: rotate(90deg); }
+
+    /* ── Repo body ── */
+    .repo-body { display: none; padding: 0 0 8px; }
+    .repo.open .repo-body { display: block; }
+
+    /* ── Manifest section ── */
+    .manifest { padding: 4px 18px 0; }
+    .manifest-name {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.8px; color: var(--muted);
+      padding: 10px 0 6px; border-top: 1px solid var(--border);
+    }
+    .manifest:first-child .manifest-name { border-top: none; }
+
+    /* ── Job card ── */
+    .job {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+    .job.disabled { opacity: 0.5; }
+    .job-main { padding: 11px 14px; }
+
+    .job-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .job-name { font-weight: 600; font-size: 13px; font-family: var(--mono); }
+    .job-desc { color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+    .job-actions {
+      display: flex; align-items: center;
+      gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end;
+    }
+
+    .scope-badge {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.5px; padding: 2px 7px; border-radius: 4px;
+    }
+    .scope-badge.user   { background: var(--accent-dim); color: var(--accent); }
+    .scope-badge.system { background: #3a2a0a; color: #e0a832; }
+
+    /* ── System status dot ── */
+    .sys-status {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 4px; border: 1px solid;
+    }
+    .sys-status.active   { background: var(--green-dim); color: var(--green);  border-color: var(--green); }
+    .sys-status.inactive { background: var(--red-dim);   color: var(--red);    border-color: var(--red); }
+    .sys-status.cron     { background: var(--yellow-dim);color: var(--yellow); border-color: var(--yellow); }
+    .sys-status.unknown  { background: var(--surface); color: var(--muted); border-color: var(--border); }
+
+    .icon-btn {
+      width: 28px; height: 28px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 6px; border: 1px solid var(--border);
+      background: var(--surface); color: var(--muted);
+      font-size: 13px; cursor: pointer; transition: color 0.15s, border-color 0.15s;
+    }
+    .icon-btn:hover { color: var(--text); border-color: var(--muted); }
+    .icon-btn.active { color: var(--accent); border-color: var(--accent); }
+
+    .edit-btn {
+      padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--surface); color: var(--muted); font-size: 12px; cursor: pointer;
+    }
+    .edit-btn:hover { color: var(--text); border-color: var(--muted); }
+
+    /* ── Job details ── */
+    .job-details { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+    .detail-row { display: flex; gap: 10px; font-size: 12px; }
+    .detail-label {
+      min-width: 52px; color: var(--muted); font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.5px; padding-top: 1px; flex-shrink: 0;
+    }
+    .detail-val { color: var(--text); word-break: break-all; font-family: var(--mono); font-size: 11.5px; }
+
+    /* ── Drill-down panel ── */
+    .drill-panel {
+      border-top: 1px solid var(--border);
+      padding: 12px 14px;
+      background: var(--surface3);
+      display: none;
+    }
+    .drill-panel.open { display: block; }
+
+    .drill-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 24px;
+      margin-bottom: 12px;
+    }
+    .drill-item { font-size: 12px; }
+    .drill-item .dk { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+    .drill-item .dv { font-family: var(--mono); font-size: 11.5px; margin-top: 2px; }
+    .dv.ok   { color: var(--green); }
+    .dv.fail { color: var(--red); }
+    .dv.muted { color: var(--muted); }
+
+    .drill-log-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .drill-log-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
+    .drill-log-link { font-size: 11px; color: var(--accent); text-decoration: none; }
+    .drill-log-link:hover { text-decoration: underline; }
+
+    .log-mini {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      max-height: 180px;
+      overflow-y: auto;
+      white-space: pre;
+    }
+    .log-mini .log-line { display: block; line-height: 1.5; }
+    .log-mini .log-line:hover { color: var(--text); }
+    .log-line.err { color: var(--red); }
+    .log-line.ok  { color: var(--green); }
+
+    .drill-loading { color: var(--muted); font-size: 12px; font-style: italic; }
+    .drill-error   { color: var(--red);   font-size: 12px; font-family: var(--mono); }
+
+    /* ── Edit Modal ── */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6); z-index: 200;
+      align-items: center; justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+      padding: 24px; width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto;
+    }
+    .modal h3 { font-size: 15px; margin-bottom: 4px; }
+    .modal .modal-job-name { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-bottom: 20px; }
+
+    .form-group { margin-bottom: 14px; }
+    .form-group label {
+      display: block; font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.5px; color: var(--muted); margin-bottom: 5px;
+    }
+    .form-group input {
+      width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 8px 10px; color: var(--text); font-size: 13px; font-family: var(--mono); outline: none;
+    }
+    .form-group input:focus { border-color: var(--accent); }
+    .form-section-title {
+      font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+      color: var(--accent); margin: 18px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border);
+    }
+    .form-actions { display: flex; gap: 8px; margin-top: 20px; justify-content: flex-end; }
+    .btn-primary {
+      padding: 8px 20px; border-radius: 7px; border: none;
+      background: var(--accent); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    .btn-primary:hover { filter: brightness(1.15); }
+    .btn-secondary {
+      padding: 8px 16px; border-radius: 7px; border: 1px solid var(--border);
+      background: transparent; color: var(--muted); font-size: 13px; cursor: pointer;
+    }
+    .btn-secondary:hover { color: var(--text); border-color: var(--muted); }
+
+    .hidden { display: none; }
+    .empty  { text-align: center; color: var(--muted); padding: 28px; font-size: 13px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <div>
+      <h1>⏰ Clockwork</h1>
+      <div class="subtitle">Configuration Manager</div>
+    </div>
+  </div>
+
+  <div class="global-controls">
+    <!-- All on/off -->
+    <div class="ctrl-group">
+      <span class="ctrl-label">All:</span>
+      <form method="post" action="/toggle/all">
+        <button type="submit" class="toggle-btn neutral">⏻ Toggle All</button>
+      </form>
+    </div>
+
+    <!-- Global cron/systemd toggle (only shown when dual-target jobs exist) -->
+    {% if dual_count > 0 %}
+    <div class="ctrl-group">
+      <span class="ctrl-label">Target:</span>
+      <form method="post" action="/toggle/target/global">
+        <div class="pill">
+          <button type="submit" name="_t" value="systemd"
+                  class="pill-btn {% if global_target == 'systemd' %}active{% endif %}">
+            systemd
+          </button>
+          <button type="submit" name="_t" value="cron"
+                  class="pill-btn {% if global_target == 'cron' %}active cron-active{% endif %}">
+            cron
+          </button>
+        </div>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+</header>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<div class="flash-list">
+  {% for cat, msg in messages %}
+  <div class="flash {{ cat }}">
+    <span>{{ '✓' if cat == 'success' else '✗' }}&nbsp;{{ msg }}</span>
+    <button class="flash-close" onclick="this.parentElement.remove()">×</button>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endwith %}
+
+<main>
+  {% if not repos %}
+    <div class="empty">No manifests found in <code>examples/</code>.</div>
+  {% endif %}
+
+  {% for repo_name, repo in repos.items() %}
+  <div class="repo {% if not repo.enabled %}disabled{% endif %}" id="repo-{{ repo_name }}">
+
+    <div class="repo-header" onclick="toggleRepo('{{ repo_name }}')">
+      <div class="repo-title">
+        <span class="chevron">▶</span>
+        <h2>{{ repo_name }}</h2>
+        {% set total_jobs = repo.manifests | map(attribute='jobs') | map('length') | sum %}
+        <span class="badge">{{ repo.manifests | length }} manifest{{ 's' if repo.manifests | length != 1 }}</span>
+        <span class="badge">{{ total_jobs }} job{{ 's' if total_jobs != 1 }}</span>
+      </div>
+      <div class="repo-controls" onclick="event.stopPropagation()">
+        <form method="post" action="/toggle/repo/{{ repo_name }}">
+          <button type="submit" class="toggle-btn {{ 'on' if repo.enabled else 'off' }}">
+            {{ '● Enabled' if repo.enabled else '○ Disabled' }}
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <div class="repo-body">
+      {% for manifest in repo.manifests %}
+      <div class="manifest">
+        <div class="manifest-name">{{ manifest.name }}.toml</div>
+
+        {% if not manifest.jobs %}
+          <div class="empty">No jobs defined.</div>
+        {% endif %}
+
+        {% for job in manifest.jobs %}
+        {% set jkey = manifest.path ~ ':' ~ job.name %}
+        {% set sys = sys_statuses.get(jkey, {}) %}
+        <div class="job {% if not job.enabled %}disabled{% endif %}" id="job-{{ job.name }}">
+
+          <div class="job-main">
+            <div class="job-header">
+              <div>
+                <div class="job-name">{{ job.name }}</div>
+                {% if job.description %}
+                <div class="job-desc">{{ job.description }}</div>
+                {% endif %}
+              </div>
+              <div class="job-actions">
+                <span class="scope-badge {{ job.scope }}">{{ job.scope }}</span>
+
+                {# ── Live system status ── #}
+                {% if sys.active_state == 'cron' %}
+                  <span class="sys-status cron">cron</span>
+                {% elif sys.active == true %}
+                  <span class="sys-status active">● active</span>
+                {% elif sys.active == false %}
+                  <span class="sys-status inactive">○ {{ sys.active_state or 'inactive' }}</span>
+                {% else %}
+                  <span class="sys-status unknown">– –</span>
+                {% endif %}
+
+                {# ── Per-job cron/systemd pill (all scheduled jobs) ── #}
+                {% if job.timer or job.cron %}
+                <form method="post" action="/toggle/target/job" onclick="event.stopPropagation()">
+                  <input type="hidden" name="manifest_path" value="{{ manifest.path }}">
+                  <input type="hidden" name="job_name" value="{{ job.name }}">
+                  <div class="pill">
+                    {# systemd button: active if current target; disabled if job has no timer #}
+                    <button type="submit" name="_t" value="systemd"
+                            class="pill-btn {% if job.target == 'systemd' %}active{% endif %}"
+                            {% if not job.timer %}disabled title="No [jobs.timer] section in manifest"{% endif %}>
+                      systemd
+                    </button>
+                    {# cron button: active if current target #}
+                    <button type="submit" name="_t" value="cron"
+                            class="pill-btn {% if job.target == 'cron' %}active cron-active{% endif %}">
+                      cron
+                    </button>
+                  </div>
+                </form>
+                {% endif %}
+
+                {# ── Enable / disable ── #}
+                <form method="post" action="/toggle/job" onclick="event.stopPropagation()">
+                  <input type="hidden" name="manifest_path" value="{{ manifest.path }}">
+                  <input type="hidden" name="job_name" value="{{ job.name }}">
+                  <button type="submit" class="toggle-btn {{ 'on' if job.enabled else 'off' }}">
+                    {{ '● On' if job.enabled else '○ Off' }}
+                  </button>
+                </form>
+
+                {# ── Edit ── #}
+                <button type="button" class="edit-btn"
+                  onclick="openEdit('{{ manifest.path }}', '{{ job.name }}')">
+                  Edit
+                </button>
+
+                {# ── Drill-down ── #}
+                <button type="button"
+                  class="icon-btn"
+                  id="drill-btn-{{ job.name | replace('.', '-') }}"
+                  onclick="toggleDrill(
+                    '{{ job.name | replace("'", "\\'") }}',
+                    '{{ (job.timer_name or job.name ~ ".timer") if job.timer else (job.service_name or job.name ~ ".service") }}',
+                    '{{ job.scope }}'
+                  )"
+                  title="History &amp; logs">
+                  ↓
+                </button>
+              </div>
+            </div>
+
+            <div class="job-details">
+              {% if job.timer %}
+              <div class="detail-row">
+                <span class="detail-label">Timer</span>
+                <span class="detail-val">
+                  {{ job.timer.get('kind', '') }}
+                  {% if job.timer.get('on_calendar') %}— {{ job.timer['on_calendar'] }}
+                  {% elif job.timer.get('on_unit_active_sec') %}— every {{ job.timer['on_unit_active_sec'] }}{% if job.timer.get('on_boot_sec') %} (boot +{{ job.timer['on_boot_sec'] }}){% endif %}
+                  {% endif %}
+                </span>
+              </div>
+              {% endif %}
+              {% if job.cron %}
+              <div class="detail-row">
+                <span class="detail-label">Cron</span>
+                <span class="detail-val">
+                  {{ job.cron.get('expression', '') }}{% if job.cron.get('timezone') %} ({{ job.cron['timezone'] }}){% endif %}
+                </span>
+              </div>
+              {% endif %}
+              {% if job.exec_start %}
+              <div class="detail-row">
+                <span class="detail-label">Exec</span>
+                <span class="detail-val">{{ job.exec_start }}</span>
+              </div>
+              {% endif %}
+              {% if job.working_directory %}
+              <div class="detail-row">
+                <span class="detail-label">Dir</span>
+                <span class="detail-val">{{ job.working_directory }}</span>
+              </div>
+              {% endif %}
+            </div>
+          </div>
+
+          {# ── Drill-down panel (lazy-loaded) ── #}
+          <div class="drill-panel" id="drill-{{ job.name | replace('.', '-') }}">
+            <div class="drill-loading">Loading history…</div>
+          </div>
+
+        </div>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+
+  </div>
+  {% endfor %}
+</main>
+
+<!-- Edit Modal -->
+<div class="modal-overlay" id="modal-overlay" onclick="closeEdit(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h3>Edit Job</h3>
+    <div class="modal-job-name" id="modal-job-label"></div>
+    <form method="post" action="/edit/job">
+      <input type="hidden" name="manifest_path" id="f-manifest-path">
+      <input type="hidden" name="job_name"      id="f-job-name">
+      <div class="form-group">
+        <label>Description</label>
+        <input type="text" name="description" id="f-description">
+      </div>
+      <div class="form-group">
+        <label>Exec Start</label>
+        <input type="text" name="exec_start" id="f-exec-start">
+      </div>
+      <div class="form-group">
+        <label>Working Directory</label>
+        <input type="text" name="working_directory" id="f-working-dir">
+      </div>
+      <div id="timer-section" class="hidden">
+        <div class="form-section-title">systemd Timer</div>
+        <div class="form-group">
+          <label>On Calendar</label>
+          <input type="text" name="on_calendar" id="f-on-calendar" placeholder="e.g. *-*-* 09:35">
+        </div>
+      </div>
+      <div id="cron-section" class="hidden">
+        <div class="form-section-title">Cron</div>
+        <div class="form-group">
+          <label>Expression</label>
+          <input type="text" name="cron_expression" id="f-cron-expression" placeholder="e.g. 35 9 * * *">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn-secondary" onclick="closeEdit()">Cancel</button>
+        <button type="submit" class="btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  const JOB_DATA = {{ job_data_json | safe }};
+
+  // ── Repo accordion ──────────────────────────────────────────────────────
+  document.querySelectorAll('.repo').forEach(el => {
+    const name = el.id.replace('repo-', '');
+    if (sessionStorage.getItem('repo-open-' + name) === '1') el.classList.add('open');
+  });
+
+  function toggleRepo(name) {
+    const el = document.getElementById('repo-' + name);
+    el.classList.toggle('open');
+    sessionStorage.setItem('repo-open-' + name, el.classList.contains('open') ? '1' : '0');
+  }
+
+  // ── Edit modal ──────────────────────────────────────────────────────────
+  function openEdit(manifestPath, jobName) {
+    const job = JOB_DATA[manifestPath + ':' + jobName];
+    if (!job) return;
+    document.getElementById('f-manifest-path').value = manifestPath;
+    document.getElementById('f-job-name').value       = jobName;
+    document.getElementById('modal-job-label').textContent = jobName;
+    document.getElementById('f-description').value    = job.description  || '';
+    document.getElementById('f-exec-start').value     = job.exec_start   || '';
+    document.getElementById('f-working-dir').value    = job.working_directory || '';
+    const timerSec = document.getElementById('timer-section');
+    if (job.timer && job.timer.on_calendar !== undefined) {
+      timerSec.classList.remove('hidden');
+      document.getElementById('f-on-calendar').value = job.timer.on_calendar || '';
+    } else { timerSec.classList.add('hidden'); }
+    const cronSec = document.getElementById('cron-section');
+    if (job.cron) {
+      cronSec.classList.remove('hidden');
+      document.getElementById('f-cron-expression').value = job.cron.expression || '';
+    } else { cronSec.classList.add('hidden'); }
+    document.getElementById('modal-overlay').classList.add('open');
+  }
+
+  function closeEdit(event) {
+    if (!event || event.target === document.getElementById('modal-overlay'))
+      document.getElementById('modal-overlay').classList.remove('open');
+  }
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeEdit(); });
+
+  // ── Drill-down ──────────────────────────────────────────────────────────
+  const drillOpen = new Set();
+
+  function toggleDrill(jobName, unit, scope) {
+    const safeName = jobName.replace(/\./g, '-');
+    const panel = document.getElementById('drill-' + safeName);
+    const btn   = document.getElementById('drill-btn-' + safeName);
+    if (!panel) return;
+
+    if (drillOpen.has(jobName)) {
+      panel.classList.remove('open');
+      btn && btn.classList.remove('active');
+      drillOpen.delete(jobName);
+      return;
+    }
+
+    panel.classList.add('open');
+    btn && btn.classList.add('active');
+    drillOpen.add(jobName);
+
+    // Only fetch if we haven't loaded it yet
+    if (panel.dataset.loaded === '1') return;
+    panel.dataset.loaded = '1';
+
+    fetch(`/api/job-details?unit=${encodeURIComponent(unit)}&scope=${encodeURIComponent(scope)}`)
+      .then(r => r.json())
+      .then(d => renderDrill(panel, d))
+      .catch(e => {
+        panel.innerHTML = `<div class="drill-error">Failed to load details: ${e}</div>`;
+      });
+  }
+
+  function cls(result) {
+    if (!result) return 'muted';
+    return result === 'success' ? 'ok' : 'fail';
+  }
+
+  function renderDrill(panel, d) {
+    if (d.error) {
+      panel.innerHTML = `<div class="drill-error">${d.error}</div>`;
+      return;
+    }
+
+    const fmtTime = s => s && s !== 'n/a' && !s.startsWith('0 ') ? s : '—';
+    const fmtCode = s => (s === '' || s === '0') ? (s === '0' ? '0 (ok)' : '—') : s;
+
+    const logLines = (d.recent_lines || []).map(ln => {
+      const low = ln.toLowerCase();
+      const cls = low.includes('error') || low.includes('fail') ? 'err'
+                : low.includes('finish') || low.includes('start') ? 'ok'
+                : '';
+      const escaped = ln.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      return `<span class="log-line ${cls}">${escaped}</span>`;
+    }).join('\n');
+
+    panel.innerHTML = `
+      <div class="drill-grid">
+        <div class="drill-item">
+          <div class="dk">Last started</div>
+          <div class="dv">${fmtTime(d.last_active)}</div>
+        </div>
+        <div class="drill-item">
+          <div class="dk">Last finished</div>
+          <div class="dv">${fmtTime(d.last_inactive)}</div>
+        </div>
+        <div class="drill-item">
+          <div class="dk">Result</div>
+          <div class="dv ${cls(d.result)}">${d.result || '—'}</div>
+        </div>
+        <div class="drill-item">
+          <div class="dk">Exit code</div>
+          <div class="dv">${fmtCode(d.last_exit_code)}</div>
+        </div>
+        <div class="drill-item">
+          <div class="dk">Last success</div>
+          <div class="dv ok">${d.last_success || '—'}</div>
+        </div>
+        <div class="drill-item">
+          <div class="dk">Last failure</div>
+          <div class="dv fail">${d.last_failure || '—'}</div>
+        </div>
+      </div>
+      <div class="drill-log-header">
+        <span class="drill-log-title">Recent log (last 40 lines)</span>
+        <a class="drill-log-link" href="${d.log_url}" target="_blank">View full log →</a>
+      </div>
+      <div class="log-mini">${logLines || '<span class="muted">No journal entries found.</span>'}</div>
+    `;
+  }
+</script>
+
+</body>
+</html>

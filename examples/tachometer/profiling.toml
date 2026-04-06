@@ -1,0 +1,20 @@
+[[jobs]]
+name = "tachometer-portfolio-snapshot"
+description = "Weekly tachometer performance snapshot across all portfolio repos"
+scope = "user"
+service_type = "oneshot"
+working_directory = "/mnt/4tb-m2/git/util-repos/tachometer"
+exec_start = "/mnt/4tb-m2/git/util-repos/tachometer/scripts/run_all_tachometer_snapshots.sh"
+standard_output = "journal"
+standard_error = "journal"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "Sun *-*-* 01:00:00"
+persistent = true
+randomized_delay_sec = "600"
+
+[jobs.cron]
+expression = "0 1 * * 0"
+command = "mkdir -p $HOME/.local/share/tachometer-portfolio-snapshot/runs && cd /mnt/4tb-m2/git/util-repos/tachometer && /mnt/4tb-m2/git/util-repos/tachometer/scripts/run_all_tachometer_snapshots.sh >> $HOME/.local/share/tachometer-portfolio-snapshot/runs/cron.log 2>&1"
+comments = ["Auto-generated from systemd timer: Sun *-*-* 01:00:00"]

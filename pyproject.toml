@@ -18,6 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff", "black"]
+web = ["flask>=3.0", "tomlkit>=0.12"]
 
 [project.scripts]
 clockwork = "clockwork.cli:main"

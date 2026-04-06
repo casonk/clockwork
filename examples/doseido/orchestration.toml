@@ -1,0 +1,14 @@
+[[jobs]]
+name = "doseido-orchestrator"
+description = "doseido supplement-source orchestrator daemon"
+scope = "user"
+service_type = "simple"
+working_directory = "/mnt/4tb-m2/git/health-repos/doseido"
+exec_start = "/usr/bin/python3 -m doseido.orchestrator --poll-seconds 300"
+after = ["network-online.target"]
+wants = ["network-online.target"]
+restart = "always"
+restart_sec = "30"
+standard_output = "journal"
+standard_error = "journal"
+service_install_wanted_by = ["default.target"]

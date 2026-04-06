@@ -1,0 +1,21 @@
+[[jobs]]
+name = "clockwork-web"
+description = "clockwork configuration web UI — localhost Flask, mTLS terminated by Caddy"
+scope = "user"
+service_type = "simple"
+working_directory = "/mnt/4tb-m2/git/util-repos/clockwork"
+exec_start = "/usr/bin/python3 /mnt/4tb-m2/git/util-repos/clockwork/web/app.py"
+after = ["network-online.target"]
+wants = ["network-online.target"]
+restart = "on-failure"
+restart_sec = "5"
+standard_output = "journal"
+standard_error = "journal"
+service_install_wanted_by = ["default.target"]
+
+[jobs.environment]
+# Flask binds to localhost only — Caddy (config/web/caddy/Caddyfile.local)
+# terminates mTLS on the WireGuard interface and proxies here.
+CLOCKWORK_WEB_HOST = "127.0.0.1"
+CLOCKWORK_WEB_PORT = "5000"
+CLOCKWORK_WEB_SECRET = "change-me-before-install"

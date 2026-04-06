@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ unit }} — Clockwork Logs</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2e3250;
+      --accent: #5b7fff; --green: #3ecf6e; --red: #e05252;
+      --text: #e2e4f0; --muted: #8890b0;
+      --mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+    }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; min-height: 100vh; }
+
+    header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 13px 20px; display: flex; align-items: center; gap: 16px;
+      position: sticky; top: 0; z-index: 10;
+    }
+    header a { color: var(--accent); text-decoration: none; font-size: 13px; }
+    header a:hover { text-decoration: underline; }
+    .unit-title { font-family: var(--mono); font-size: 14px; font-weight: 600; }
+    .unit-meta { color: var(--muted); font-size: 12px; }
+
+    .controls {
+      display: flex; align-items: center; gap: 10px; margin-left: auto;
+    }
+    .n-select {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 4px 8px; color: var(--text); font-size: 12px; cursor: pointer;
+    }
+
+    main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+
+    .log-output {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.6;
+      overflow-x: auto;
+      white-space: pre;
+    }
+
+    .log-line { display: block; }
+    .log-line:hover { background: rgba(255,255,255,0.03); }
+    .log-line.err  { color: var(--red); }
+    .log-line.ok   { color: var(--green); }
+    .log-line.muted { color: var(--muted); }
+
+    .empty { color: var(--muted); text-align: center; padding: 40px; }
+
+    #jump-bottom { position: fixed; bottom: 20px; right: 20px; }
+    .fab {
+      width: 40px; height: 40px; border-radius: 50%;
+      background: var(--accent); color: #fff; border: none;
+      font-size: 18px; cursor: pointer; display: flex;
+      align-items: center; justify-content: center;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    .fab:hover { filter: brightness(1.15); }
+  </style>
+</head>
+<body>
+
+<header>
+  <a href="/">← Back</a>
+  <div>
+    <div class="unit-title">{{ unit }}</div>
+    <div class="unit-meta">scope: {{ scope }} · {{ lines | length }} lines</div>
+  </div>
+  <div class="controls">
+    <form method="get" action="/logs/{{ unit }}">
+      <input type="hidden" name="scope" value="{{ scope }}">
+      <select class="n-select" name="n" onchange="this.form.submit()">
+        {% for opt in [100, 200, 500, 1000, 2000] %}
+        <option value="{{ opt }}" {% if opt == n %}selected{% endif %}>last {{ opt }}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+</header>
+
+<main>
+  {% if lines %}
+  <div class="log-output" id="log">
+    {% for line in lines %}
+    {%- set low = line.lower() -%}
+    {%- if 'error' in low or 'fail' in low or 'fatal' in low -%}
+    <span class="log-line err">{{ line }}</span>
+    {%- elif 'finish' in low or 'start' in low or 'success' in low or 'active' in low -%}
+    <span class="log-line ok">{{ line }}</span>
+    {%- elif '-- no entries --' in low -%}
+    <span class="log-line muted">{{ line }}</span>
+    {%- else -%}
+    <span class="log-line">{{ line }}</span>
+    {%- endif %}
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">No journal entries found for <code>{{ unit }}</code>.</div>
+  {% endif %}
+</main>
+
+<div id="jump-bottom">
+  <button class="fab" onclick="window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'})" title="Jump to bottom">↓</button>
+</div>
+
+<script>
+  // Auto-scroll to bottom on load (most recent entries)
+  window.addEventListener('load', () => {
+    window.scrollTo(0, document.body.scrollHeight);
+  });
+</script>
+</body>
+</html>
