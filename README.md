@@ -58,15 +58,11 @@ sudoers drop-in (`config/sudoers/clockwork-web`) and a wrapper script
 (`config/scripts/clockwork-system-install`) so only the specific commands needed
 run as root.
 
-## mTLS Setup
+## mTLS and Caddy
 
-```bash
-# Generate CA, server cert, and client cert; export iOS mobileconfig
-bash scripts/setup-mtls.sh
-
-# Install Caddyfile and certs system-wide, enable lingering, start clockwork-web
-sudo python3 scripts/setup_caddy.py --system-install
-```
+mTLS provisioning, Caddyfile generation, and DNS setup live in the
+`wiring-harness` repo (`../wiring-harness`).  See its README for the full
+provisioning sequence.
 
 ## CLI
 
