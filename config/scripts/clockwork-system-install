@@ -2,4 +2,4 @@
 # Wrapper used by clockwork-web (via sudo) to install system-scope unit files.
 # Root's Python environment doesn't include the editable clockwork package, so
 # we inject the source path explicitly before calling the module.
-PYTHONPATH="/mnt/4tb-m2/git/util-repos/clockwork/src" exec /usr/bin/python3 -m clockwork install "$@"
+PYTHONPATH="/path/to/portfolio/util-repos/clockwork/src" exec /usr/bin/python3 -m clockwork install "$@"

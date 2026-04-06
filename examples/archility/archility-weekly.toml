@@ -3,15 +3,15 @@ name = "archility-weekly"
 description = "Weekly architecture audit and diagram render across util-repos"
 scope = "user"
 service_type = "oneshot"
-working_directory = "/mnt/4tb-m2/git/util-repos/archility"
-exec_start = "/usr/bin/python3 -m archility render /mnt/4tb-m2/git/util-repos/archility"
+working_directory = "/path/to/portfolio/util-repos/archility"
+exec_start = "/usr/bin/python3 -m archility render /path/to/portfolio/util-repos/archility"
 after = ["network.target"]
 standard_output = "journal"
 standard_error = "journal"
 timer_description = "Run archility weekly architecture audit and diagram render"
 
 [jobs.environment]
-PORTFOLIO_ROOT = "/mnt/4tb-m2/git"
+PORTFOLIO_ROOT = "/path/to/portfolio"
 LOG_DIR = "%h/.local/share/archility-weekly"
 
 [jobs.timer]
@@ -22,5 +22,5 @@ randomized_delay_sec = "600"
 
 [jobs.cron]
 expression = "0 2 * * 0"
-command = "mkdir -p $HOME/.local/share/archility-weekly/runs && cd /mnt/4tb-m2/git/util-repos/archility && /usr/bin/python3 -m archility render /mnt/4tb-m2/git/util-repos/archility >> $HOME/.local/share/archility-weekly/runs/cron.log 2>&1"
+command = "mkdir -p $HOME/.local/share/archility-weekly/runs && cd /path/to/portfolio/util-repos/archility && /usr/bin/python3 -m archility render /path/to/portfolio/util-repos/archility >> $HOME/.local/share/archility-weekly/runs/cron.log 2>&1"
 comments = ["Auto-generated from systemd timer: Sun *-*-* 02:00:00"]
