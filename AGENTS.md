@@ -21,8 +21,9 @@ job.
 - `src/clockwork/cli.py`: CLI entry point for render/install flows
 - `web/app.py`: Flask web UI for browsing, enabling, and disabling jobs
 - `web/templates/`: Jinja2 templates for the web UI
-- `examples/`: current portfolio mappings that show how existing repos fit the
-  shared scheduler model
+- `examples/`: portable manifest templates with `/path/to/portfolio` placeholders.
+  Copy to a sibling `*.local.toml` file and substitute real paths for local use.
+  `*.local.toml` files are gitignored and never committed.
 - `config/downstream-repos.toml`: known repos with scheduler patterns targeted
   for `clockwork` migration
 - `config/sudoers/clockwork-web`: sudoers drop-in granting the web app least-privilege elevation for system-scope jobs
