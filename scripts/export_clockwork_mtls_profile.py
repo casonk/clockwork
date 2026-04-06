@@ -21,7 +21,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
 
-
 DEFAULT_SHARE_TMP = Path("/srv/snowbridge/share/tmp")
 DEFAULT_OWNER = "snowbridge"
 DEFAULT_GROUP = "snowbridge"
@@ -102,7 +101,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--ca-cert",
         default=None,
-        help=f"Path to the Clockwork CA certificate (used for both server trust and client signing). Default: ~/.config/clockwork/certs/ca.crt",
+        help="Path to the Clockwork CA certificate (used for both server trust and client signing). Default: ~/.config/clockwork/certs/ca.crt",
     )
     parser.add_argument(
         "--ca-key",
@@ -276,7 +275,7 @@ def build_identity_paths(device_name: str, issued_dir: Path, output: str | None,
 
 def run_command(command: list[str], *, env: dict[str, str] | None = None) -> None:
     try:
-        subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        subprocess.run(command, check=True, capture_output=True, text=True, env=env)
     except subprocess.CalledProcessError as exc:
         stderr = exc.stderr.strip()
         stdout = exc.stdout.strip()

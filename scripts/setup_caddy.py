@@ -43,7 +43,7 @@ Options:
 from __future__ import annotations
 
 import argparse
-import grp
+import contextlib
 import os
 import pwd
 import shutil
@@ -317,10 +317,8 @@ def system_install(
     sudo_user = os.environ.get("SUDO_USER")
     invoking_uid: int | None = None
     if sudo_user:
-        try:
+        with contextlib.suppress(KeyError):
             invoking_uid = pwd.getpwnam(sudo_user).pw_uid
-        except KeyError:
-            pass
         rc_l, out_l = _run(["loginctl", "enable-linger", sudo_user])
         if rc_l == 0:
             print(f"  loginctl enable-linger {sudo_user}: ok")
@@ -371,7 +369,7 @@ def main(argv: list[str] | None = None) -> int:
                    help="Path to snowbridge filebrowser.env.local")
     default_certs_dir = _invoking_user_home() / ".config" / "clockwork" / "certs"
     p.add_argument("--certs-dir", metavar="DIR", default=str(default_certs_dir),
-                   help=f"User clockwork certs dir (default: <invoking-user-home>/.config/clockwork/certs)")
+                   help="User clockwork certs dir (default: <invoking-user-home>/.config/clockwork/certs)")
     p.add_argument("--sb-client-ca", metavar="PATH",
                    help="Snowbridge mTLS client CA cert path")
     p.add_argument("--flask-port", type=int, default=DEFAULT_FLASK_PORT)
@@ -464,11 +462,11 @@ def main(argv: list[str] | None = None) -> int:
     sb_compose = (sb_repo or Path("/path/to/snowbridge")) / "config" / "web" / "filebrowser" / "docker-compose.local.yml"
     print()
     print("To install system-wide (run once; needs root):")
-    print(f"  sudo python3 scripts/setup_caddy.py --system-install")
+    print("  sudo python3 scripts/setup_caddy.py --system-install")
     print()
     print("Or manually:")
     print(f"  sudo podman-compose -f {sb_compose} stop caddy")
-    print(f"  sudo python3 scripts/setup_caddy.py --system-install")
+    print("  sudo python3 scripts/setup_caddy.py --system-install")
 
     return 0
 

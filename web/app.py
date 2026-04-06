@@ -392,7 +392,7 @@ def toggle_all():
         if not (self_unit and primary_unit(j) == self_unit)
     )
     new_enabled = not any_on
-    gt = global_target(state)
+    global_target(state)
 
     for repo_name, repo in repos.items():
         toggled_any = False
@@ -499,10 +499,9 @@ def toggle_target_job():
          if m["path"] == mpath for j in m["jobs"] if j["name"] == jname),
         None,
     )
-    if job_data:
-        if new_target == "systemd" and not job_data.get("timer") and job_data.get("service_type") == "oneshot":
-            flash(f"{jname}: no [jobs.timer] section — add one to the manifest to use systemd timer.", "error")
-            return redirect(url_for("index"))
+    if job_data and new_target == "systemd" and not job_data.get("timer") and job_data.get("service_type") == "oneshot":
+        flash(f"{jname}: no [jobs.timer] section — add one to the manifest to use systemd timer.", "error")
+        return redirect(url_for("index"))
 
     state.setdefault("jobs", {}).setdefault(key, {})["target"] = new_target
 
@@ -540,10 +539,10 @@ def edit_job():
         if str(job.get("name", "")) != jname:
             continue
 
-        def _set(field: str) -> None:
+        def _set(field: str, _job: dict = job) -> None:
             val = request.form.get(field, "").strip()
             if val:
-                job[field] = val
+                _job[field] = val
 
         _set("description")
         _set("exec_start")
