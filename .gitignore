@@ -25,3 +25,5 @@ config/web-state.json
 *.crontab
 config/web/caddy/*.local
 *.local.toml
+
+/REFS-LOCAL.md
