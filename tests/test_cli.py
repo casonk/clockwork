@@ -5,10 +5,7 @@ from clockwork.cli import main
 
 def test_install_writes_user_units(tmp_path):
     manifest_path = (
-        Path(__file__).resolve().parent.parent
-        / "examples"
-        / "archility"
-        / "archility-weekly.toml"
+        Path(__file__).resolve().parent.parent / "examples" / "archility" / "archility-weekly.toml"
     )
     unit_dir = tmp_path / "systemd-user"
 
@@ -57,10 +54,7 @@ def test_install_writes_cron_output(tmp_path):
 
 def test_install_prints_timer_unit_name_with_suffix(tmp_path, capsys):
     manifest_path = (
-        Path(__file__).resolve().parent.parent
-        / "examples"
-        / "archility"
-        / "archility-weekly.toml"
+        Path(__file__).resolve().parent.parent / "examples" / "archility" / "archility-weekly.toml"
     )
     unit_dir = tmp_path / "systemd-user"
 
