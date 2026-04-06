@@ -1,9 +1,0 @@
-# clockwork dnsmasq A-record for the snowbridge WireGuard server
-#
-# Drop this file on snowbridge at /etc/dnsmasq.d/clockwork.conf
-# (generated with the correct IP by scripts/setup-mtls.sh).
-#
-# Replace 10.99.0.X with the WireGuard peer IP of the machine running
-# clockwork-web (visible in `wg show` on snowbridge or in the peer config).
-
-address=/config.clockwork.internal/10.99.0.X

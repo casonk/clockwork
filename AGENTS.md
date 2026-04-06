@@ -23,9 +23,6 @@ job.
 - `web/templates/`: Jinja2 templates for the web UI
 - `examples/`: current portfolio mappings that show how existing repos fit the
   shared scheduler model
-- `scripts/setup-mtls.sh`: generates CA, server cert, client cert, and iOS mobileconfig
-- `scripts/setup_caddy.py`: installs Caddyfile, copies certs, enables lingering and clockwork-web
-- `scripts/export_clockwork_mtls_profile.py`: generates per-device mobileconfigs
 - `config/downstream-repos.toml`: known repos with scheduler patterns targeted
   for `clockwork` migration
 - `config/sudoers/clockwork-web`: sudoers drop-in granting the web app least-privilege elevation for system-scope jobs
@@ -65,9 +62,10 @@ clockwork install --manifest examples/personal-finance/monthly-controller.toml -
 5. Run repo-appropriate validation after schema or renderer changes.
 6. System-scope jobs require the sudoers drop-in and wrapper script to be
    installed.  See `config/sudoers/clockwork-web` and
-   `config/scripts/clockwork-system-install`.  Re-run
-   `sudo python3 scripts/setup_caddy.py --system-install` after a fresh clone
-   to restore the full stack.
+   `config/scripts/clockwork-system-install`.
+7. mTLS provisioning, Caddy config, and DNS setup live in `../wiring-harness`.
+   Run `sudo python3 ../wiring-harness/scripts/setup_caddy.py --provision` after
+   a fresh install to restore the full Caddy/mTLS stack.
 
 ## Portfolio References
 
