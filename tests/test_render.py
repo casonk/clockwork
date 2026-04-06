@@ -8,7 +8,7 @@ def test_render_user_systemd_units_for_archility_example():
     manifest = load_manifest(
         Path(__file__).resolve().parent.parent
         / "examples"
-        / "traction-control"
+        / "archility"
         / "archility-weekly.toml"
     )
 
@@ -16,7 +16,7 @@ def test_render_user_systemd_units_for_archility_example():
 
     assert "archility-weekly.service" in rendered
     assert "archility-weekly.timer" in rendered
-    assert 'Environment="PORTFOLIO_ROOT=/path/to/portfolio"' in rendered["archility-weekly.service"]
+    assert 'Environment="PORTFOLIO_ROOT=/mnt/4tb-m2/git"' in rendered["archility-weekly.service"]
     assert "RandomizedDelaySec=600" in rendered["archility-weekly.timer"]
 
 
@@ -78,7 +78,7 @@ def test_render_personal_finance_intraday_systemd_and_cron_examples():
     assert "pf-intraday-snapshot@market-open.service" in systemd_rendered
     assert "pf-intraday-snapshot-market-close.timer" in systemd_rendered
     assert (
-        "ExecStart=/usr/bin/env bash /path/to/portfolio/example-scheduler/scripts/all/"
+        "ExecStart=/usr/bin/env bash /mnt/4tb-m2/git/example-scheduler/scripts/all/"
         "scheduled_intraday_snapshot.sh market-open"
     ) in systemd_rendered["pf-intraday-snapshot@market-open.service"]
     assert "10 16 * * *" in cron_output
