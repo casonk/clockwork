@@ -24,4 +24,4 @@ CLAUDE.md
 config/web-state.json
 *.crontab
 config/web/caddy/*.local
-local/
+*.local.toml
