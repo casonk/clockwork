@@ -74,7 +74,7 @@ def _calendar_to_cron(on_calendar: str) -> tuple[str, str]:
     m = re.match(r"^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+", s, re.IGNORECASE)
     if m:
         dow = _DOW[m.group(1).capitalize()]
-        s = s[m.end():]
+        s = s[m.end() :]
     m2 = re.match(r"^\*-\*-\*\s+(\d{1,2}):(\d{2})(?::\d{2})?$", s)
     if m2:
         hour, minute = int(m2.group(1)), int(m2.group(2))
@@ -281,8 +281,10 @@ def fetch_all_statuses(repos: dict) -> dict[str, dict]:
                     statuses[key] = unit_status(primary_unit(job), scope=job.get("scope", "user"))
                 else:
                     statuses[key] = {
-                        "active": None, "enabled": None,
-                        "active_state": "cron", "enabled_state": "cron",
+                        "active": None,
+                        "enabled": None,
+                        "active_state": "cron",
+                        "enabled_state": "cron",
                     }
     return statuses
 
@@ -298,17 +300,32 @@ def _resolve_target(job: dict, pref: str) -> str:
     return f"systemd-{job.get('scope', 'user')}"
 
 
-def do_enable(manifest_full_path: Path, job: dict, target_pref: str = "systemd") -> list[tuple[str, int, str]]:
+def do_enable(
+    manifest_full_path: Path, job: dict, target_pref: str = "systemd"
+) -> list[tuple[str, int, str]]:
     scope = job.get("scope", "user")
     target = _resolve_target(job, target_pref)
     results: list[tuple[str, int, str]] = []
 
     if scope == "system":
-        install_cmd = ["sudo", "-n", "/usr/local/bin/clockwork-system-install",
-                       "--manifest", str(manifest_full_path), "--target", target]
+        install_cmd = [
+            "sudo",
+            "-n",
+            "/usr/local/bin/clockwork-system-install",
+            "--manifest",
+            str(manifest_full_path),
+            "--target",
+            target,
+        ]
     else:
-        install_cmd = ["clockwork", "install", "--manifest", str(manifest_full_path),
-                       "--target", target]
+        install_cmd = [
+            "clockwork",
+            "install",
+            "--manifest",
+            str(manifest_full_path),
+            "--target",
+            target,
+        ]
     rc, out = _run(*install_cmd, timeout=60)
     results.append((f"clockwork install --target {target}", rc, out))
 
@@ -358,9 +375,7 @@ def index():
                 job_lookup[f"{manifest['path']}:{job['name']}"] = job
 
     # Count how many jobs have both targets available
-    dual_count = sum(
-        1 for j in job_lookup.values() if j.get("dual_target")
-    )
+    dual_count = sum(1 for j in job_lookup.values() if j.get("dual_target"))
 
     return render_template(
         "index.html",
@@ -420,8 +435,10 @@ def toggle_all():
 def toggle_target_global():
     state = load_state()
     requested = request.form.get("_t", "").strip()
-    new = requested if requested in ("systemd", "cron") else (
-        "cron" if global_target(state) == "systemd" else "systemd"
+    new = (
+        requested
+        if requested in ("systemd", "cron")
+        else ("cron" if global_target(state) == "systemd" else "systemd")
     )
     state["global_target"] = new
     save_state(state)
@@ -464,8 +481,14 @@ def toggle_job():
 
     repos = scan_repos()
     job_data = next(
-        (j for repo in repos.values() for m in repo["manifests"]
-         if m["path"] == mpath for j in m["jobs"] if j["name"] == jname),
+        (
+            j
+            for repo in repos.values()
+            for m in repo["manifests"]
+            if m["path"] == mpath
+            for j in m["jobs"]
+            if j["name"] == jname
+        ),
         None,
     )
     if job_data:
@@ -489,18 +512,34 @@ def toggle_target_job():
     key = f"{mpath}:{jname}"
     current = job_target(state, mpath, jname)
     requested = request.form.get("_t", "").strip()
-    new_target = requested if requested in ("systemd", "cron") else (
-        "cron" if current == "systemd" else "systemd"
+    new_target = (
+        requested
+        if requested in ("systemd", "cron")
+        else ("cron" if current == "systemd" else "systemd")
     )
     # Validate the job actually supports the requested target
     repos = scan_repos()
     job_data = next(
-        (j for repo in repos.values() for m in repo["manifests"]
-         if m["path"] == mpath for j in m["jobs"] if j["name"] == jname),
+        (
+            j
+            for repo in repos.values()
+            for m in repo["manifests"]
+            if m["path"] == mpath
+            for j in m["jobs"]
+            if j["name"] == jname
+        ),
         None,
     )
-    if job_data and new_target == "systemd" and not job_data.get("timer") and job_data.get("service_type") == "oneshot":
-        flash(f"{jname}: no [jobs.timer] section — add one to the manifest to use systemd timer.", "error")
+    if (
+        job_data
+        and new_target == "systemd"
+        and not job_data.get("timer")
+        and job_data.get("service_type") == "oneshot"
+    ):
+        flash(
+            f"{jname}: no [jobs.timer] section — add one to the manifest to use systemd timer.",
+            "error",
+        )
         return redirect(url_for("index"))
 
     state.setdefault("jobs", {}).setdefault(key, {})["target"] = new_target
@@ -509,8 +548,14 @@ def toggle_target_job():
     if job_enabled(state, mpath, jname):
         repos = scan_repos()
         job_data = next(
-            (j for repo in repos.values() for m in repo["manifests"]
-             if m["path"] == mpath for j in m["jobs"] if j["name"] == jname),
+            (
+                j
+                for repo in repos.values()
+                for m in repo["manifests"]
+                if m["path"] == mpath
+                for j in m["jobs"]
+                if j["name"] == jname
+            ),
             None,
         )
         if job_data:
@@ -572,8 +617,12 @@ def job_details():
         return jsonify({"error": "missing unit"}), 400
 
     props = [
-        "Result", "ActiveEnterTimestamp", "InactiveEnterTimestamp",
-        "ExecMainStatus", "ExecMainExitTimestamp", "NRestarts",
+        "Result",
+        "ActiveEnterTimestamp",
+        "InactiveEnterTimestamp",
+        "ExecMainStatus",
+        "ExecMainExitTimestamp",
+        "NRestarts",
     ]
     rc, show_out = _systemctl("show", unit, f"--property={','.join(props)}", scope=scope)
     info: dict[str, str] = {}
@@ -587,9 +636,7 @@ def job_details():
     recent = [ln for ln in log_out.splitlines() if ln.strip()]
 
     # Scan journal for last success and last failure timestamps
-    _, scan_out = _journalctl(
-        "-u", unit, "-n", "500", "--no-pager", "-o", "short-iso", scope=scope
-    )
+    _, scan_out = _journalctl("-u", unit, "-n", "500", "--no-pager", "-o", "short-iso", scope=scope)
     last_success: str | None = None
     last_failure: str | None = None
     for line in scan_out.splitlines():
