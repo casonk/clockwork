@@ -19,10 +19,17 @@ job.
 - `src/clockwork/model.py`: scheduler dataclasses and invariants
 - `src/clockwork/render.py`: cron and `systemd` rendering helpers
 - `src/clockwork/cli.py`: CLI entry point for render/install flows
+- `web/app.py`: Flask web UI for browsing, enabling, and disabling jobs
+- `web/templates/`: Jinja2 templates for the web UI
 - `examples/`: current portfolio mappings that show how existing repos fit the
   shared scheduler model
+- `scripts/setup-mtls.sh`: generates CA, server cert, client cert, and iOS mobileconfig
+- `scripts/setup_caddy.py`: installs Caddyfile, copies certs, enables lingering and clockwork-web
+- `scripts/export_clockwork_mtls_profile.py`: generates per-device mobileconfigs
 - `config/downstream-repos.toml`: known repos with scheduler patterns targeted
   for `clockwork` migration
+- `config/sudoers/clockwork-web`: sudoers drop-in granting the web app least-privilege elevation for system-scope jobs
+- `config/scripts/clockwork-system-install`: wrapper script used by sudo to invoke clockwork with the correct Python environment as root
 - `tests/`: unit coverage for manifest loading, rendering, and install helpers
 
 ## Setup And Commands
@@ -39,7 +46,7 @@ pytest -q
 Useful commands:
 
 ```bash
-clockwork render --manifest examples/traction-control/archility-weekly.toml --target systemd-user
+clockwork render --manifest examples/archility/archility-weekly.toml --target systemd-user
 clockwork install --manifest examples/example-scheduler/monthly-controller.toml --target cron --output /tmp/example-scheduler.crontab
 ```
 
@@ -50,11 +57,17 @@ clockwork install --manifest examples/example-scheduler/monthly-controller.toml 
 2. Do not move repo-specific env bootstrapping, notification hooks, or domain
    workflow logic into `clockwork` unless they are truly shared scheduler
    concerns.
-3. Prefer rendering files plus activation instructions over mutating live
-   scheduler state automatically.
+3. The CLI renders and writes files; the web UI manages live scheduler state via
+   `systemctl` (user scope directly, system scope via `sudo -n` with the
+   sudoers drop-in).
 4. When a downstream repo's scheduler pattern changes, update its example
    manifest or migration note here in the same change.
 5. Run repo-appropriate validation after schema or renderer changes.
+6. System-scope jobs require the sudoers drop-in and wrapper script to be
+   installed.  See `config/sudoers/clockwork-web` and
+   `config/scripts/clockwork-system-install`.  Re-run
+   `sudo python3 scripts/setup_caddy.py --system-install` after a fresh clone
+   to restore the full stack.
 
 ## Portfolio References
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -90,7 +91,11 @@ def handle_install(args: argparse.Namespace) -> int:
         return 0
 
     unit_dir = Path(args.unit_dir) if args.unit_dir else _default_unit_dir(args.target)
-    written = write_rendered_files(unit_dir, rendered)
+    try:
+        written = write_rendered_files(unit_dir, rendered)
+    except PermissionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     print(f"Wrote {len(written)} unit file(s) -> {unit_dir}")
     if args.target == "systemd-user":
         print("Next steps:")

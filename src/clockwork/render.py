@@ -114,10 +114,20 @@ def render_target(manifest: Manifest, target: str) -> dict[str, str]:
 
 def write_rendered_files(output_dir: str | Path, files: dict[str, str]) -> list[Path]:
     output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
+    try:
+        output_path.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        raise PermissionError(
+            f"cannot write to {output_path} — run with sudo for system-scope jobs"
+        ) from None
     written: list[Path] = []
     for name, content in files.items():
         target = output_path / name
-        target.write_text(content, encoding="utf-8")
+        try:
+            target.write_text(content, encoding="utf-8")
+        except PermissionError:
+            raise PermissionError(
+                f"cannot write {target} — run with sudo for system-scope jobs"
+            ) from None
         written.append(target)
     return written

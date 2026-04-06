@@ -1,0 +1,19 @@
+# Sudoers rules for the clockwork-web Flask service.
+#
+# Allows the 'user' account to manage system-scope units without a password,
+# which is required for jobs that set scope = "system" in their manifests.
+#
+# Install (as root):
+#   sudo cp config/sudoers/clockwork-web /etc/sudoers.d/clockwork-web
+#   sudo chmod 440 /etc/sudoers.d/clockwork-web
+#   sudo visudo -c   # validate
+
+# Write system unit files via clockwork install (wrapper sets PYTHONPATH for root)
+user ALL=(root) NOPASSWD: /usr/local/bin/clockwork-system-install --manifest * --target systemd-system
+
+# Reload the system unit file index after writing
+user ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
+
+# Start / enable / stop / disable system-scope units
+user ALL=(root) NOPASSWD: /usr/bin/systemctl enable --now *
+user ALL=(root) NOPASSWD: /usr/bin/systemctl disable --now *

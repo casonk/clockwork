@@ -21,3 +21,6 @@ CHATHISTORY.md
 CLAUDE.md
 
 .tachometer/
+config/web-state.json
+*.crontab
+config/web/caddy/*.local
