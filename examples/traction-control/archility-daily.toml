@@ -1,0 +1,22 @@
+[[jobs]]
+name = "archility-daily"
+description = "Archility daily architecture audit"
+scope = "user"
+service_type = "oneshot"
+working_directory = "/path/to/portfolio/util-repos/traction-control"
+exec_start = "/path/to/portfolio/util-repos/traction-control/scripts/archility-daily.sh"
+after = ["network.target"]
+standard_output = "journal"
+standard_error = "journal"
+timer_description = "Run archility daily architecture audit"
+
+[jobs.environment]
+PORTFOLIO_ROOT = "/path/to/portfolio"
+ARCHILITY_CMD = "/path/to/venv/bin/archility"
+LOG_DIR = "%h/.local/share/archility-daily"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "*-*-* 02:00:00"
+persistent = true
+randomized_delay_sec = "300"
