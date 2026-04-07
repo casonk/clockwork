@@ -89,6 +89,17 @@ When another repo needs portable scheduler rendering or install guidance,
 prefer integrating with `clockwork` instead of adding another repo-local unit
 template or cron snippet generator.
 
+## Local CI Verification
+
+Run before every push:
+
+```bash
+pre-commit run --all-files
+pytest -q
+```
+
+Do not push changes that have not passed all checks locally.
+
 ## Agent Memory
 
 Use `./LESSONSLEARNED.md` as the tracked durable lessons file for this repo.
