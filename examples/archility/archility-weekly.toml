@@ -24,3 +24,29 @@ randomized_delay_sec = "600"
 expression = "0 2 * * 0"
 command = "mkdir -p $HOME/.local/share/archility-weekly/runs && cd /path/to/portfolio/util-repos/archility && /usr/bin/python3 -m archility render /path/to/portfolio/util-repos/archility >> $HOME/.local/share/archility-weekly/runs/cron.log 2>&1"
 comments = ["Auto-generated from systemd timer: Sun *-*-* 02:00:00"]
+
+[[jobs]]
+name = "archility-audit-weekly"
+description = "Weekly archility audit across all portfolio repos — writes new recommendations to each repo's BACKLOG.md"
+scope = "user"
+service_type = "oneshot"
+working_directory = "/path/to/portfolio/util-repos/archility"
+exec_start = "/usr/bin/python3 -m archility audit --write-backlog /path/to/portfolio/util-repos/archility /path/to/portfolio/util-repos/auto-pass /path/to/portfolio/util-repos/clockwork /path/to/portfolio/util-repos/crew-chief /path/to/portfolio/util-repos/dyno-lab /path/to/portfolio/util-repos/nordility /path/to/portfolio/util-repos/shock-relay /path/to/portfolio/util-repos/short-circuit /path/to/portfolio/util-repos/snowbridge /path/to/portfolio/util-repos/tachometer /path/to/portfolio/util-repos/traction-control /path/to/portfolio/util-repos/wiring-harness"
+after = ["archility-weekly.service"]
+standard_output = "journal"
+standard_error = "journal"
+timer_description = "Run archility audit across all portfolio repos and write BACKLOG.md suggestions"
+
+[jobs.environment]
+PORTFOLIO_ROOT = "/path/to/portfolio"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "Sun *-*-* 02:15:00"
+persistent = true
+randomized_delay_sec = "300"
+
+[jobs.cron]
+expression = "15 2 * * 0"
+command = "cd /path/to/portfolio/util-repos/archility && /usr/bin/python3 -m archility audit --write-backlog /path/to/portfolio/util-repos/archility /path/to/portfolio/util-repos/auto-pass /path/to/portfolio/util-repos/clockwork /path/to/portfolio/util-repos/crew-chief /path/to/portfolio/util-repos/dyno-lab /path/to/portfolio/util-repos/nordility /path/to/portfolio/util-repos/shock-relay /path/to/portfolio/util-repos/short-circuit /path/to/portfolio/util-repos/snowbridge /path/to/portfolio/util-repos/tachometer /path/to/portfolio/util-repos/traction-control /path/to/portfolio/util-repos/wiring-harness"
+comments = ["Auto-generated from systemd timer: Sun *-*-* 02:15:00", "Runs after archility-weekly.service"]
