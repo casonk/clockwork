@@ -16,6 +16,14 @@ BASE_DIR = Path(__file__).parent.parent
 EXAMPLES_DIR = BASE_DIR / "examples"
 STATE_FILE = BASE_DIR / "config" / "web-state.json"
 
+
+def _resolve_manifest_path(canonical_rel: str) -> Path:
+    """Return *.local.toml if it exists alongside the canonical *.toml, else the canonical."""
+    canonical = EXAMPLES_DIR / canonical_rel
+    local = canonical.with_name(canonical.stem + ".local.toml")
+    return local if local.exists() else canonical
+
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("CLOCKWORK_WEB_SECRET", "clockwork-dev-secret")
 
@@ -168,12 +176,25 @@ def _coerce(val) -> str:
 
 def scan_repos() -> dict[str, dict]:
     repos: dict[str, dict] = {}
-    for toml_file in sorted(EXAMPLES_DIR.glob("**/*.toml")):
+    all_files = sorted(EXAMPLES_DIR.glob("**/*.toml"))
+    local_files = {f for f in all_files if f.name.endswith(".local.toml")}
+    # Base files that have a .local.toml sibling are shadowed — skip them
+    shadowed = {f.parent / (f.name[: -len(".local.toml")] + ".toml") for f in local_files}
+    for toml_file in all_files:
+        if toml_file in shadowed:
+            continue
+
         repo_name = toml_file.parent.name
         if repo_name not in repos:
             repos[repo_name] = {"name": repo_name, "manifests": []}
 
-        rel_path = str(toml_file.relative_to(EXAMPLES_DIR))
+        # Canonical path always uses .toml (stable state key regardless of local/base)
+        rel_obj = toml_file.relative_to(EXAMPLES_DIR)
+        if toml_file.name.endswith(".local.toml"):
+            rel_path = str(rel_obj.parent / (toml_file.name[: -len(".local.toml")] + ".toml"))
+        else:
+            rel_path = str(rel_obj)
+
         doc = tomlkit.loads(toml_file.read_text())
 
         jobs = []
@@ -198,7 +219,7 @@ def scan_repos() -> dict[str, dict]:
             )
 
         repos[repo_name]["manifests"].append(
-            {"path": rel_path, "name": toml_file.stem, "jobs": jobs}
+            {"path": rel_path, "name": toml_file.stem.removesuffix(".local"), "jobs": jobs}
         )
     return repos
 
@@ -258,6 +279,13 @@ def _self_unit() -> str | None:
 def _journalctl(*args: str, scope: str = "user") -> tuple[int, str]:
     flags = ["--user"] if scope == "user" else []
     return _run("journalctl", *flags, *args, timeout=15)
+
+
+def _log_units(unit: str) -> list[str]:
+    """For a timer unit return both the timer and its service; otherwise just the unit."""
+    if unit.endswith(".timer"):
+        return [unit, unit[:-6] + ".service"]
+    return [unit]
 
 
 def unit_status(unit: str, scope: str = "user") -> dict:
@@ -459,7 +487,7 @@ def toggle_repo(repo_name: str):
     repo = repos.get(repo_name, {})
 
     for manifest in repo.get("manifests", []):
-        full_path = EXAMPLES_DIR / manifest["path"]
+        full_path = _resolve_manifest_path(manifest["path"])
         for job in manifest["jobs"]:
             key = f"{manifest['path']}:{job['name']}"
             tpref = job_target(state, manifest["path"], job["name"])
@@ -492,7 +520,7 @@ def toggle_job():
         None,
     )
     if job_data:
-        full_path = EXAMPLES_DIR / mpath
+        full_path = _resolve_manifest_path(mpath)
         tpref = job_target(state, mpath, jname)
         results = do_disable(job_data) if currently_on else do_enable(full_path, job_data, tpref)
         _flash_results(results)
@@ -560,7 +588,7 @@ def toggle_target_job():
         )
         if job_data:
             _flash_results(do_disable(job_data))
-            full_path = EXAMPLES_DIR / mpath
+            full_path = _resolve_manifest_path(mpath)
             _flash_results(do_enable(full_path, job_data, new_target))
 
     save_state(state)
@@ -577,7 +605,7 @@ def edit_job():
     mpath = request.form["manifest_path"]
     jname = request.form["job_name"]
 
-    full_path = EXAMPLES_DIR / mpath
+    full_path = _resolve_manifest_path(mpath)
     doc = tomlkit.loads(full_path.read_text())
 
     for job in doc.get("jobs", []):
@@ -624,19 +652,28 @@ def job_details():
         "ExecMainExitTimestamp",
         "NRestarts",
     ]
-    rc, show_out = _systemctl("show", unit, f"--property={','.join(props)}", scope=scope)
+    # Execution properties live on the service unit, not the timer
+    show_unit = unit[:-6] + ".service" if unit.endswith(".timer") else unit
+    rc, show_out = _systemctl("show", show_unit, f"--property={','.join(props)}", scope=scope)
     info: dict[str, str] = {}
     for line in show_out.splitlines():
         if "=" in line:
             k, v = line.split("=", 1)
             info[k] = v.strip()
 
+    # Build journal args covering both timer and service units
+    unit_flags: list[str] = []
+    for u in _log_units(unit):
+        unit_flags.extend(["-u", u])
+
     # Recent journal lines (last 40)
-    _, log_out = _journalctl("-u", unit, "-n", "40", "--no-pager", "-o", "short-iso", scope=scope)
+    _, log_out = _journalctl(*unit_flags, "-n", "40", "--no-pager", "-o", "short-iso", scope=scope)
     recent = [ln for ln in log_out.splitlines() if ln.strip()]
 
     # Scan journal for last success and last failure timestamps
-    _, scan_out = _journalctl("-u", unit, "-n", "500", "--no-pager", "-o", "short-iso", scope=scope)
+    _, scan_out = _journalctl(
+        *unit_flags, "-n", "500", "--no-pager", "-o", "short-iso", scope=scope
+    )
     last_success: str | None = None
     last_failure: str | None = None
     for line in scan_out.splitlines():
@@ -667,7 +704,10 @@ def job_details():
 def job_logs(unit: str):
     scope = request.args.get("scope", "user")
     n = min(int(request.args.get("n", "500")), 2000)
-    _, out = _journalctl("-u", unit, "-n", str(n), "--no-pager", "-o", "short-iso", scope=scope)
+    unit_flags: list[str] = []
+    for u in _log_units(unit):
+        unit_flags.extend(["-u", u])
+    _, out = _journalctl(*unit_flags, "-n", str(n), "--no-pager", "-o", "short-iso", scope=scope)
     lines = out.splitlines() if out else []
     return render_template("logs.html", unit=unit, scope=scope, lines=lines, n=n)
 
