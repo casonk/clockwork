@@ -21,9 +21,11 @@ job.
 - `src/clockwork/cli.py`: CLI entry point for render/install flows
 - `web/app.py`: Flask web UI for browsing, enabling, and disabling jobs
 - `web/templates/`: Jinja2 templates for the web UI
-- `examples/`: portable manifest templates with `/path/to/portfolio` placeholders.
-  Copy to a sibling `*.local.toml` file and substitute real paths for local use.
-  `*.local.toml` files are gitignored and never committed.
+- `examples/`: portable manifest templates using `%h/git/...` for systemd unit fields
+  and `$HOME/git/...` for cron commands. `%h` is the systemd home-directory specifier
+  and works natively in `WorkingDirectory`, `ExecStart`, and `Environment=` directives.
+  If your portfolio is not at `~/git/`, copy the manifest to a sibling `*.local.toml`
+  file and substitute the real paths. `*.local.toml` files are gitignored and never committed.
 - `config/downstream-repos.toml`: known repos with scheduler patterns targeted
   for `clockwork` migration
 - `config/sudoers/clockwork-web`: sudoers drop-in granting the web app least-privilege elevation for system-scope jobs
