@@ -3,8 +3,8 @@ name = "crew-chief-listener"
 description = "crew-chief shock-relay listener — poll Signal and Gmail for commands"
 scope = "user"
 service_type = "simple"
-working_directory = "/path/to/portfolio/util-repos/crew-chief"
-exec_start = "/path/to/portfolio/util-repos/crew-chief/scripts/run_listener.sh"
+working_directory = "%h/git/util-repos/crew-chief"
+exec_start = "%h/git/util-repos/crew-chief/scripts/run_listener.sh"
 after = ["network.target"]
 restart = "on-failure"
 restart_sec = "5"
@@ -13,5 +13,5 @@ standard_error = "journal"
 service_install_wanted_by = ["default.target"]
 
 [jobs.environment]
-CREW_CHIEF_LISTENER_CONFIG = "/path/to/portfolio/util-repos/crew-chief/config/listener/config.toml"
-PYTHONPATH = "/path/to/portfolio/util-repos/crew-chief/src"
+CREW_CHIEF_LISTENER_CONFIG = "%h/git/util-repos/crew-chief/config/listener/config.toml"
+PYTHONPATH = "%h/git/util-repos/crew-chief/src"
