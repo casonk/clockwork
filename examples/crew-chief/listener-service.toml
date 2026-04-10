@@ -5,6 +5,7 @@ scope = "user"
 service_type = "simple"
 working_directory = "%h/git/util-repos/crew-chief"
 exec_start = "%h/git/util-repos/crew-chief/scripts/run_listener.sh"
+poll_interval = "30s"
 after = ["network.target"]
 restart = "on-failure"
 restart_sec = "5"

@@ -44,6 +44,30 @@ def test_render_system_scope_interval_timer_for_snowbridge_example():
     assert "OnUnitActiveSec=15m" in rendered["snowbridge-wireguard-endpoint-monitor.timer"]
 
 
+def test_render_fedora_debugg_interval_timer_and_cron_example():
+    manifest = load_manifest(
+        Path(__file__).resolve().parent.parent
+        / "examples"
+        / "fedora-debugg"
+        / "crash-snapshot.toml"
+    )
+
+    systemd_rendered = render_target(manifest, "systemd-user")
+    cron_rendered = render_target(manifest, "cron")
+    cron_output = next(iter(cron_rendered.values()))
+
+    assert "fedora-debugg-workflow.service" in systemd_rendered
+    assert "fedora-debugg-workflow.timer" in systemd_rendered
+    assert (
+        "ExecStart=%h/git/util-repos/fedora-debugg/scripts/run_workflow.sh"
+        in systemd_rendered["fedora-debugg-workflow.service"]
+    )
+    assert "OnBootSec=20m" in systemd_rendered["fedora-debugg-workflow.timer"]
+    assert "OnUnitActiveSec=6h" in systemd_rendered["fedora-debugg-workflow.timer"]
+    assert "20 */6 * * *" in cron_output
+    assert "artifacts/clockwork-cron.log" in cron_output
+
+
 def test_render_crontab_for_personal_finance_example():
     manifest = load_manifest(
         Path(__file__).resolve().parent.parent

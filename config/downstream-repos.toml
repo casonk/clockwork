@@ -12,6 +12,7 @@ paths = [
   "./util-repos/archility",        # weekly/daily architecture audit and render timers
   "./util-repos/crew-chief",       # shock-relay listener daemon
   "./util-repos/dyno-lab",         # nightly self-test suite
+  "./util-repos/fedora-debugg",    # recurring debug snapshot workflow + tachometer sidecar refresh
   "./util-repos/intake",           # generated user-level daemon and report timers
   "./util-repos/snowbridge",       # installed system service + interval timer
   "./util-repos/tachometer",       # weekly portfolio-wide performance snapshot

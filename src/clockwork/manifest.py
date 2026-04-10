@@ -95,6 +95,7 @@ def _parse_job(value: Any) -> JobSpec:
         service_name=value.get("service_name"),
         timer_name=value.get("timer_name"),
         timer_description=value.get("timer_description"),
+        poll_interval=value.get("poll_interval"),
         timer=_parse_timer(value.get("timer")),
         cron=_parse_cron(value.get("cron")),
     )

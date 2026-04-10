@@ -29,6 +29,31 @@ def test_load_personal_finance_manifest_parses_cron_example():
     assert manifest.jobs[0].cron.timezone == "America/New_York"
 
 
+def test_load_doseido_manifest_parses_poll_interval():
+    manifest = load_manifest(
+        Path(__file__).resolve().parent.parent / "examples" / "doseido" / "orchestration.toml"
+    )
+
+    assert len(manifest.jobs) == 1
+    assert manifest.jobs[0].poll_interval == "5m"
+
+
+def test_load_fedora_debugg_manifest_parses_interval_timer():
+    manifest = load_manifest(
+        Path(__file__).resolve().parent.parent
+        / "examples"
+        / "fedora-debugg"
+        / "crash-snapshot.toml"
+    )
+
+    assert len(manifest.jobs) == 1
+    assert manifest.jobs[0].name == "fedora-debugg-workflow"
+    assert manifest.jobs[0].timer is not None
+    assert manifest.jobs[0].timer.kind == "interval"
+    assert manifest.jobs[0].timer.on_boot_sec == "20m"
+    assert manifest.jobs[0].timer.on_unit_active_sec == "6h"
+
+
 def test_load_personal_finance_intraday_manifest_parses_three_jobs():
     manifest = load_manifest(
         Path(__file__).resolve().parent.parent

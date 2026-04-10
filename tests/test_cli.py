@@ -1,3 +1,6 @@
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from clockwork.cli import main
@@ -73,3 +76,35 @@ def test_install_prints_timer_unit_name_with_suffix(tmp_path, capsys):
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "systemctl --user enable --now archility-weekly.timer" in captured.out
+
+
+def test_python_module_entrypoint_invokes_main(tmp_path):
+    repo_root = Path(__file__).resolve().parent.parent
+    manifest_path = repo_root / "examples" / "fedora-debugg" / "crash-snapshot.toml"
+    unit_dir = tmp_path / "systemd-user"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(repo_root / "src")
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "clockwork.cli",
+            "install",
+            "--manifest",
+            str(manifest_path),
+            "--target",
+            "systemd-user",
+            "--unit-dir",
+            str(unit_dir),
+        ],
+        cwd=repo_root,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert proc.returncode == 0
+    assert (unit_dir / "fedora-debugg-workflow.service").exists()
+    assert (unit_dir / "fedora-debugg-workflow.timer").exists()

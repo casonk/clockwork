@@ -5,6 +5,7 @@ scope = "user"
 service_type = "simple"
 working_directory = "%h/git/health-repos/doseido"
 exec_start = "/usr/bin/python3 -m doseido.orchestrator --poll-seconds 300"
+poll_interval = "5m"
 after = ["network-online.target"]
 wants = ["network-online.target"]
 restart = "always"
