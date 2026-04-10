@@ -123,3 +123,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.handler(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

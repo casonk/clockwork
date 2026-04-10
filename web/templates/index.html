@@ -182,6 +182,17 @@
       font-size: 11px; padding: 2px 8px; border-radius: 99px;
       background: var(--surface2); color: var(--muted); border: 1px solid var(--border);
     }
+    .badge.repo-next {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--surface3);
+      border-color: var(--accent-dim);
+    }
+    .repo-next-live { color: var(--accent); font-weight: 700; }
+    .repo-next-fallback { color: var(--muted); font-weight: 600; }
+    .repo-next-cadence { color: var(--muted); font-weight: 600; }
+    .repo-next-job { color: var(--text); font-family: var(--mono); }
 
     .repo-controls { display: flex; align-items: center; gap: 8px; }
     .chevron { color: var(--muted); font-size: 11px; transition: transform 0.2s; }
@@ -265,6 +276,10 @@
       text-transform: uppercase; letter-spacing: 0.5px; padding-top: 1px; flex-shrink: 0;
     }
     .detail-val { color: var(--text); word-break: break-all; font-family: var(--mono); font-size: 11.5px; }
+    .detail-val.subtle { color: var(--muted); }
+    .next-run-val { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+    .next-run-live { color: var(--accent); font-weight: 700; }
+    .next-run-abs { color: var(--muted); }
 
     /* ── Drill-down panel ── */
     .drill-panel {
@@ -428,6 +443,20 @@
         {% set total_jobs = repo.manifests | map(attribute='jobs') | map('length') | sum %}
         <span class="badge">{{ repo.manifests | length }} manifest{{ 's' if repo.manifests | length != 1 }}</span>
         <span class="badge">{{ total_jobs }} job{{ 's' if total_jobs != 1 }}</span>
+        {% if repo.next_run.next_run_text %}
+        <span class="badge repo-next" title="{{ repo.next_run.job_name }} — {{ repo.next_run.next_run_text }}{% if repo.next_run.cadence_text %} — {{ repo.next_run.cadence_text }}{% endif %}">
+          <span>Next</span>
+          {% if repo.next_run.next_run_iso %}
+          <span class="repo-next-live" data-next-run-iso="{{ repo.next_run.next_run_iso }}">scheduled</span>
+          {% else %}
+          <span class="repo-next-live repo-next-fallback">{{ repo.next_run.next_run_text }}</span>
+          {% endif %}
+          {% if repo.next_run.cadence_text %}
+          <span class="repo-next-cadence">{{ repo.next_run.cadence_text }}</span>
+          {% endif %}
+          <span class="repo-next-job">{{ repo.next_run.job_name }}</span>
+        </span>
+        {% endif %}
       </div>
       <div class="repo-controls" onclick="event.stopPropagation()">
         <form method="post" action="/toggle/repo/{{ repo_name }}">
@@ -536,6 +565,25 @@
                   {% endif %}
                 </span>
               </div>
+              <div class="detail-row">
+                <span class="detail-label">Next</span>
+                {% if sys.next_run_text %}
+                <span class="detail-val next-run-val">
+                  {% if sys.next_run_iso %}
+                  <span class="next-run-live" data-next-run-iso="{{ sys.next_run_iso }}">scheduled</span>
+                  {% endif %}
+                  <span class="next-run-abs">{{ sys.next_run_text }}</span>
+                </span>
+                {% else %}
+                <span class="detail-val subtle">not scheduled</span>
+                {% endif %}
+              </div>
+              {% endif %}
+              {% if job.poll_interval %}
+              <div class="detail-row">
+                <span class="detail-label">Poll</span>
+                <span class="detail-val">every {{ job.poll_interval }}</span>
+              </div>
               {% endif %}
               {% if job.cron %}
               <div class="detail-row">
@@ -631,6 +679,37 @@
     el.classList.toggle('open');
     sessionStorage.setItem('repo-open-' + name, el.classList.contains('open') ? '1' : '0');
   }
+
+  function formatCountdown(msUntil) {
+    if (!Number.isFinite(msUntil)) return 'scheduled';
+    if (msUntil <= 0) return 'due now';
+
+    let remaining = Math.floor(msUntil / 1000);
+    const days = Math.floor(remaining / 86400);
+    remaining -= days * 86400;
+    const hours = Math.floor(remaining / 3600);
+    remaining -= hours * 3600;
+    const minutes = Math.floor(remaining / 60);
+    const seconds = remaining - minutes * 60;
+
+    const parts = [];
+    if (days) parts.push(`${days}d`);
+    if (hours || days) parts.push(`${hours}h`);
+    if (minutes || hours || days) parts.push(`${minutes}m`);
+    if (!days) parts.push(`${seconds}s`);
+    return `in ${parts.join(' ')}`;
+  }
+
+  function refreshNextRunCountdowns() {
+    const now = Date.now();
+    document.querySelectorAll('[data-next-run-iso]').forEach(el => {
+      const target = Date.parse(el.dataset.nextRunIso);
+      el.textContent = formatCountdown(target - now);
+    });
+  }
+
+  refreshNextRunCountdowns();
+  window.setInterval(refreshNextRunCountdowns, 1000);
 
   // ── Edit modal ──────────────────────────────────────────────────────────
   function openEdit(manifestPath, jobName) {

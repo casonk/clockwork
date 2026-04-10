@@ -70,6 +70,7 @@ Render planned scheduler artifacts to stdout:
 
 ```bash
 clockwork render --manifest examples/archility/archility-weekly.toml --target systemd-user
+clockwork render --manifest examples/fedora-debugg/crash-snapshot.toml --target systemd-user
 clockwork render --manifest examples/example-scheduler/intraday-snapshots.toml --target systemd-user
 clockwork render --manifest examples/example-scheduler/monthly-controller.toml --target cron
 ```
@@ -78,6 +79,7 @@ Write scheduler artifacts to a target directory or file:
 
 ```bash
 clockwork install --manifest examples/archility/archility-weekly.toml --target systemd-user
+clockwork install --manifest examples/fedora-debugg/crash-snapshot.toml --target systemd-user
 clockwork install --manifest examples/snowbridge/wireguard-endpoint-monitor.toml --target systemd-system
 clockwork install --manifest examples/example-scheduler/monthly-controller.toml --target cron --output /tmp/example-scheduler.crontab
 ```
@@ -111,6 +113,7 @@ Supported manifest sections:
 - service keys support standard execution metadata such as `working_directory`,
   `after`, `wants`, restart policy, environment variables, and
   `start_limit_interval_sec`
+- `poll_interval`: optional UI hint for long-running daemons with an internal poll loop
 - `[jobs.environment]`: service environment variables
 - `[jobs.timer]`: optional systemd timer metadata
 - `[jobs.cron]`: optional cron rendering metadata
@@ -125,6 +128,7 @@ The first migration targets are the repos where scheduling is already explicit:
   - `examples/example-scheduler/intraday-snapshots.toml` covers the daily intraday snapshot timers plus matching cron snippets
   - `examples/example-scheduler/monthly-controller.toml` keeps the monthly all-accounts cron example
 - `intake`: generated user-level daemon and report timer units
+- `fedora-debugg`: recurring snapshot workflow that refreshes the tachometer sidecar
 - `snowbridge`: installed system service + interval timer
 - `traction-control`: tracked weekly `archility` timer
 - `example-orchestrator`: repo-local service/orchestrator conventions

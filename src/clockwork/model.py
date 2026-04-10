@@ -73,6 +73,7 @@ class JobSpec:
     service_name: str | None = None
     timer_name: str | None = None
     timer_description: str | None = None
+    poll_interval: str | None = None
     timer: TimerSpec | None = None
     cron: CronSpec | None = None
 

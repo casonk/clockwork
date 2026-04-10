@@ -12,6 +12,21 @@ from pathlib import Path
 import tomlkit
 from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
 
+try:
+    from web.status_helpers import (
+        build_repo_next_run_candidate,
+        build_unit_status,
+        parse_show_properties,
+        select_next_run,
+    )
+except ModuleNotFoundError:
+    from status_helpers import (
+        build_repo_next_run_candidate,
+        build_unit_status,
+        parse_show_properties,
+        select_next_run,
+    )
+
 BASE_DIR = Path(__file__).parent.parent
 EXAMPLES_DIR = BASE_DIR / "examples"
 STATE_FILE = BASE_DIR / "config" / "web-state.json"
@@ -211,6 +226,7 @@ def scan_repos() -> dict[str, dict]:
                     "working_directory": _coerce(job.get("working_directory")),
                     "timer_name": _coerce(job.get("timer_name")),
                     "service_name": _coerce(job.get("service_name")),
+                    "poll_interval": _coerce(job.get("poll_interval")),
                     "timer": {k: _coerce(v) for k, v in timer.items()} if timer else None,
                     "cron": {k: _coerce(v) for k, v in cron.items()} if cron else None,
                     # dual_target = has both systemd timer and cron, user can choose
@@ -289,13 +305,25 @@ def _log_units(unit: str) -> list[str]:
 
 
 def unit_status(unit: str, scope: str = "user") -> dict:
+    _, out = _systemctl(
+        "show",
+        unit,
+        "--property=ActiveState,UnitFileState,NextElapseUSecRealtime",
+        scope=scope,
+    )
+    props = parse_show_properties(out)
+    if props:
+        return build_unit_status(out)
+
     rc_a, out_a = _systemctl("is-active", unit, scope=scope)
     rc_e, out_e = _systemctl("is-enabled", unit, scope=scope)
     return {
-        "active": out_a.strip() == "active",
-        "enabled": out_e.strip() in ("enabled", "static", "alias"),
+        "active": rc_a == 0 and out_a.strip() == "active",
+        "enabled": rc_e == 0 and out_e.strip() in ("enabled", "static", "alias"),
         "active_state": out_a.strip(),
         "enabled_state": out_e.strip(),
+        "next_run_text": "",
+        "next_run_iso": "",
     }
 
 
@@ -402,13 +430,25 @@ def index():
                 job["target"] = job_target(state, manifest["path"], job["name"])
                 job_lookup[f"{manifest['path']}:{job['name']}"] = job
 
+    sys_statuses = fetch_all_statuses(repos)
+    for repo in repos.values():
+        repo["next_run"] = select_next_run(
+            [
+                build_repo_next_run_candidate(
+                    job, sys_statuses.get(f"{manifest['path']}:{job['name']}", {})
+                )
+                for manifest in repo["manifests"]
+                for job in manifest["jobs"]
+            ]
+        )
+
     # Count how many jobs have both targets available
     dual_count = sum(1 for j in job_lookup.values() if j.get("dual_target"))
 
     return render_template(
         "index.html",
         repos=repos,
-        sys_statuses=fetch_all_statuses(repos),
+        sys_statuses=sys_statuses,
         job_data_json=json.dumps(job_lookup),
         global_target=global_target(state),
         dual_count=dual_count,
@@ -746,7 +786,14 @@ if __name__ == "__main__":
     port = int(os.environ.get("CLOCKWORK_WEB_PORT", "5000"))
     ssl_context = _make_ssl_context()
     scheme = "https" if ssl_context else "http"
+    debug = os.environ.get("CLOCKWORK_WEB_DEBUG", "").lower() in {"1", "true", "yes", "on"}
     print(f"clockwork-web  {scheme}://{host}:{port}")
     if ssl_context:
         print("mTLS: clients must present a certificate signed by the configured CA.")
-    app.run(debug=not ssl_context, host=host, port=port, ssl_context=ssl_context)
+    app.run(
+        debug=debug,
+        use_reloader=debug,
+        host=host,
+        port=port,
+        ssl_context=ssl_context,
+    )
