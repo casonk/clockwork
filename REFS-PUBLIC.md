@@ -1,4 +1,4 @@
-# REFS-PUBLIC.md — Public References
+# REFS-PUBLIC.md - Public References
 
 > Record external public repositories, datasets, documentation, APIs, or other
 > public resources that this repository utilizes or depends on.
@@ -6,22 +6,19 @@
 
 ## Public Repositories
 
-<!-- External repos this project depends on, forks, or integrates with:
-- https://github.com/org/repo — description of usage
--->
+- No fixed external code repository is the main upstream; the repo renders local scheduler manifests into systemd and cron text.
 
 ## Public Datasets and APIs
 
-<!-- Publicly accessible data sources, REST APIs, or external feeds consumed here:
-- https://example.com/dataset — description of usage
--->
+- No standing public data APIs are required; all manifests and scheduler targets are local.
 
 ## Documentation and Specifications
 
-<!-- Reference docs, RFCs, standards, or upstream project documentation:
-- https://docs.example.com — description
--->
+- https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html - systemd service-unit reference
+- https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html - systemd timer reference
+- https://man7.org/linux/man-pages/man5/crontab.5.html - cron syntax reference used by the cron renderer
+- https://flask.palletsprojects.com/ - Flask documentation for the local web UI
 
 ## Notes
 
-<!-- Any context about how these public references are used or versioned -->
+- clockwork is a local render/install tool. The durable external references are the scheduler specifications it targets, not any upstream service API.
