@@ -6,6 +6,7 @@ skinparam defaultFontName Monospace
 skinparam componentStyle rectangle
 skinparam linetype ortho
 rectangle ".github/workflows/ci.yml\n6 detected tools" as source_github_workflows_ci_yml #E0F2FE
+rectangle "config/scripts/clockwork-system-install\n0 detected tools" as source_config_scripts_clockwork_system_install #E0F2FE
 rectangle "scripts/run_tachometer_profile.sh\n3 detected tools" as source_scripts_run_tachometer_profile_sh #E0F2FE
 cloud "actions/checkout" as tool_actions_checkout #FEF3C7
 cloud "actions/setup-python" as tool_actions_setup_python #FEF3C7
@@ -26,7 +27,7 @@ source_scripts_run_tachometer_profile_sh --> tool_run
 source_scripts_run_tachometer_profile_sh --> tool_summarize
 source_scripts_run_tachometer_profile_sh --> tool_tachometer
 note as toolingGraphSummary
-Scanned 2 tooling entrypoints.
+Scanned 3 tooling entrypoints.
 Detected 9 third-party tools.
 end note
 @enduml

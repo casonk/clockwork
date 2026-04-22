@@ -350,11 +350,13 @@
       display: block; font-size: 11px; font-weight: 600; text-transform: uppercase;
       letter-spacing: 0.5px; color: var(--muted); margin-bottom: 5px;
     }
-    .form-group input {
+    .form-group input,
+    .form-group select {
       width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
       padding: 8px 10px; color: var(--text); font-size: 13px; font-family: var(--mono); outline: none;
     }
-    .form-group input:focus { border-color: var(--accent); }
+    .form-group input:focus,
+    .form-group select:focus { border-color: var(--accent); }
     .form-section-title {
       font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
       color: var(--accent); margin: 18px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border);
@@ -599,6 +601,24 @@
                 <span class="detail-val">{{ job.exec_start }}</span>
               </div>
               {% endif %}
+              {% if job.provider_env_key %}
+              <div class="detail-row">
+                <span class="detail-label">Provider</span>
+                <span class="detail-val">{{ job.provider_value or 'auto' }}</span>
+              </div>
+              {% endif %}
+              {% if job.model_env_key %}
+              <div class="detail-row">
+                <span class="detail-label">Model</span>
+                <span class="detail-val">{{ job.model_value or 'provider default' }}</span>
+              </div>
+              {% endif %}
+              {% if job.environment_files %}
+              <div class="detail-row">
+                <span class="detail-label">EnvFile</span>
+                <span class="detail-val">{{ job.environment_files | join(', ') }}</span>
+              </div>
+              {% endif %}
               {% if job.working_directory %}
               <div class="detail-row">
                 <span class="detail-label">Dir</span>
@@ -631,6 +651,8 @@
     <form method="post" action="/edit/job">
       <input type="hidden" name="manifest_path" id="f-manifest-path">
       <input type="hidden" name="job_name"      id="f-job-name">
+      <input type="hidden" name="provider_env_key" id="f-provider-env-key">
+      <input type="hidden" name="model_env_key" id="f-model-env-key">
       <div class="form-group">
         <label>Description</label>
         <input type="text" name="description" id="f-description">
@@ -642,6 +664,26 @@
       <div class="form-group">
         <label>Working Directory</label>
         <input type="text" name="working_directory" id="f-working-dir">
+      </div>
+      <div id="agent-section" class="hidden">
+        <div class="form-section-title">Agent Defaults</div>
+        <div id="agent-provider-group" class="form-group hidden">
+          <label>Provider</label>
+          <select name="provider_value" id="f-provider">
+            <option value="auto">auto</option>
+            <option value="codex">codex</option>
+            <option value="claude">claude</option>
+            <option value="copilot">copilot</option>
+          </select>
+        </div>
+        <div id="agent-model-group" class="form-group hidden">
+          <label>Model</label>
+          <input type="text" name="model_value" id="f-model" placeholder="provider default">
+        </div>
+        <div id="agent-env-files-group" class="form-group hidden">
+          <label>Credential Env File</label>
+          <input type="text" id="f-env-files" readonly>
+        </div>
       </div>
       <div id="timer-section" class="hidden">
         <div class="form-section-title">systemd Timer</div>
@@ -721,10 +763,53 @@
     document.getElementById('f-description').value    = job.description  || '';
     document.getElementById('f-exec-start').value     = job.exec_start   || '';
     document.getElementById('f-working-dir').value    = job.working_directory || '';
+    document.getElementById('f-provider-env-key').value = job.provider_env_key || '';
+    document.getElementById('f-model-env-key').value = job.model_env_key || '';
+
+    const agentSection = document.getElementById('agent-section');
+    const providerGroup = document.getElementById('agent-provider-group');
+    const modelGroup = document.getElementById('agent-model-group');
+    const envFilesGroup = document.getElementById('agent-env-files-group');
+    const knownProviders = ['auto', 'codex', 'claude', 'copilot'];
+    if (job.provider_env_key || job.model_env_key || (job.environment_files && job.environment_files.length)) {
+      agentSection.classList.remove('hidden');
+      if (job.provider_env_key) {
+        providerGroup.classList.remove('hidden');
+        document.getElementById('f-provider').value = knownProviders.includes(job.provider_value)
+          ? job.provider_value
+          : 'auto';
+      } else {
+        providerGroup.classList.add('hidden');
+        document.getElementById('f-provider').value = 'auto';
+      }
+      if (job.model_env_key) {
+        modelGroup.classList.remove('hidden');
+        document.getElementById('f-model').value = job.model_value || '';
+      } else {
+        modelGroup.classList.add('hidden');
+        document.getElementById('f-model').value = '';
+      }
+      if (job.environment_files && job.environment_files.length) {
+        envFilesGroup.classList.remove('hidden');
+        document.getElementById('f-env-files').value = job.environment_files.join(', ');
+      } else {
+        envFilesGroup.classList.add('hidden');
+        document.getElementById('f-env-files').value = '';
+      }
+    } else {
+      agentSection.classList.add('hidden');
+      providerGroup.classList.add('hidden');
+      modelGroup.classList.add('hidden');
+      envFilesGroup.classList.add('hidden');
+      document.getElementById('f-provider').value = 'auto';
+      document.getElementById('f-model').value = '';
+      document.getElementById('f-env-files').value = '';
+    }
+
     const timerSec = document.getElementById('timer-section');
     if (job.timer && job.timer.on_calendar !== undefined) {
       timerSec.classList.remove('hidden');
-      document.getElementById('f-on-calendar').value = job.timer.on_calendar || '';
+        document.getElementById('f-on-calendar').value = job.timer.on_calendar || '';
     } else { timerSec.classList.add('hidden'); }
     const cronSec = document.getElementById('cron-section');
     if (job.cron) {

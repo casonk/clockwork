@@ -43,7 +43,8 @@ pip install -e .[dev]
 
 A Flask app (`web/app.py`) provides a browser interface for enabling, disabling,
 and monitoring all jobs defined under `examples/`.  It is served behind Caddy
-with mTLS and proxied over WireGuard.
+with mTLS and proxied over WireGuard. The standalone app now binds to
+`127.0.0.1` by default; non-loopback exposure is an explicit opt-in.
 
 ```bash
 # Development
@@ -52,6 +53,15 @@ python3 web/app.py
 # Production (systemd user service, managed by its own clockwork manifest)
 systemctl --user start clockwork-web.service
 ```
+
+If you intentionally expose the Flask app beyond loopback, set
+`CLOCKWORK_WEB_ALLOW_REMOTE=1`. Remote exposure without client-authenticated
+TLS is blocked unless you also set `CLOCKWORK_WEB_ALLOW_REMOTE_WITHOUT_MTLS=1`.
+
+For agentic maintenance manifests that carry provider/model defaults in
+`[jobs.environment]`, the edit modal now surfaces those defaults directly so
+they can be changed without manually editing TOML. Optional local-only
+credential/profile overrides still belong in `environment_files`.
 
 System-scope jobs (`scope = "system"`) require elevated writes.  The app uses a
 sudoers drop-in (`config/sudoers/clockwork-web`) and a wrapper script
@@ -73,6 +83,9 @@ clockwork render --manifest examples/archility/archility-weekly.toml --target sy
 clockwork render --manifest examples/fedora-debugg/crash-snapshot.toml --target systemd-user
 clockwork render --manifest examples/example-scheduler/intraday-snapshots.toml --target systemd-user
 clockwork render --manifest examples/example-scheduler/monthly-controller.toml --target cron
+clockwork render --manifest examples/traction-control/bug-sweep-agentic.toml --target systemd-user
+clockwork render --manifest examples/traction-control/template-consolidation-agentic.toml --target systemd-user
+clockwork render --manifest examples/traction-control/ci-repair-agentic.toml --target systemd-user
 ```
 
 Write scheduler artifacts to a target directory or file:
@@ -82,6 +95,9 @@ clockwork install --manifest examples/archility/archility-weekly.toml --target s
 clockwork install --manifest examples/fedora-debugg/crash-snapshot.toml --target systemd-user
 clockwork install --manifest examples/snowbridge/wireguard-endpoint-monitor.toml --target systemd-system
 clockwork install --manifest examples/example-scheduler/monthly-controller.toml --target cron --output /tmp/example-scheduler.crontab
+clockwork install --manifest examples/traction-control/bug-sweep-agentic.toml --target systemd-user
+clockwork install --manifest examples/traction-control/template-consolidation-agentic.toml --target systemd-user
+clockwork install --manifest examples/traction-control/ci-repair-agentic.toml --target systemd-user
 ```
 
 ## Manifest Shape
@@ -96,6 +112,7 @@ working_directory = "/path/to/portfolio/util-repos/traction-control"
 exec_start = "/path/to/portfolio/util-repos/traction-control/scripts/archility-weekly.sh"
 after = ["network.target"]
 start_limit_interval_sec = "0"
+environment_files = ["-/path/to/local-only.env"]
 
 [jobs.environment]
 PORTFOLIO_ROOT = "/path/to/portfolio"
@@ -113,6 +130,8 @@ Supported manifest sections:
 - service keys support standard execution metadata such as `working_directory`,
   `after`, `wants`, restart policy, environment variables, and
   `start_limit_interval_sec`
+- `environment_files`: optional systemd `EnvironmentFile=` paths; use `-...`
+  when the file is local-only and may not exist on every machine
 - `poll_interval`: optional UI hint for long-running daemons with an internal poll loop
 - `[jobs.environment]`: service environment variables
 - `[jobs.timer]`: optional systemd timer metadata
@@ -130,7 +149,7 @@ The first migration targets are the repos where scheduling is already explicit:
 - `intake`: generated user-level daemon and report timer units
 - `fedora-debugg`: recurring snapshot workflow that refreshes the tachometer sidecar
 - `snowbridge`: installed system service + interval timer
-- `traction-control`: tracked weekly `archility` timer
+- `traction-control`: daily governance audit plus daily bug sweep and every-other-day agentic template consolidation and CI repair
 - `example-orchestrator`: repo-local service/orchestrator conventions
 
 ## Development

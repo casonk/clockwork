@@ -14,9 +14,26 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
+- When one downstream repo schedules multiple unattended agentic maintenance
+  jobs, keep them as separate manifests and stagger their boot delays instead of
+  hiding unrelated workflows behind one timer.
+- Admin UIs that rely on Caddy, mTLS, or WireGuard as the real trust boundary
+  must still default to loopback in the app itself so a missing proxy layer does
+  not silently widen exposure.
+- When a Flask UI uses plain HTML forms for state-changing routes, add
+  same-origin request checks in the app even if the primary deployment is
+  loopback-only.
+
 - Keep tracked example manifests generic: use placeholder paths, usernames, and
   local config locations instead of publishing a real host's filesystem layout
   or service-account names.
+- For unattended agentic maintenance jobs, keep provider selection, prompt
+  text, dirty-worktree preflight, and run logging in a downstream repo wrapper;
+  `clockwork` should schedule that wrapper instead of absorbing agent-specific
+  execution logic itself.
+- When a tracked manifest is the live control surface for an unattended agentic
+  job, surface its provider/model defaults in the web editor instead of hiding
+  them in TOML-only environment tables.
 - Document the repository around its real execution, curation, or integration
   flow instead of only the top-level folder list.
 - Keep local-only, private, reference-only, or generated boundaries explicit so

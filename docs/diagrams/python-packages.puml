@@ -2,15 +2,21 @@
 set namespaceSeparator none
 top to bottom direction
 skinparam componentStyle rectangle
-rectangle "clockwork\n0 child pkg, 5 modules\n6 python files\nexamples: __main__, cli, manifest" as clockwork
-rectangle "clockwork.__main__\n1 python file" as clockwork.__main__
-rectangle "clockwork.cli\n1 python file" as clockwork.cli
-rectangle "clockwork.manifest\n1 python file" as clockwork.manifest
-rectangle "clockwork.model\n1 python file" as clockwork.model
-rectangle "clockwork.render\n1 python file" as clockwork.render
-clockwork.__main__ --> clockwork.cli
-clockwork.cli --> clockwork.manifest
-clockwork.cli --> clockwork.render
-clockwork.manifest --> clockwork.model
-clockwork.render --> clockwork.model
+rectangle "src.clockwork\n0 child pkg, 5 modules\n6 python files\nexamples: __main__, cli, manifest" as src.clockwork
+rectangle "src.clockwork.__main__\n1 python file" as src.clockwork.__main__
+rectangle "src.clockwork.cli\n1 python file" as src.clockwork.cli
+rectangle "src.clockwork.manifest\n1 python file" as src.clockwork.manifest
+rectangle "src.clockwork.model\n1 python file" as src.clockwork.model
+rectangle "src.clockwork.render\n1 python file" as src.clockwork.render
+rectangle "web\n0 child pkg, 3 modules\n4 python files\nexamples: app, security, status_helpers" as web
+rectangle "web.app\n1 python file" as web.app
+rectangle "web.security\n1 python file" as web.security
+rectangle "web.status_helpers\n1 python file" as web.status_helpers
+src.clockwork.__main__ --> src.clockwork.cli
+src.clockwork.cli --> src.clockwork.manifest
+src.clockwork.cli --> src.clockwork.render
+src.clockwork.manifest --> src.clockwork.model
+src.clockwork.render --> src.clockwork.model
+web.app --> web.security
+web.app --> web.status_helpers
 @enduml

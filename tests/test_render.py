@@ -104,3 +104,93 @@ def test_render_personal_finance_intraday_systemd_and_cron_examples():
     ) in systemd_rendered["pf-intraday-snapshot@market-open.service"]
     assert "10 16 * * *" in cron_output
     assert "scheduled_intraday_snapshot.sh market-close" in cron_output
+
+
+def test_render_traction_control_template_consolidation_interval_example():
+    manifest = load_manifest(
+        Path(__file__).resolve().parent.parent
+        / "examples"
+        / "traction-control"
+        / "template-consolidation-agentic.toml"
+    )
+
+    systemd_rendered = render_target(manifest, "systemd-user")
+
+    assert "template-consolidation-agentic.service" in systemd_rendered
+    assert "template-consolidation-agentic.timer" in systemd_rendered
+    assert (
+        "ExecStart=%h/git/util-repos/traction-control/scripts/template_consolidation_agentic.sh"
+        in systemd_rendered["template-consolidation-agentic.service"]
+    )
+    assert (
+        "EnvironmentFile=-%h/.config/traction-control/template-consolidation-agentic.env"
+        in systemd_rendered["template-consolidation-agentic.service"]
+    )
+    assert (
+        'Environment="TEMPLATE_CONSOLIDATION_PROVIDER=auto"'
+        in systemd_rendered["template-consolidation-agentic.service"]
+    )
+    assert (
+        'Environment="TEMPLATE_CONSOLIDATION_MODEL="'
+        in systemd_rendered["template-consolidation-agentic.service"]
+    )
+    assert "OnBootSec=30m" in systemd_rendered["template-consolidation-agentic.timer"]
+    assert "OnUnitActiveSec=2d" in systemd_rendered["template-consolidation-agentic.timer"]
+
+
+def test_render_traction_control_bug_sweep_interval_example():
+    manifest = load_manifest(
+        Path(__file__).resolve().parent.parent
+        / "examples"
+        / "traction-control"
+        / "bug-sweep-agentic.toml"
+    )
+
+    systemd_rendered = render_target(manifest, "systemd-user")
+
+    assert "bug-sweep-agentic.service" in systemd_rendered
+    assert "bug-sweep-agentic.timer" in systemd_rendered
+    assert (
+        "ExecStart=%h/git/util-repos/traction-control/scripts/bug_sweep_agentic.sh"
+        in systemd_rendered["bug-sweep-agentic.service"]
+    )
+    assert (
+        "EnvironmentFile=-%h/.config/traction-control/bug-sweep-agentic.env"
+        in systemd_rendered["bug-sweep-agentic.service"]
+    )
+    assert (
+        'Environment="BUG_SWEEP_AGENTIC_PROVIDER=auto"'
+        in systemd_rendered["bug-sweep-agentic.service"]
+    )
+    assert 'Environment="BUG_SWEEP_AGENTIC_MODEL="' in systemd_rendered["bug-sweep-agentic.service"]
+    assert "OnBootSec=90m" in systemd_rendered["bug-sweep-agentic.timer"]
+    assert "OnUnitActiveSec=1d" in systemd_rendered["bug-sweep-agentic.timer"]
+
+
+def test_render_traction_control_ci_repair_interval_example():
+    manifest = load_manifest(
+        Path(__file__).resolve().parent.parent
+        / "examples"
+        / "traction-control"
+        / "ci-repair-agentic.toml"
+    )
+
+    systemd_rendered = render_target(manifest, "systemd-user")
+
+    assert "ci-repair-agentic.service" in systemd_rendered
+    assert "ci-repair-agentic.timer" in systemd_rendered
+    assert (
+        "ExecStart=%h/git/util-repos/traction-control/scripts/ci_repair_agentic.sh"
+        in systemd_rendered["ci-repair-agentic.service"]
+    )
+    assert (
+        "EnvironmentFile=-%h/.config/traction-control/ci-repair-agentic.env"
+        in systemd_rendered["ci-repair-agentic.service"]
+    )
+    assert (
+        'Environment="CI_REPAIR_AGENTIC_PROVIDER=auto"'
+        in systemd_rendered["ci-repair-agentic.service"]
+    )
+    assert 'Environment="CI_REPAIR_AGENTIC_MODEL="' in systemd_rendered["ci-repair-agentic.service"]
+    assert "OnBootSec=1h" in systemd_rendered["ci-repair-agentic.timer"]
+    assert "OnUnitActiveSec=2d" in systemd_rendered["ci-repair-agentic.timer"]

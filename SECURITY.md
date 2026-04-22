@@ -4,6 +4,10 @@
 
 `clockwork` renders scheduler artifacts. It must never become a place to store
 live secrets, crontab exports with credentials, or host-specific private data.
+Its web UI can trigger scheduler state changes, so deployment boundaries matter:
+the standalone Flask app is intended to stay on `localhost` by default, with
+Caddy and mTLS providing the remote trust boundary when the UI is exposed over
+WireGuard.
 
 ## Reporting
 
@@ -18,3 +22,7 @@ public issue with exploit details.
 - Treat generated unit files and crontab snippets as reviewable text artifacts;
   do not add hidden shell expansion or remote download behavior to install
   flows.
+- Do not expose `clockwork-web` on a public network interface without
+  client-authenticated TLS or another explicit authentication layer.
+- Treat scheduler state, unit names, logs, and local service topology as
+  potentially sensitive operational context when writing issues or screenshots.
