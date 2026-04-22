@@ -5,6 +5,7 @@ skinparam shadowing false
 skinparam defaultFontName Monospace
 skinparam componentStyle rectangle
 skinparam linetype ortho
+rectangle "config/scripts/clockwork-system-install\n0 local shell edges\n0 external tools" as shell_config_scripts_clockwork_system_install #DBEAFE
 rectangle "scripts/run_tachometer_profile.sh\n0 local shell edges\n3 external tools" as shell_scripts_run_tachometer_profile_sh #DBEAFE
 cloud "run" as tool_run #FEF3C7
 cloud "summarize" as tool_summarize #FEF3C7
@@ -13,7 +14,7 @@ shell_scripts_run_tachometer_profile_sh --> tool_run
 shell_scripts_run_tachometer_profile_sh --> tool_summarize
 shell_scripts_run_tachometer_profile_sh --> tool_tachometer
 note as shellGraphSummary
-Scanned 1 shell script.
+Scanned 2 shell scripts.
 Detected 0 local shell edges.
 Detected 3 external tools.
 end note

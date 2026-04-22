@@ -16,6 +16,8 @@ paths = [
   "./util-repos/intake",           # generated user-level daemon and report timers
   "./util-repos/snowbridge",       # installed system service + interval timer
   "./util-repos/tachometer",       # weekly portfolio-wide performance snapshot
+  "./util-repos/traction-control", # daily governance audit + daily bug sweep + every-other-day template consolidation and CI repair
+  "./util-repos/terminility",      # daily tmux session alias rebuild
   "./personal-finance",            # cron examples + scheduled refresh wrappers
   "./health-repos/doseido",        # supplement-source orchestrator daemon
   "./research-repos/zillow-public-data",  # weekly data report pull and analysis

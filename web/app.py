@@ -5,14 +5,16 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import ssl
 import subprocess
 from pathlib import Path
 
 import tomlkit
-from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
+from flask import Flask, abort, flash, jsonify, redirect, render_template, request, url_for
 
 try:
+    from web.security import same_origin_host, validate_remote_bind
     from web.status_helpers import (
         build_repo_next_run_candidate,
         build_unit_status,
@@ -20,6 +22,7 @@ try:
         select_next_run,
     )
 except ModuleNotFoundError:
+    from security import same_origin_host, validate_remote_bind
     from status_helpers import (
         build_repo_next_run_candidate,
         build_unit_status,
@@ -40,7 +43,18 @@ def _resolve_manifest_path(canonical_rel: str) -> Path:
 
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("CLOCKWORK_WEB_SECRET", "clockwork-dev-secret")
+app.secret_key = os.environ.get("CLOCKWORK_WEB_SECRET") or secrets.token_hex(32)
+
+
+@app.before_request
+def _protect_state_changing_requests() -> None:
+    """Reject cross-origin state-changing requests."""
+    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return
+    source = request.headers.get("Origin") or request.headers.get("Referer")
+    if source and same_origin_host(source, request.host):
+        return
+    abort(403, description="Cross-origin state-changing request blocked.")
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +203,23 @@ def _coerce(val) -> str:
     return str(val) if val is not None else ""
 
 
+def _coerce_list(values) -> list[str]:
+    if not values:
+        return []
+    return [_coerce(item) for item in values]
+
+
+def _coerce_mapping(values) -> dict[str, str]:
+    if not values:
+        return {}
+    return {str(key): _coerce(value) for key, value in values.items()}
+
+
+def _environment_key(environment: dict[str, str], suffix: str) -> str:
+    matches = sorted(key for key in environment if key.endswith(suffix))
+    return matches[0] if matches else ""
+
+
 def scan_repos() -> dict[str, dict]:
     repos: dict[str, dict] = {}
     all_files = sorted(EXAMPLES_DIR.glob("**/*.toml"))
@@ -216,6 +247,10 @@ def scan_repos() -> dict[str, dict]:
         for job in doc.get("jobs", []):
             timer = job.get("timer")
             cron = job.get("cron")
+            environment = _coerce_mapping(job.get("environment"))
+            environment_files = _coerce_list(job.get("environment_files"))
+            provider_env_key = _environment_key(environment, "_PROVIDER")
+            model_env_key = _environment_key(environment, "_MODEL")
             jobs.append(
                 {
                     "name": _coerce(job.get("name")),
@@ -224,6 +259,12 @@ def scan_repos() -> dict[str, dict]:
                     "service_type": _coerce(job.get("service_type")) or "oneshot",
                     "exec_start": _coerce(job.get("exec_start")),
                     "working_directory": _coerce(job.get("working_directory")),
+                    "environment": environment,
+                    "environment_files": environment_files,
+                    "provider_env_key": provider_env_key,
+                    "provider_value": environment.get(provider_env_key, ""),
+                    "model_env_key": model_env_key,
+                    "model_value": environment.get(model_env_key, ""),
                     "timer_name": _coerce(job.get("timer_name")),
                     "service_name": _coerce(job.get("service_name")),
                     "poll_interval": _coerce(job.get("poll_interval")),
@@ -665,6 +706,19 @@ def edit_job():
             job["timer"]["on_calendar"] = request.form["on_calendar"].strip()
         if job.get("cron") and request.form.get("cron_expression", "").strip():
             job["cron"]["expression"] = request.form["cron_expression"].strip()
+
+        provider_env_key = request.form.get("provider_env_key", "").strip()
+        model_env_key = request.form.get("model_env_key", "").strip()
+        if provider_env_key or model_env_key:
+            if not job.get("environment"):
+                job["environment"] = tomlkit.table()
+            env_table = job["environment"]
+            if provider_env_key:
+                env_table[provider_env_key] = (
+                    request.form.get("provider_value", "").strip() or "auto"
+                )
+            if model_env_key:
+                env_table[model_env_key] = request.form.get("model_value", "").strip()
         break
 
     full_path.write_text(tomlkit.dumps(doc))
@@ -776,15 +830,20 @@ def _make_ssl_context() -> ssl.SSLContext | None:
 # Startup: auto-generate missing cron sections
 # ---------------------------------------------------------------------------
 
-_cron_modified = ensure_cron_sections(EXAMPLES_DIR)
-if _cron_modified:
-    print(f"clockwork-web  auto-generated cron sections in: {', '.join(_cron_modified)}")
+if os.environ.get("CLOCKWORK_WEB_AUTOGENERATE_CRON", "1").lower() in {"1", "true", "yes", "on"}:
+    _cron_modified = ensure_cron_sections(EXAMPLES_DIR)
+    if _cron_modified:
+        print(f"clockwork-web  auto-generated cron sections in: {', '.join(_cron_modified)}")
 
 
 if __name__ == "__main__":
-    host = os.environ.get("CLOCKWORK_WEB_HOST", "0.0.0.0")
+    host = os.environ.get("CLOCKWORK_WEB_HOST", "127.0.0.1")
     port = int(os.environ.get("CLOCKWORK_WEB_PORT", "5000"))
     ssl_context = _make_ssl_context()
+    try:
+        validate_remote_bind(host, ssl_context)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     scheme = "https" if ssl_context else "http"
     debug = os.environ.get("CLOCKWORK_WEB_DEBUG", "").lower() in {"1", "true", "yes", "on"}
     print(f"clockwork-web  {scheme}://{host}:{port}")

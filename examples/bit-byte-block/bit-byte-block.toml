@@ -1,0 +1,19 @@
+[[jobs]]
+name = "bit-byte-block-proxy"
+description = "Bitcoin Stratum TCP proxy – solo.ckpool.org ingress"
+scope = "user"
+service_type = "simple"
+working_directory = "%h/git/util-repos/bit-byte-block"
+exec_start = "/usr/bin/python3 -m bit_byte_block proxy"
+after = ["network-online.target"]
+wants = ["network-online.target"]
+start_limit_interval_sec = "0"
+service_install_wanted_by = ["default.target"]
+restart = "always"
+restart_sec = "30"
+standard_output = "journal"
+standard_error = "journal"
+environment_files = ["%h/git/util-repos/bit-byte-block/config/bit-byte-block.env"]
+
+[jobs.environment]
+PYTHONUNBUFFERED = "1"

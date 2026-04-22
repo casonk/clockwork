@@ -1,13 +1,13 @@
 @startuml classes_clockwork
 set namespaceSeparator none
-class "CronSpec" as clockwork.model.CronSpec {
+class "CronSpec" as src.clockwork.model.CronSpec {
   command : str
   comments : tuple[str, ...]
   expression : str
   timezone : str | None
   validate() -> None
 }
-class "JobSpec" as clockwork.model.JobSpec {
+class "JobSpec" as src.clockwork.model.JobSpec {
   after : tuple[str, ...]
   cron : CronSpec | None
   description : str
@@ -16,6 +16,7 @@ class "JobSpec" as clockwork.model.JobSpec {
   exec_start : str
   group : str | None
   name : str
+  poll_interval : str | None
   restart : str | None
   restart_sec : str | None
   scope : str
@@ -35,12 +36,12 @@ class "JobSpec" as clockwork.model.JobSpec {
   timer_unit_name() -> str
   validate() -> None
 }
-class "Manifest" as clockwork.model.Manifest {
+class "Manifest" as src.clockwork.model.Manifest {
   jobs : tuple[JobSpec, ...]
   path : str
   validate() -> None
 }
-class "TimerSpec" as clockwork.model.TimerSpec {
+class "TimerSpec" as src.clockwork.model.TimerSpec {
   accuracy_sec : str | None
   install_wanted_by : str
   kind : str

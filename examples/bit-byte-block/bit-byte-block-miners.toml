@@ -1,0 +1,38 @@
+[[jobs]]
+name = "bit-byte-block-cpu-miner"
+description = "Bitcoin CPU miner (cpuminer-opt) – solo.ckpool.org"
+scope = "user"
+service_type = "simple"
+working_directory = "%h/git/util-repos/bit-byte-block"
+exec_start = "/bin/bash -lc 'exec cpuminer-opt --config %h/git/util-repos/bit-byte-block/config/miners/cpuminer.json'"
+restart = "on-failure"
+restart_sec = "30"
+standard_output = "journal"
+standard_error = "journal"
+service_install_wanted_by = ["default.target"]
+
+[[jobs]]
+name = "bit-byte-block-nvidia-miner"
+description = "Bitcoin NVIDIA GPU miner (ccminer) – solo.ckpool.org"
+scope = "user"
+service_type = "simple"
+working_directory = "%h/git/util-repos/bit-byte-block"
+exec_start = "/bin/bash -lc 'exec ccminer --config %h/git/util-repos/bit-byte-block/config/miners/ccminer.json'"
+restart = "on-failure"
+restart_sec = "30"
+standard_output = "journal"
+standard_error = "journal"
+service_install_wanted_by = ["default.target"]
+
+[[jobs]]
+name = "bit-byte-block-amd-miner"
+description = "Bitcoin AMD GPU miner (cgminer) – solo.ckpool.org"
+scope = "user"
+service_type = "simple"
+working_directory = "%h/git/util-repos/bit-byte-block"
+exec_start = "/bin/bash -lc 'exec cgminer -c %h/git/util-repos/bit-byte-block/config/miners/cgminer.conf'"
+restart = "on-failure"
+restart_sec = "30"
+standard_output = "journal"
+standard_error = "journal"
+service_install_wanted_by = ["default.target"]
