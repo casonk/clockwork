@@ -16,6 +16,7 @@ from flask import Flask, abort, flash, jsonify, redirect, render_template, reque
 try:
     from web.security import same_origin_host, validate_remote_bind
     from web.status_helpers import (
+        build_cron_status,
         build_repo_next_run_candidate,
         build_unit_status,
         parse_show_properties,
@@ -24,6 +25,7 @@ try:
 except ModuleNotFoundError:
     from security import same_origin_host, validate_remote_bind
     from status_helpers import (
+        build_cron_status,
         build_repo_next_run_candidate,
         build_unit_status,
         parse_show_properties,
@@ -416,15 +418,12 @@ def fetch_all_statuses(repos: dict) -> dict[str, dict]:
         for manifest in repo["manifests"]:
             for job in manifest["jobs"]:
                 key = f"{manifest['path']}:{job['name']}"
-                if not job.get("cron") or job.get("timer"):
+                if job.get("cron") and job.get("target") == "cron":
+                    statuses[key] = build_cron_status(job)
+                elif not job.get("cron") or job.get("timer"):
                     statuses[key] = unit_status(primary_unit(job), scope=job.get("scope", "user"))
                 else:
-                    statuses[key] = {
-                        "active": None,
-                        "enabled": None,
-                        "active_state": "cron",
-                        "enabled_state": "cron",
-                    }
+                    statuses[key] = build_cron_status(job)
     return statuses
 
 
