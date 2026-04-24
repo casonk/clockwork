@@ -82,6 +82,78 @@ def test_edit_job_updates_agent_provider_and_model_defaults(tmp_path, monkeypatc
     assert job["environment"]["BUG_SWEEP_AGENTIC_MODEL"] == "claude-sonnet-4-6"
 
 
+def test_fetch_all_statuses_uses_cron_status_for_cron_only_and_cron_selected_jobs(monkeypatch):
+    cron_calls: list[str] = []
+    unit_calls: list[str] = []
+
+    def fake_cron_status(job, now=None):
+        cron_calls.append(job["name"])
+        return {
+            "active": None,
+            "enabled": None,
+            "active_state": "cron",
+            "enabled_state": "cron",
+            "next_run_text": f"next {job['name']}",
+            "next_run_iso": "",
+        }
+
+    def fake_unit_status(unit, scope="user"):
+        unit_calls.append(unit)
+        return {
+            "active": False,
+            "enabled": True,
+            "active_state": "inactive",
+            "enabled_state": "enabled",
+            "next_run_text": "",
+            "next_run_iso": "",
+        }
+
+    monkeypatch.setattr(web_app, "build_cron_status", fake_cron_status)
+    monkeypatch.setattr(web_app, "unit_status", fake_unit_status)
+
+    statuses = web_app.fetch_all_statuses(
+        {
+            "archility": {
+                "manifests": [
+                    {
+                        "path": "archility/archility-daily.toml",
+                        "jobs": [
+                            {
+                                "name": "cron-only",
+                                "scope": "user",
+                                "target": "cron",
+                                "timer": None,
+                                "cron": {"expression": "0 2 * * *"},
+                            },
+                            {
+                                "name": "dual-cron",
+                                "scope": "user",
+                                "target": "cron",
+                                "timer": {"kind": "calendar", "on_calendar": "*-*-* 02:00:00"},
+                                "timer_name": "dual-cron.timer",
+                                "cron": {"expression": "0 2 * * *"},
+                            },
+                            {
+                                "name": "dual-systemd",
+                                "scope": "user",
+                                "target": "systemd",
+                                "timer": {"kind": "calendar", "on_calendar": "*-*-* 03:00:00"},
+                                "timer_name": "dual-systemd.timer",
+                                "cron": {"expression": "0 3 * * *"},
+                            },
+                        ],
+                    }
+                ]
+            }
+        }
+    )
+
+    assert cron_calls == ["cron-only", "dual-cron"]
+    assert unit_calls == ["dual-systemd.timer"]
+    assert statuses["archility/archility-daily.toml:cron-only"]["active_state"] == "cron"
+    assert statuses["archility/archility-daily.toml:dual-cron"]["next_run_text"] == "next dual-cron"
+
+
 def test_job_details_treats_non_fatal_log_lines_as_warnings(monkeypatch):
     monkeypatch.setattr(
         web_app,

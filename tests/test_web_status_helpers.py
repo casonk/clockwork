@@ -1,4 +1,4 @@
-from datetime import timezone
+from datetime import datetime, timezone
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -52,6 +52,30 @@ def test_build_unit_status_ignores_unscheduled_timers():
     assert status["enabled"] is False
     assert status["next_run_text"] == ""
     assert status["next_run_iso"] == ""
+
+
+def test_build_cron_status_includes_next_run_for_step_schedule():
+    status = status_helpers.build_cron_status(
+        {"cron": {"expression": "*/15 * * * *", "timezone": "America/New_York"}},
+        now=datetime(2026, 4, 24, 11, 7, 30, tzinfo=ZoneInfo("America/New_York")),
+    )
+
+    assert status["active"] is None
+    assert status["enabled"] is None
+    assert status["active_state"] == "cron"
+    assert status["enabled_state"] == "cron"
+    assert status["next_run_text"] == "Fri 2026-04-24 11:15:00 EDT"
+    assert status["next_run_iso"] == "2026-04-24T11:15:00-04:00"
+
+
+def test_build_cron_status_honors_cron_timezone():
+    status = status_helpers.build_cron_status(
+        {"cron": {"expression": "0 9 * * *", "timezone": "America/Los_Angeles"}},
+        now=datetime(2026, 4, 24, 11, 7, 30, tzinfo=ZoneInfo("America/New_York")),
+    )
+
+    assert status["next_run_text"] == "Fri 2026-04-24 09:00:00 PDT"
+    assert status["next_run_iso"] == "2026-04-24T09:00:00-07:00"
 
 
 def test_select_next_run_picks_earliest_job():
@@ -180,3 +204,14 @@ def test_select_next_run_uses_fallback_when_no_concrete_schedule_exists():
         "next_run_text": "boot/login",
         "cadence_text": "every 30s",
     }
+
+
+def test_next_cron_occurrence_matches_weekday_or_day_of_month_rule():
+    next_run = status_helpers.next_cron_occurrence(
+        "0 8 2 * 6",
+        timezone_name="America/New_York",
+        now=datetime(2026, 4, 1, 9, 0, 0, tzinfo=ZoneInfo("America/New_York")),
+    )
+
+    assert next_run is not None
+    assert next_run.isoformat() == "2026-04-02T08:00:00-04:00"

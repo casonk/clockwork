@@ -569,6 +569,8 @@
                   {% endif %}
                 </span>
               </div>
+              {% endif %}
+              {% if job.timer or job.cron %}
               <div class="detail-row">
                 <span class="detail-label">Next</span>
                 {% if sys.next_run_text %}
