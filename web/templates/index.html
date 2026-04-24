@@ -300,6 +300,7 @@
     .drill-item .dk { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
     .drill-item .dv { font-family: var(--mono); font-size: 11.5px; margin-top: 2px; }
     .dv.ok   { color: var(--green); }
+    .dv.warn { color: var(--yellow); }
     .dv.fail { color: var(--red); }
     .dv.muted { color: var(--muted); }
 
@@ -325,8 +326,9 @@
     }
     .log-mini .log-line { display: block; line-height: 1.5; }
     .log-mini .log-line:hover { color: var(--text); }
-    .log-line.err { color: var(--red); }
-    .log-line.ok  { color: var(--green); }
+    .log-line.err  { color: var(--red); }
+    .log-line.warn { color: var(--yellow); }
+    .log-line.ok   { color: var(--green); }
 
     .drill-loading { color: var(--muted); font-size: 12px; font-style: italic; }
     .drill-error   { color: var(--red);   font-size: 12px; font-family: var(--mono); }
@@ -871,12 +873,13 @@
     const fmtTime = s => s && s !== 'n/a' && !s.startsWith('0 ') ? s : '—';
     const fmtCode = s => (s === '' || s === '0') ? (s === '0' ? '0 (ok)' : '—') : s;
 
-    const logLines = (d.recent_lines || []).map(ln => {
-      const low = ln.toLowerCase();
-      const cls = low.includes('error') || low.includes('fail') ? 'err'
-                : low.includes('finish') || low.includes('start') ? 'ok'
+    const entries = d.recent_entries || (d.recent_lines || []).map(ln => ({ text: ln, level: '' }));
+    const logLines = entries.map(entry => {
+      const cls = entry.level === 'fail' ? 'err'
+                : entry.level === 'warn' ? 'warn'
+                : entry.level === 'ok' ? 'ok'
                 : '';
-      const escaped = ln.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const escaped = entry.text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       return `<span class="log-line ${cls}">${escaped}</span>`;
     }).join('\n');
 
@@ -901,6 +904,10 @@
         <div class="drill-item">
           <div class="dk">Last success</div>
           <div class="dv ok">${d.last_success || '—'}</div>
+        </div>
+        <div class="drill-item">
+          <div class="dk">Last warning</div>
+          <div class="dv warn">${d.last_warning || '—'}</div>
         </div>
         <div class="drill-item">
           <div class="dk">Last failure</div>

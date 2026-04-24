@@ -42,6 +42,33 @@ def _resolve_manifest_path(canonical_rel: str) -> Path:
     return local if local.exists() else canonical
 
 
+def _journal_timestamp(line: str) -> str:
+    return line[:25].strip()
+
+
+def _is_zero_error_summary(line: str) -> bool:
+    low = line.lower()
+    return "done:" in low and "0 error(s)" in low
+
+
+def _journal_line_level(line: str) -> str:
+    low = line.lower()
+    if "warning" in low or "non-fatal" in low:
+        return "warn"
+    if _is_zero_error_summary(line) or "finished" in low or "succeeded" in low:
+        return "ok"
+    if "failed" in low or "error" in low:
+        return "fail"
+    if "start" in low:
+        return "ok"
+    return ""
+
+
+def _journal_line_counts_as_success(line: str) -> bool:
+    low = line.lower()
+    return _is_zero_error_summary(line) or "finished" in low or "succeeded" in low
+
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("CLOCKWORK_WEB_SECRET") or secrets.token_hex(32)
 
@@ -763,19 +790,23 @@ def job_details():
     # Recent journal lines (last 40)
     _, log_out = _journalctl(*unit_flags, "-n", "40", "--no-pager", "-o", "short-iso", scope=scope)
     recent = [ln for ln in log_out.splitlines() if ln.strip()]
+    recent_entries = [{"text": ln, "level": _journal_line_level(ln)} for ln in recent]
 
     # Scan journal for last success and last failure timestamps
     _, scan_out = _journalctl(
         *unit_flags, "-n", "500", "--no-pager", "-o", "short-iso", scope=scope
     )
     last_success: str | None = None
+    last_warning: str | None = None
     last_failure: str | None = None
     for line in scan_out.splitlines():
-        low = line.lower()
-        if "finished" in low or ("succeeded" in low):
-            last_success = line[:25].strip()
-        if "failed" in low or "error" in low:
-            last_failure = line[:25].strip()
+        level = _journal_line_level(line)
+        if _journal_line_counts_as_success(line):
+            last_success = _journal_timestamp(line)
+        elif level == "warn":
+            last_warning = _journal_timestamp(line)
+        elif level == "fail":
+            last_failure = _journal_timestamp(line)
 
     return jsonify(
         {
@@ -787,7 +818,9 @@ def job_details():
             "last_exit_code": info.get("ExecMainStatus", ""),
             "n_restarts": info.get("NRestarts", ""),
             "last_success": last_success,
+            "last_warning": last_warning,
             "last_failure": last_failure,
+            "recent_entries": recent_entries,
             "recent_lines": recent,
             "log_url": f"/logs/{unit}?scope={scope}",
         }
