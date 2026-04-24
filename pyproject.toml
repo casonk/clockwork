@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "black"]
+dev = ["pytest", "ruff", "black", "flask>=3.0", "tomlkit>=0.12"]
 web = ["flask>=3.0", "tomlkit>=0.12"]
 
 [project.scripts]
