@@ -80,3 +80,74 @@ def test_edit_job_updates_agent_provider_and_model_defaults(tmp_path, monkeypatc
     assert job["description"] == "Daily bug review"
     assert job["environment"]["BUG_SWEEP_AGENTIC_PROVIDER"] == "claude"
     assert job["environment"]["BUG_SWEEP_AGENTIC_MODEL"] == "claude-sonnet-4-6"
+
+
+def test_job_details_treats_non_fatal_log_lines_as_warnings(monkeypatch):
+    monkeypatch.setattr(
+        web_app,
+        "_systemctl",
+        lambda *args, scope="user": (
+            0,
+            "\n".join(
+                [
+                    "Result=success",
+                    "ActiveEnterTimestamp=Thu 2026-04-24 11:00:00 EDT",
+                    "InactiveEnterTimestamp=",
+                    "ExecMainStatus=0",
+                    "NRestarts=0",
+                ]
+            ),
+        ),
+    )
+    logs = "\n".join(
+        [
+            "2026-04-24T11:50:43-0400 desk bash[1]: password-retrieval notification failed (non-fatal): shock-relay email notification failed with exit code 2",
+            "2026-04-24T11:50:46-0400 desk bash[1]: [email] done: 0 attachment(s), 0 inline, 0 error(s)",
+        ]
+    )
+    monkeypatch.setattr(web_app, "_journalctl", lambda *args, scope="user": (0, logs))
+
+    client = web_app.app.test_client()
+    response = client.get("/api/job-details?unit=intake-daemon.service&scope=user")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["last_warning"] == "2026-04-24T11:50:43-0400"
+    assert payload["last_failure"] is None
+    assert payload["last_success"] == "2026-04-24T11:50:46-0400"
+    assert payload["recent_entries"][0]["level"] == "warn"
+    assert payload["recent_entries"][1]["level"] == "ok"
+
+
+def test_job_details_keeps_real_error_lines_as_failures(monkeypatch):
+    monkeypatch.setattr(
+        web_app,
+        "_systemctl",
+        lambda *args, scope="user": (
+            0,
+            "\n".join(
+                [
+                    "Result=failed",
+                    "ActiveEnterTimestamp=Thu 2026-04-24 11:00:00 EDT",
+                    "InactiveEnterTimestamp=Thu 2026-04-24 11:05:12 EDT",
+                    "ExecMainStatus=1",
+                    "NRestarts=0",
+                ]
+            ),
+        ),
+    )
+    logs = "\n".join(
+        [
+            "2026-04-24T11:05:12-0400 desk bash[1]: [email] ERROR: Email fetch failed: command: SELECT => System Error",
+        ]
+    )
+    monkeypatch.setattr(web_app, "_journalctl", lambda *args, scope="user": (0, logs))
+
+    client = web_app.app.test_client()
+    response = client.get("/api/job-details?unit=intake-daemon.service&scope=user")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["last_warning"] is None
+    assert payload["last_failure"] == "2026-04-24T11:05:12-0400"
+    assert payload["recent_entries"][0]["level"] == "fail"
