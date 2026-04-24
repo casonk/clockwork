@@ -46,6 +46,21 @@ def _journal_timestamp(line: str) -> str:
     return line[:25].strip()
 
 
+def _systemd_timestamp_value(value: str) -> str:
+    text = str(value or "").strip()
+    if not text or text in {"0", "n/a", "[not set]"} or text.startswith("0 "):
+        return ""
+    return text
+
+
+def _first_systemd_timestamp(*values: str) -> str:
+    for value in values:
+        text = _systemd_timestamp_value(value)
+        if text:
+            return text
+    return ""
+
+
 def _is_zero_error_summary(line: str) -> bool:
     low = line.lower()
     return "done:" in low and "0 error(s)" in low
@@ -769,6 +784,8 @@ def job_details():
         "Result",
         "ActiveEnterTimestamp",
         "InactiveEnterTimestamp",
+        "InactiveExitTimestamp",
+        "ExecMainStartTimestamp",
         "ExecMainStatus",
         "ExecMainExitTimestamp",
         "NRestarts",
@@ -776,11 +793,22 @@ def job_details():
     # Execution properties live on the service unit, not the timer
     show_unit = unit[:-6] + ".service" if unit.endswith(".timer") else unit
     rc, show_out = _systemctl("show", show_unit, f"--property={','.join(props)}", scope=scope)
-    info: dict[str, str] = {}
-    for line in show_out.splitlines():
-        if "=" in line:
-            k, v = line.split("=", 1)
-            info[k] = v.strip()
+    info = parse_show_properties(show_out)
+    timer_info: dict[str, str] = {}
+    if unit.endswith(".timer"):
+        _, timer_out = _systemctl("show", unit, "--property=LastTriggerUSec", scope=scope)
+        timer_info = parse_show_properties(timer_out)
+
+    last_started = _first_systemd_timestamp(
+        info.get("ActiveEnterTimestamp", ""),
+        info.get("ExecMainStartTimestamp", ""),
+        info.get("InactiveExitTimestamp", ""),
+        timer_info.get("LastTriggerUSec", ""),
+    )
+    last_finished = _first_systemd_timestamp(
+        info.get("InactiveEnterTimestamp", ""),
+        info.get("ExecMainExitTimestamp", ""),
+    )
 
     # Build journal args covering both timer and service units
     unit_flags: list[str] = []
@@ -813,8 +841,8 @@ def job_details():
             "unit": unit,
             "scope": scope,
             "result": info.get("Result", ""),
-            "last_active": info.get("ActiveEnterTimestamp", ""),
-            "last_inactive": info.get("InactiveEnterTimestamp", ""),
+            "last_active": last_started,
+            "last_inactive": last_finished,
             "last_exit_code": info.get("ExecMainStatus", ""),
             "n_restarts": info.get("NRestarts", ""),
             "last_success": last_success,

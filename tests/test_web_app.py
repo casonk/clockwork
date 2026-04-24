@@ -151,3 +151,68 @@ def test_job_details_keeps_real_error_lines_as_failures(monkeypatch):
     assert payload["last_warning"] is None
     assert payload["last_failure"] == "2026-04-24T11:05:12-0400"
     assert payload["recent_entries"][0]["level"] == "fail"
+
+
+def test_job_details_uses_exec_start_and_inactive_exit_for_completed_oneshot(monkeypatch):
+    monkeypatch.setattr(
+        web_app,
+        "_systemctl",
+        lambda *args, scope="user": (
+            0,
+            "\n".join(
+                [
+                    "Result=success",
+                    "ActiveEnterTimestamp=",
+                    "InactiveEnterTimestamp=Thu 2026-04-24 11:05:12 EDT",
+                    "InactiveExitTimestamp=Thu 2026-04-24 11:05:01 EDT",
+                    "ExecMainStartTimestamp=Thu 2026-04-24 11:05:02 EDT",
+                    "ExecMainExitTimestamp=Thu 2026-04-24 11:05:11 EDT",
+                    "ExecMainStatus=0",
+                    "NRestarts=0",
+                ]
+            ),
+        ),
+    )
+    monkeypatch.setattr(web_app, "_journalctl", lambda *args, scope="user": (0, ""))
+
+    client = web_app.app.test_client()
+    response = client.get("/api/job-details?unit=archility-weekly.service&scope=user")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["last_active"] == "Thu 2026-04-24 11:05:02 EDT"
+    assert payload["last_inactive"] == "Thu 2026-04-24 11:05:12 EDT"
+
+
+def test_job_details_uses_timer_last_trigger_when_service_start_timestamps_are_blank(monkeypatch):
+    def fake_systemctl(*args, scope="user"):
+        unit = args[1]
+        if unit == "intake-daemon.service":
+            return (
+                0,
+                "\n".join(
+                    [
+                        "Result=success",
+                        "ActiveEnterTimestamp=",
+                        "InactiveEnterTimestamp=",
+                        "InactiveExitTimestamp=",
+                        "ExecMainStartTimestamp=",
+                        "ExecMainExitTimestamp=",
+                        "ExecMainStatus=0",
+                        "NRestarts=0",
+                    ]
+                ),
+            )
+        if unit == "intake-daemon.timer":
+            return (0, "LastTriggerUSec=Thu 2026-04-24 11:10:00 EDT")
+        raise AssertionError(f"unexpected unit {unit}")
+
+    monkeypatch.setattr(web_app, "_systemctl", fake_systemctl)
+    monkeypatch.setattr(web_app, "_journalctl", lambda *args, scope="user": (0, ""))
+
+    client = web_app.app.test_client()
+    response = client.get("/api/job-details?unit=intake-daemon.timer&scope=user")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["last_active"] == "Thu 2026-04-24 11:10:00 EDT"
