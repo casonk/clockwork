@@ -3,18 +3,32 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "clockwork"
+name = "casonk-clockwork"
 version = "0.1.0"
 description = "Shared cron and systemd manifest rendering for portfolio schedulers."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
-  { name = "Cason Konzer" },
+  { name = "Cason Konzer", email = "casonk@umich.edu" },
+]
+keywords = ["cron", "systemd", "scheduler", "manifest", "devops"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Operating System :: POSIX :: Linux",
+  "Topic :: System :: Systems Administration",
+  "Topic :: Utilities",
+  "License :: OSI Approved :: MIT License",
 ]
 dependencies = [
   "tomli>=2; python_version < '3.11'",
 ]
+
+[project.urls]
+Homepage = "https://github.com/casonk/clockwork"
+Repository = "https://github.com/casonk/clockwork"
+Changelog = "https://github.com/casonk/clockwork/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff", "black", "flask>=3.0", "tomlkit>=0.12"]
