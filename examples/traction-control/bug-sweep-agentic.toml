@@ -24,3 +24,8 @@ on_boot_sec = "90m"
 on_unit_active_sec = "1d"
 persistent = true
 randomized_delay_sec = "1800"
+
+[jobs.cron]
+expression = "0 0 * * *"
+command = "mkdir -p $HOME/.local/share/bug-sweep-agentic/runs && cd $HOME/git/util-repos/traction-control && %h/git/util-repos/traction-control/scripts/bug_sweep_agentic.sh >> $HOME/.local/share/bug-sweep-agentic/runs/cron.log 2>&1"
+comments = ["Auto-generated from systemd timer: every 1d"]
