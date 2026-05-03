@@ -653,6 +653,30 @@ def toggle_job():
     return redirect(url_for("index"))
 
 
+@app.post("/restart/job")
+def restart_job():
+    mpath = request.form["manifest_path"]
+    jname = request.form["job_name"]
+    repos = scan_repos()
+    job_data = next(
+        (
+            j
+            for repo in repos.values()
+            for m in repo["manifests"]
+            if m["path"] == mpath
+            for j in m["jobs"]
+            if j["name"] == jname
+        ),
+        None,
+    )
+    if job_data:
+        unit = primary_unit(job_data)
+        scope = job_data.get("scope", "user")
+        rc, out = _systemctl("restart", unit, scope=scope)
+        _flash_results([(f"systemctl restart {unit}", rc, out)])
+    return redirect(url_for("index"))
+
+
 @app.post("/toggle/target/job")
 def toggle_target_job():
     """Switch a job between systemd and cron, re-installing if enabled."""
