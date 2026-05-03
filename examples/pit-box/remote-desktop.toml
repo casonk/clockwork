@@ -1,0 +1,27 @@
+[[jobs]]
+name = "pit-box-guacd"
+service_name = "pit-box-guacd.service"
+description = "Guacamole Daemon (guacd) — RDP/VNC/SSH protocol proxy"
+scope = "system"
+service_type = "simple"
+exec_start = "/usr/bin/podman start pit-box-guacd"
+after = ["network-online.target"]
+restart = "on-failure"
+restart_sec = "5"
+standard_output = "journal"
+standard_error = "journal"
+service_install_wanted_by = ["multi-user.target"]
+
+[[jobs]]
+name = "pit-box-guacamole"
+service_name = "pit-box-guacamole.service"
+description = "Apache Guacamole — browser-based remote desktop gateway (iPhone Safari path)"
+scope = "system"
+service_type = "simple"
+exec_start = "/usr/bin/podman start pit-box-guacamole"
+after = ["network-online.target", "pit-box-guacd.service"]
+restart = "on-failure"
+restart_sec = "5"
+standard_output = "journal"
+standard_error = "journal"
+service_install_wanted_by = ["multi-user.target"]

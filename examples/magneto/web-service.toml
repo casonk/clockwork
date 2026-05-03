@@ -1,0 +1,39 @@
+[[jobs]]
+name = "magneto-web"
+description = "Magneto private torrent web UI — localhost Flask, mTLS terminated by Caddy"
+scope = "user"
+service_type = "simple"
+working_directory = "%h/git/util-repos/magneto"
+exec_start = "%h/git/util-repos/magneto/.venv/bin/magneto web"
+environment_files = ["%h/git/util-repos/magneto/config/magneto.env.local"]
+after = ["network-online.target"]
+wants = ["network-online.target"]
+restart = "on-failure"
+restart_sec = "5"
+standard_output = "journal"
+standard_error = "journal"
+service_install_wanted_by = ["default.target"]
+
+[[jobs]]
+name = "magneto-notify"
+description = "Magneto torrent completion/error notification poller"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h/git/util-repos/magneto"
+exec_start = "%h/git/util-repos/magneto/.venv/bin/magneto notify"
+environment_files = ["%h/git/util-repos/magneto/config/magneto.env.local"]
+after = ["network-online.target", "magneto-web.service"]
+wants = ["network-online.target"]
+standard_output = "journal"
+standard_error = "journal"
+
+[jobs.timer]
+kind = "interval"
+on_boot_sec = "2m"
+on_unit_active_sec = "5m"
+persistent = true
+
+[jobs.cron]
+expression = "*/5 * * * *"
+command = "cd $HOME/git/util-repos/magneto && $HOME/git/util-repos/magneto/.venv/bin/magneto notify >> $HOME/.local/share/magneto-notify/cron.log 2>&1"
+comments = ["Auto-generated from systemd timer: every 5m"]
