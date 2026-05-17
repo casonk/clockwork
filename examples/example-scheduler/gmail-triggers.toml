@@ -1,0 +1,47 @@
+[[jobs]]
+name = "pf-gmail-statement-triggers"
+description = "Personal Finance Gmail statement-notification scanner and download trigger"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h/git/example-scheduler"
+exec_start = "/usr/bin/env python3 %h/git/example-scheduler/scripts/all/gmail_statement_triggers.py --config %h/git/example-scheduler/scripts/all/gmail_statement_triggers.local.json"
+after = ["network-online.target"]
+wants = ["network-online.target"]
+timer_description = "Personal Finance Gmail statement triggers timer"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "*-*-* 00/4:00"
+accuracy_sec = "10m"
+
+[jobs.cron]
+expression = "0 */4 * * *"
+command = "cd $HOME/git/example-scheduler && /usr/bin/env python3 scripts/all/gmail_statement_triggers.py --config scripts/all/gmail_statement_triggers.local.json >> artifacts/all/gmail_statement_triggers/runs/cron.log 2>&1"
+comments = [
+  "Scans Gmail every 4 hours for statement notifications and triggers downloads.",
+  "Update the repo path placeholder before installing.",
+]
+
+[[jobs]]
+name = "pf-gmail-credit-score-triggers"
+description = "Personal Finance Gmail credit-score-notification scanner and review trigger"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h/git/example-scheduler"
+exec_start = "/usr/bin/env python3 %h/git/example-scheduler/scripts/all/gmail_credit_score_triggers.py --config %h/git/example-scheduler/scripts/all/gmail_credit_score_triggers.local.json"
+after = ["network-online.target"]
+wants = ["network-online.target"]
+timer_description = "Personal Finance Gmail credit score triggers timer"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "*-*-* 02/6:00"
+accuracy_sec = "10m"
+
+[jobs.cron]
+expression = "0 2,8,14,20 * * *"
+command = "cd $HOME/git/example-scheduler && /usr/bin/env python3 scripts/all/gmail_credit_score_triggers.py --config scripts/all/gmail_credit_score_triggers.local.json >> artifacts/all/gmail_credit_score_triggers/runs/cron.log 2>&1"
+comments = [
+  "Scans Gmail every 6 hours (at 02:00, 08:00, 14:00, 20:00) for credit score alerts.",
+  "Update the repo path placeholder before installing.",
+]
