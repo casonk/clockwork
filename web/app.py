@@ -38,6 +38,9 @@ STATE_FILE = BASE_DIR / "config" / "web-state.json"
 GROCERIES_FILE = Path(
     os.environ.get("CLOCKWORK_GROCERIES_FILE", BASE_DIR / "config" / "groceries.json")
 )
+WIRING_HARNESS_DIR = Path(
+    os.environ.get("CLOCKWORK_WIRING_HARNESS_DIR", BASE_DIR.parent / "wiring-harness")
+)
 
 
 def _resolve_manifest_path(canonical_rel: str) -> Path:
@@ -1014,6 +1017,87 @@ def groceries_reset():
 
 def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+# ---------------------------------------------------------------------------
+# Routes — home portal
+# ---------------------------------------------------------------------------
+
+_SERVICE_ICONS: dict[str, str] = {
+    "clockwork-web": "⏰",
+    "tachometer-dashboard": "📊",
+    "intake-reports": "📬",
+    "snowbridge-filebrowser": "📁",
+    "pit-box-webterm": "💻",
+    "pit-box-cockpit": "🔧",
+    "pit-box-rdp": "🖥️",
+    "pit-box-remote-desktop": "🖥️",
+    "nordility-web": "🛡️",
+    "magneto-web": "🧲",
+    "session-control": "🤖",
+}
+
+_REPO_GROUP: dict[str, str] = {
+    "./util-repos/clockwork": "Clockwork",
+    "./util-repos/tachometer": "Monitoring",
+    "./util-repos/intake": "Monitoring",
+    "./util-repos/snowbridge": "Infrastructure",
+    "./util-repos/pit-box": "Pit Box",
+    "./util-repos/nordility": "Infrastructure",
+    "./util-repos/magneto": "Infrastructure",
+    "./util-repos/session-control": "AI",
+}
+
+_GROUP_ORDER = ["Clockwork", "Monitoring", "Pit Box", "Infrastructure", "AI"]
+
+
+def _svc_url(svc: dict) -> str:
+    scheme = str(svc.get("url_scheme", "https"))
+    host = str(svc.get("hostname", ""))
+    port = svc.get("port") or svc.get("port_default")
+    mode = str(svc.get("access_mode", ""))
+    if scheme == "rdp":
+        return f"rdp://{host}:{port}"
+    if mode in ("shared-mtls", "snowbridge-mtls"):
+        return f"https://{host}"
+    return f"https://{host}:{port}" if port and port not in (80, 443) else f"https://{host}"
+
+
+def _load_portal_groups() -> list[tuple[str, list[dict]]]:
+    local = WIRING_HARNESS_DIR / "services.local.toml"
+    base = WIRING_HARNESS_DIR / "services.toml"
+    path = local if local.exists() else base
+    raw: list = list(tomlkit.loads(path.read_text()).get("services", [])) if path.exists() else []
+
+    groups: dict[str, list[dict]] = {g: [] for g in _GROUP_ORDER}
+    for svc in raw:
+        name = str(svc.get("name", ""))
+        group = _REPO_GROUP.get(str(svc.get("owner_repo", "")), "Other")
+        groups.setdefault(group, []).append({
+            "name": name,
+            "display": str(svc.get("description", name)),
+            "url": _svc_url(svc),
+            "hostname": str(svc.get("hostname", "")),
+            "access_mode": str(svc.get("access_mode", "")),
+            "icon": _SERVICE_ICONS.get(name, "🔗"),
+        })
+
+    groups["Clockwork"].append({
+        "name": "clockwork-groceries",
+        "display": "Groceries",
+        "url": "/groceries",
+        "hostname": "",
+        "access_mode": "shared-mtls",
+        "icon": "🛒",
+    })
+
+    ordered = _GROUP_ORDER + sorted(set(groups) - set(_GROUP_ORDER))
+    return [(g, cards) for g in ordered if (cards := groups.get(g))]
+
+
+@app.get("/home")
+def home():
+    return render_template("home.html", groups=_load_portal_groups())
 
 
 # ---------------------------------------------------------------------------
