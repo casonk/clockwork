@@ -35,7 +35,9 @@ except ModuleNotFoundError:
 BASE_DIR = Path(__file__).parent.parent
 EXAMPLES_DIR = BASE_DIR / "examples"
 STATE_FILE = BASE_DIR / "config" / "web-state.json"
-GROCERIES_FILE = BASE_DIR / "config" / "groceries.json"
+GROCERIES_FILE = Path(
+    os.environ.get("CLOCKWORK_GROCERIES_FILE", BASE_DIR / "config" / "groceries.json")
+)
 
 
 def _resolve_manifest_path(canonical_rel: str) -> Path:
