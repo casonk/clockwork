@@ -36,6 +36,27 @@ BUG_SWEEP_AGENTIC_MODEL = ""
     )
 
 
+def _write_interval_manifest(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        """[[jobs]]
+name = "shock-relay-gmail-digest"
+description = "Send queued Gmail notification digest emails"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h/git/util-repos/shock-relay"
+exec_start = "/usr/bin/env python3 %h/git/util-repos/shock-relay/services/gmail-imap/send_digest.py"
+
+[jobs.timer]
+kind = "interval"
+on_boot_sec = "5m"
+on_unit_active_sec = "1h"
+persistent = true
+""",
+        encoding="utf-8",
+    )
+
+
 def test_scan_repos_includes_agent_provider_model_and_env_file(tmp_path, monkeypatch):
     manifest_path = tmp_path / "traction-control" / "bug-sweep-agentic.toml"
     _write_bug_sweep_manifest(manifest_path)
@@ -80,6 +101,34 @@ def test_edit_job_updates_agent_provider_and_model_defaults(tmp_path, monkeypatc
     assert job["description"] == "Daily bug review"
     assert job["environment"]["BUG_SWEEP_AGENTIC_PROVIDER"] == "claude"
     assert job["environment"]["BUG_SWEEP_AGENTIC_MODEL"] == "claude-sonnet-4-6"
+
+
+def test_edit_job_updates_interval_timer_cadence(tmp_path, monkeypatch):
+    manifest_path = tmp_path / "shock-relay" / "gmail-digest.toml"
+    _write_interval_manifest(manifest_path)
+    monkeypatch.setattr(web_app, "EXAMPLES_DIR", tmp_path)
+
+    client = web_app.app.test_client()
+    response = client.post(
+        "/edit/job",
+        data={
+            "manifest_path": "shock-relay/gmail-digest.toml",
+            "job_name": "shock-relay-gmail-digest",
+            "description": "Send queued digest emails",
+            "exec_start": "/usr/bin/env python3 %h/git/util-repos/shock-relay/services/gmail-imap/send_digest.py",
+            "working_directory": "%h/git/util-repos/shock-relay",
+            "on_boot_sec": "10m",
+            "on_unit_active_sec": "30m",
+        },
+        headers={"Origin": "http://localhost"},
+    )
+
+    assert response.status_code == 302
+
+    doc = tomlkit.loads(manifest_path.read_text(encoding="utf-8"))
+    timer = doc["jobs"][0]["timer"]
+    assert timer["on_boot_sec"] == "10m"
+    assert timer["on_unit_active_sec"] == "30m"
 
 
 def test_fetch_all_statuses_uses_cron_status_for_cron_only_and_cron_selected_jobs(monkeypatch):

@@ -59,3 +59,8 @@ should change how future sessions work in this repo.
   Repo-level state must be updated asymmetrically: always mark repos enabled
   during enable-all (even if all jobs were skipped), but only mark disabled
   during disable-all if at least one job was actually toggled.
+
+### 2026-06-07 — User-configurable timing needs interval fields in the web editor
+
+- If a scheduled workflow is meant to be tuned from the Clockwork web UI, expose `OnBootSec` and `OnUnitActiveSec` for interval timers, not only `OnCalendar` for calendar timers.
+- Keep workload behavior in the downstream repo; Clockwork should own the schedule manifest, install path, and web-editable cadence.

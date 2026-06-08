@@ -767,8 +767,19 @@ def edit_job():
         _set("exec_start")
         _set("working_directory")
 
-        if job.get("timer") and request.form.get("on_calendar", "").strip():
-            job["timer"]["on_calendar"] = request.form["on_calendar"].strip()
+        if job.get("timer"):
+            timer = job["timer"]
+            timer_kind = str(timer.get("kind", "")).strip()
+            on_calendar = request.form.get("on_calendar", "").strip()
+            on_boot_sec = request.form.get("on_boot_sec", "").strip()
+            on_unit_active_sec = request.form.get("on_unit_active_sec", "").strip()
+            if timer_kind == "calendar" and on_calendar:
+                timer["on_calendar"] = on_calendar
+            if timer_kind == "interval":
+                if on_boot_sec:
+                    timer["on_boot_sec"] = on_boot_sec
+                if on_unit_active_sec:
+                    timer["on_unit_active_sec"] = on_unit_active_sec
         if job.get("cron") and request.form.get("cron_expression", "").strip():
             job["cron"]["expression"] = request.form["cron_expression"].strip()
 
