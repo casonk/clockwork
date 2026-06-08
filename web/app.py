@@ -35,6 +35,7 @@ except ModuleNotFoundError:
 BASE_DIR = Path(__file__).parent.parent
 EXAMPLES_DIR = BASE_DIR / "examples"
 STATE_FILE = BASE_DIR / "config" / "web-state.json"
+GROCERIES_FILE = BASE_DIR / "config" / "groceries.json"
 
 
 def _resolve_manifest_path(canonical_rel: str) -> Path:
@@ -899,6 +900,118 @@ def job_logs(unit: str):
     _, out = _journalctl(*unit_flags, "-n", str(n), "--no-pager", "-o", "short-iso", scope=scope)
     lines = out.splitlines() if out else []
     return render_template("logs.html", unit=unit, scope=scope, lines=lines, n=n)
+
+
+# ---------------------------------------------------------------------------
+# Routes — groceries
+# ---------------------------------------------------------------------------
+
+
+def load_groceries() -> dict:
+    if GROCERIES_FILE.exists():
+        return json.loads(GROCERIES_FILE.read_text())
+    return {"categories": []}
+
+
+def save_groceries(data: dict) -> None:
+    GROCERIES_FILE.write_text(json.dumps(data, indent=2))
+
+
+def _find_category(data: dict, name: str) -> dict | None:
+    return next((c for c in data["categories"] if c["name"] == name), None)
+
+
+@app.get("/groceries")
+def groceries():
+    data = load_groceries()
+    total = sum(len(c["items"]) for c in data["categories"])
+    stocked = sum(1 for c in data["categories"] for i in c["items"] if i["stocked"])
+    return render_template("groceries.html", data=data, total=total, stocked=stocked)
+
+
+@app.post("/groceries/add-category")
+def groceries_add_category():
+    name = request.form.get("category", "").strip()
+    if not name:
+        flash("Category name cannot be empty.", "error")
+        return redirect(url_for("groceries"))
+    data = load_groceries()
+    if _find_category(data, name):
+        flash(f'Category "{name}" already exists.', "error")
+        return redirect(url_for("groceries"))
+    data["categories"].append({"name": name, "items": []})
+    save_groceries(data)
+    return redirect(url_for("groceries"))
+
+
+@app.post("/groceries/delete-category")
+def groceries_delete_category():
+    name = request.form.get("category", "").strip()
+    data = load_groceries()
+    data["categories"] = [c for c in data["categories"] if c["name"] != name]
+    save_groceries(data)
+    return redirect(url_for("groceries"))
+
+
+@app.post("/groceries/add-item")
+def groceries_add_item():
+    category = request.form.get("category", "").strip()
+    item_name = request.form.get("item", "").strip()
+    if not item_name:
+        return redirect(url_for("groceries"))
+    data = load_groceries()
+    cat = _find_category(data, category)
+    if cat is None:
+        flash(f'Category "{category}" not found.', "error")
+        return redirect(url_for("groceries"))
+    if any(i["name"].lower() == item_name.lower() for i in cat["items"]):
+        flash(f'"{item_name}" is already in {category}.', "error")
+        return redirect(url_for("groceries"))
+    cat["items"].append({"name": item_name, "stocked": False})
+    save_groceries(data)
+    return redirect(url_for("groceries") + f"#{_slug(category)}")
+
+
+@app.post("/groceries/toggle-item")
+def groceries_toggle_item():
+    category = request.form.get("category", "").strip()
+    item_name = request.form.get("item", "").strip()
+    data = load_groceries()
+    cat = _find_category(data, category)
+    if cat:
+        for item in cat["items"]:
+            if item["name"] == item_name:
+                item["stocked"] = not item["stocked"]
+                break
+    save_groceries(data)
+    return redirect(url_for("groceries") + f"#{_slug(category)}")
+
+
+@app.post("/groceries/delete-item")
+def groceries_delete_item():
+    category = request.form.get("category", "").strip()
+    item_name = request.form.get("item", "").strip()
+    data = load_groceries()
+    cat = _find_category(data, category)
+    if cat:
+        cat["items"] = [i for i in cat["items"] if i["name"] != item_name]
+    save_groceries(data)
+    return redirect(url_for("groceries") + f"#{_slug(category)}")
+
+
+@app.post("/groceries/reset")
+def groceries_reset():
+    data = load_groceries()
+    for cat in data["categories"]:
+        for item in cat["items"]:
+            item["stocked"] = False
+    save_groceries(data)
+    flash("All items marked as not stocked.", "success")
+    return redirect(url_for("groceries"))
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
 
 
 # ---------------------------------------------------------------------------

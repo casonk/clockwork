@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Groceries — Clockwork</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f1117;
+      --surface:   #1a1d27;
+      --surface2:  #22263a;
+      --surface3:  #191c2a;
+      --border:    #2e3250;
+      --accent:    #5b7fff;
+      --accent-dim:#2d3f8a;
+      --green:     #3ecf6e;
+      --green-dim: #1a4d30;
+      --red:       #e05252;
+      --red-dim:   #4d1a1a;
+      --yellow:    #e0b832;
+      --yellow-dim:#4d3d0a;
+      --text:      #e2e4f0;
+      --muted:     #8890b0;
+      --mono:      "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      gap: 12px;
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .back-link {
+      font-size: 20px; text-decoration: none;
+      opacity: 0.7; transition: opacity 0.15s;
+    }
+    .back-link:hover { opacity: 1; }
+    header h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; }
+    .subtitle { color: var(--muted); font-size: 12px; }
+
+    /* ── Progress bar ── */
+    .progress-bar {
+      height: 3px;
+      background: var(--border);
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--green);
+      transition: width 0.3s;
+    }
+
+    /* ── Flash ── */
+    .flash-list {
+      max-width: 680px;
+      margin: 14px auto 0;
+      padding: 0 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .flash {
+      padding: 8px 12px;
+      border-radius: 7px;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .flash.success { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+    .flash.error   { background: var(--red-dim);   color: var(--red);   border: 1px solid var(--red); }
+    .flash-close {
+      margin-left: auto; background: none; border: none; color: inherit;
+      cursor: pointer; font-size: 14px; line-height: 1; opacity: 0.7;
+    }
+    .flash-close:hover { opacity: 1; }
+
+    /* ── Layout ── */
+    main { max-width: 680px; margin: 0 auto; padding: 18px 14px 100px; }
+
+    /* ── Empty state ── */
+    .empty-state {
+      text-align: center; color: var(--muted);
+      padding: 48px 24px; font-size: 14px;
+    }
+    .empty-state p { margin-bottom: 6px; }
+
+    /* ── Category card ── */
+    .category {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 14px;
+      overflow: hidden;
+    }
+
+    .category-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface2);
+    }
+    .category-name {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+      color: var(--muted);
+      flex: 1;
+    }
+    .category-count {
+      font-size: 11px; padding: 2px 8px; border-radius: 99px;
+      background: var(--surface); color: var(--muted); border: 1px solid var(--border);
+    }
+    .category-count .needs { color: var(--red); font-weight: 700; }
+
+    /* ── Item list ── */
+    .items { padding: 6px 0; }
+
+    .item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 14px;
+      min-height: 44px;
+    }
+    .item:not(:last-child) {
+      border-bottom: 1px solid rgba(46,50,80,0.4);
+    }
+
+    /* Toggle checkbox — submitted as a form button */
+    .check-form { flex-shrink: 0; }
+    .check-btn {
+      width: 26px; height: 26px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 6px;
+      border: 2px solid var(--border);
+      background: transparent;
+      cursor: pointer;
+      font-size: 13px;
+      transition: background 0.15s, border-color 0.15s;
+      flex-shrink: 0;
+    }
+    .check-btn.stocked {
+      background: var(--green-dim);
+      border-color: var(--green);
+      color: var(--green);
+    }
+    .check-btn.not-stocked {
+      background: transparent;
+      border-color: var(--border);
+      color: transparent;
+    }
+    .check-btn.not-stocked:hover {
+      border-color: var(--muted);
+    }
+
+    .item-name {
+      flex: 1;
+      font-size: 14px;
+      user-select: none;
+    }
+    .item-name.stocked {
+      color: var(--muted);
+      text-decoration: line-through;
+      text-decoration-color: var(--muted);
+    }
+    .item-name.not-stocked {
+      color: var(--text);
+    }
+
+    .delete-form { flex-shrink: 0; }
+    .delete-btn {
+      width: 26px; height: 26px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 6px; border: 1px solid transparent;
+      background: transparent; color: var(--muted);
+      font-size: 15px; cursor: pointer; line-height: 1;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+      opacity: 0.4;
+    }
+    .item:hover .delete-btn { opacity: 1; }
+    .delete-btn:hover { color: var(--red); border-color: var(--red-dim); background: var(--red-dim); }
+
+    /* ── Add item row ── */
+    .add-item-row {
+      display: flex;
+      gap: 8px;
+      padding: 10px 14px;
+      border-top: 1px solid var(--border);
+      background: var(--surface3);
+    }
+    .add-item-row input[type="text"] {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 10px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+      min-width: 0;
+    }
+    .add-item-row input[type="text"]:focus { border-color: var(--accent); }
+    .add-item-row input[type="text"]::placeholder { color: var(--muted); }
+    .add-item-btn {
+      padding: 7px 14px;
+      border-radius: 6px;
+      border: none;
+      background: var(--accent-dim);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: filter 0.15s;
+    }
+    .add-item-btn:hover { filter: brightness(1.2); }
+
+    /* ── Delete category button ── */
+    .cat-delete-btn {
+      width: 24px; height: 24px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 5px; border: 1px solid transparent;
+      background: transparent; color: var(--muted);
+      font-size: 14px; cursor: pointer; line-height: 1;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+      opacity: 0.5;
+    }
+    .cat-delete-btn:hover { opacity: 1; color: var(--red); border-color: var(--red-dim); background: var(--red-dim); }
+
+    /* ── Add category strip ── */
+    .add-category {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      gap: 8px;
+    }
+    .add-category input[type="text"] {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+      min-width: 0;
+    }
+    .add-category input[type="text"]:focus { border-color: var(--accent); }
+    .add-category input[type="text"]::placeholder { color: var(--muted); }
+    .add-category-btn {
+      padding: 8px 16px;
+      border-radius: 6px;
+      border: 1px solid var(--accent-dim);
+      background: transparent;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .add-category-btn:hover { background: var(--accent-dim); }
+
+    /* ── Reset button ── */
+    .reset-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 12px; border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface2); color: var(--muted);
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+      white-space: nowrap;
+    }
+    .reset-btn:hover { color: var(--yellow); border-color: var(--yellow); }
+
+    /* ── Mobile ── */
+    @media (max-width: 600px) {
+      header { flex-wrap: wrap; padding: 10px 14px; }
+      .item { min-height: 48px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <a href="/" class="back-link" title="Back to Clockwork">⏰</a>
+    <div>
+      <h1>🛒 Groceries</h1>
+      <div class="subtitle">
+        {% if total == 0 %}No items yet{% else %}{{ stocked }} / {{ total }} stocked{% endif %}
+      </div>
+    </div>
+  </div>
+  <form method="post" action="/groceries/reset">
+    <button type="submit" class="reset-btn" title="Mark everything as not stocked">↺ Reset</button>
+  </form>
+</header>
+
+{% if total > 0 %}
+<div class="progress-bar">
+  <div class="progress-fill" style="width: {{ (stocked / total * 100) | int }}%"></div>
+</div>
+{% endif %}
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<div class="flash-list">
+  {% for cat, msg in messages %}
+  <div class="flash {{ cat }}">
+    <span>{{ '✓' if cat == 'success' else '✗' }}&nbsp;{{ msg }}</span>
+    <button class="flash-close" onclick="this.parentElement.remove()">×</button>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endwith %}
+
+<main>
+  {% if not data.categories %}
+  <div class="empty-state">
+    <p>No categories yet.</p>
+    <p>Add a category below to get started.</p>
+  </div>
+  {% endif %}
+
+  {% for cat in data.categories %}
+  {% set cat_slug = cat.name | lower | replace(' ', '-') %}
+  {% set needs = cat.items | selectattr('stocked', 'false') | list | length %}
+  <div class="category" id="{{ cat_slug }}">
+
+    <div class="category-header">
+      <span class="category-name">{{ cat.name }}</span>
+      <span class="category-count">
+        {% if needs > 0 %}<span class="needs">{{ needs }} needed</span>{% else %}all stocked{% endif %}
+      </span>
+      <form method="post" action="/groceries/delete-category" style="line-height:0">
+        <input type="hidden" name="category" value="{{ cat.name }}">
+        <button type="submit" class="cat-delete-btn" title="Delete category">×</button>
+      </form>
+    </div>
+
+    <div class="items">
+      {# Not-stocked items first, then stocked #}
+      {% set ns_items = cat.items | selectattr('stocked', 'false') | list %}
+      {% set s_items  = cat.items | selectattr('stocked', 'true')  | list %}
+      {% for item in ns_items + s_items %}
+      <div class="item">
+        <form class="check-form" method="post" action="/groceries/toggle-item">
+          <input type="hidden" name="category" value="{{ cat.name }}">
+          <input type="hidden" name="item"     value="{{ item.name }}">
+          <button type="submit"
+                  class="check-btn {{ 'stocked' if item.stocked else 'not-stocked' }}"
+                  title="{{ 'Mark as needed' if item.stocked else 'Mark as stocked' }}">
+            {% if item.stocked %}✓{% endif %}
+          </button>
+        </form>
+
+        <span class="item-name {{ 'stocked' if item.stocked else 'not-stocked' }}">
+          {{ item.name }}
+        </span>
+
+        <form class="delete-form" method="post" action="/groceries/delete-item">
+          <input type="hidden" name="category" value="{{ cat.name }}">
+          <input type="hidden" name="item"     value="{{ item.name }}">
+          <button type="submit" class="delete-btn" title="Remove item">×</button>
+        </form>
+      </div>
+      {% else %}
+      <div class="item" style="color: var(--muted); font-size: 12px; font-style: italic;">
+        No items — add one below.
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="add-item-row">
+      <form method="post" action="/groceries/add-item" style="display:contents">
+        <input type="hidden" name="category" value="{{ cat.name }}">
+        <input type="text" name="item" placeholder="Add item…" autocomplete="off">
+        <button type="submit" class="add-item-btn">+ Add</button>
+      </form>
+    </div>
+
+  </div>
+  {% endfor %}
+
+  <div class="add-category">
+    <form method="post" action="/groceries/add-category" style="display:contents">
+      <input type="text" name="category" placeholder="New category (e.g. Dairy, Produce)…" autocomplete="off">
+      <button type="submit" class="add-category-btn">+ Category</button>
+    </form>
+  </div>
+</main>
+
+</body>
+</html>
