@@ -380,35 +380,31 @@
 
     /* ── Mobile ── */
     @media (max-width: 640px) {
-      header {
-        flex-wrap: wrap;
-        gap: 10px;
-        padding: 10px 14px;
-      }
-      .global-controls {
-        width: 100%;
-        gap: 10px;
-      }
+      header { flex-wrap: wrap; gap: 10px; padding: 10px 14px; }
+      .global-controls { width: 100%; gap: 10px; }
       main { padding: 14px 10px 60px; }
 
-      .repo-header { flex-wrap: wrap; padding: 10px 12px; }
-      .repo-title { gap: 6px; }
-      .repo-controls { width: 100%; }
+      /* Repo header: keep title + controls in one row; let the title shrink */
+      .repo-header { padding: 10px 12px; gap: 8px; }
+      .repo-title { flex: 1; min-width: 0; gap: 6px; }
+      .repo-title h2 { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .badge.repo-next { display: none; }   /* hides the verbose "Next in X" badge */
 
-      .job-main { padding: 10px 10px; }
-      .job-header { flex-wrap: wrap; gap: 8px; }
+      /* Job header: name column grows, actions scroll sideways — no secondary wrapping */
+      .job-main { padding: 10px; }
+      .job-header { gap: 8px; align-items: flex-start; }
+      .job-header > div:first-child { flex: 1; min-width: 0; }
       .job-actions {
-        flex-shrink: 1;
-        width: 100%;
-        justify-content: flex-start;
+        flex-shrink: 0;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        max-width: 55vw;
       }
+      .job-actions::-webkit-scrollbar { display: none; }
 
-      .modal {
-        margin: 12px;
-        max-width: calc(100% - 24px);
-        padding: 18px;
-      }
-
+      .modal { margin: 12px; max-width: calc(100% - 24px); padding: 18px; }
       .drill-grid { grid-template-columns: 1fr; gap: 6px; }
     }
   </style>
