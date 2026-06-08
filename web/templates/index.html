@@ -377,6 +377,40 @@
 
     .hidden { display: none; }
     .empty  { text-align: center; color: var(--muted); padding: 28px; font-size: 13px; }
+
+    /* ── Mobile ── */
+    @media (max-width: 640px) {
+      header {
+        flex-wrap: wrap;
+        gap: 10px;
+        padding: 10px 14px;
+      }
+      .global-controls {
+        width: 100%;
+        gap: 10px;
+      }
+      main { padding: 14px 10px 60px; }
+
+      .repo-header { flex-wrap: wrap; padding: 10px 12px; }
+      .repo-title { gap: 6px; }
+      .repo-controls { width: 100%; }
+
+      .job-main { padding: 10px 10px; }
+      .job-header { flex-wrap: wrap; gap: 8px; }
+      .job-actions {
+        flex-shrink: 1;
+        width: 100%;
+        justify-content: flex-start;
+      }
+
+      .modal {
+        margin: 12px;
+        max-width: calc(100% - 24px);
+        padding: 18px;
+      }
+
+      .drill-grid { grid-template-columns: 1fr; gap: 6px; }
+    }
   </style>
 </head>
 <body>
@@ -698,9 +732,19 @@
       </div>
       <div id="timer-section" class="hidden">
         <div class="form-section-title">systemd Timer</div>
-        <div class="form-group">
+        <div id="timer-calendar-group" class="form-group hidden">
           <label>On Calendar</label>
           <input type="text" name="on_calendar" id="f-on-calendar" placeholder="e.g. *-*-* 09:35">
+        </div>
+        <div id="timer-interval-group" class="hidden">
+          <div class="form-group">
+            <label>On Boot</label>
+            <input type="text" name="on_boot_sec" id="f-on-boot-sec" placeholder="e.g. 5m">
+          </div>
+          <div class="form-group">
+            <label>Every</label>
+            <input type="text" name="on_unit_active_sec" id="f-on-unit-active-sec" placeholder="e.g. 1h">
+          </div>
         </div>
       </div>
       <div id="cron-section" class="hidden">
@@ -818,10 +862,31 @@
     }
 
     const timerSec = document.getElementById('timer-section');
-    if (job.timer && job.timer.on_calendar !== undefined) {
+    const timerCalendarGroup = document.getElementById('timer-calendar-group');
+    const timerIntervalGroup = document.getElementById('timer-interval-group');
+    document.getElementById('f-on-calendar').value = '';
+    document.getElementById('f-on-boot-sec').value = '';
+    document.getElementById('f-on-unit-active-sec').value = '';
+    if (job.timer) {
       timerSec.classList.remove('hidden');
+      if (job.timer.kind === 'calendar') {
+        timerCalendarGroup.classList.remove('hidden');
+        timerIntervalGroup.classList.add('hidden');
         document.getElementById('f-on-calendar').value = job.timer.on_calendar || '';
-    } else { timerSec.classList.add('hidden'); }
+      } else if (job.timer.kind === 'interval') {
+        timerCalendarGroup.classList.add('hidden');
+        timerIntervalGroup.classList.remove('hidden');
+        document.getElementById('f-on-boot-sec').value = job.timer.on_boot_sec || '';
+        document.getElementById('f-on-unit-active-sec').value = job.timer.on_unit_active_sec || '';
+      } else {
+        timerCalendarGroup.classList.add('hidden');
+        timerIntervalGroup.classList.add('hidden');
+      }
+    } else {
+      timerSec.classList.add('hidden');
+      timerCalendarGroup.classList.add('hidden');
+      timerIntervalGroup.classList.add('hidden');
+    }
     const cronSec = document.getElementById('cron-section');
     if (job.cron) {
       cronSec.classList.remove('hidden');
