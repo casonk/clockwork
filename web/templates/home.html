@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Home — Internal Services</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f1117;
+      --surface:   #1a1d27;
+      --surface2:  #22263a;
+      --border:    #2e3250;
+      --accent:    #5b7fff;
+      --accent-dim:#2d3f8a;
+      --purple:    #a06fff;
+      --purple-dim:#3a1f70;
+      --red:       #e05252;
+      --red-dim:   #4d1a1a;
+      --text:      #e2e4f0;
+      --muted:     #8890b0;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    header h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; }
+    .nav-links { display: flex; align-items: center; gap: 16px; }
+    .nav-link {
+      font-size: 18px; text-decoration: none;
+      opacity: 0.6; transition: opacity 0.15s;
+    }
+    .nav-link:hover { opacity: 1; }
+
+    main { max-width: 1100px; margin: 0 auto; padding: 28px 20px 80px; }
+
+    .group { margin-bottom: 32px; }
+    .group-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+      gap: 12px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      text-decoration: none;
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: border-color 0.15s, transform 0.12s, box-shadow 0.12s;
+    }
+    .card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 22px rgba(0,0,0,0.45);
+    }
+    .card:active { transform: translateY(0); }
+
+    .card-top { display: flex; align-items: center; gap: 10px; }
+    .card-icon { font-size: 22px; line-height: 1; flex-shrink: 0; }
+    .card-name { font-size: 14px; font-weight: 700; line-height: 1.3; }
+
+    .card-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: auto;
+    }
+    .card-host {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: ui-monospace, "Fira Code", monospace;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    .badge {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      padding: 2px 7px;
+      border-radius: 99px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .badge-shared-mtls     { background: var(--accent-dim); color: var(--accent); }
+    .badge-snowbridge-mtls { background: var(--purple-dim); color: var(--purple); }
+    .badge-vpn-only-direct { background: var(--red-dim);    color: var(--red);    }
+
+    @media (max-width: 640px) {
+      main { padding: 18px 12px 60px; }
+      .card-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+      .card { padding: 14px 12px; }
+    }
+    @media (max-width: 380px) {
+      .card-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🏠 Internal Services</h1>
+  <div class="nav-links">
+    <a href="/groceries" class="nav-link" title="Groceries">🛒</a>
+    <a href="/" class="nav-link" title="Clockwork">⏰</a>
+  </div>
+</header>
+
+<main>
+  {% for group_name, cards in groups %}
+  <div class="group">
+    <div class="group-label">{{ group_name }}</div>
+    <div class="card-grid">
+      {% for card in cards %}
+      {% set is_relative = card.url.startswith('/') %}
+      <a href="{{ card.url }}"
+         class="card"
+         {% if not is_relative %}target="_blank" rel="noopener noreferrer"{% endif %}>
+        <div class="card-top">
+          <span class="card-icon">{{ card.icon }}</span>
+          <span class="card-name">{{ card.display }}</span>
+        </div>
+        <div class="card-footer">
+          <span class="card-host">{{ card.hostname if card.hostname else "clockwork" }}</span>
+          {% set am = card.access_mode %}
+          {% if am == "shared-mtls" %}
+          <span class="badge badge-shared-mtls">mTLS</span>
+          {% elif am == "snowbridge-mtls" %}
+          <span class="badge badge-snowbridge-mtls">Snowbridge</span>
+          {% elif am == "vpn-only-direct" %}
+          <span class="badge badge-vpn-only-direct">VPN</span>
+          {% endif %}
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</main>
+
+</body>
+</html>
