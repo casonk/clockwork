@@ -68,6 +68,28 @@ def test_render_fedora_debugg_interval_timer_and_cron_example():
     assert "artifacts/clockwork-cron.log" in cron_output
 
 
+def test_render_shock_relay_gmail_digest_interval_timer_and_cron_example():
+    manifest = load_manifest(
+        Path(__file__).resolve().parent.parent / "examples" / "shock-relay" / "gmail-digest.toml"
+    )
+
+    systemd_rendered = render_target(manifest, "systemd-user")
+    cron_rendered = render_target(manifest, "cron")
+    cron_output = next(iter(cron_rendered.values()))
+
+    assert "shock-relay-gmail-digest.service" in systemd_rendered
+    assert "shock-relay-gmail-digest.timer" in systemd_rendered
+    assert (
+        "ExecStart=/usr/bin/env python3 %h/git/util-repos/shock-relay/services/gmail-imap/send_digest.py"
+        in systemd_rendered["shock-relay-gmail-digest.service"]
+    )
+    assert "OnBootSec=5m" in systemd_rendered["shock-relay-gmail-digest.timer"]
+    assert "OnUnitActiveSec=1h" in systemd_rendered["shock-relay-gmail-digest.timer"]
+    assert "RandomizedDelaySec=60" in systemd_rendered["shock-relay-gmail-digest.timer"]
+    assert "0 * * * *" in cron_output
+    assert "services/gmail-imap/send_digest.py" in cron_output
+
+
 def test_render_crontab_for_personal_finance_example():
     manifest = load_manifest(
         Path(__file__).resolve().parent.parent

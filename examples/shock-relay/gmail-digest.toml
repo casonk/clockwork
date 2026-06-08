@@ -1,0 +1,24 @@
+[[jobs]]
+name = "shock-relay-gmail-digest"
+description = "Send queued Gmail notification digest emails"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h/git/util-repos/shock-relay"
+exec_start = "/usr/bin/env python3 %h/git/util-repos/shock-relay/services/gmail-imap/send_digest.py --config %h/git/util-repos/shock-relay/services/gmail-imap/config.local.yaml"
+after = ["network-online.target"]
+wants = ["network-online.target"]
+standard_output = "journal"
+standard_error = "journal"
+timer_description = "Send queued Gmail notification digests"
+
+[jobs.timer]
+kind = "interval"
+on_boot_sec = "5m"
+on_unit_active_sec = "1h"
+persistent = true
+randomized_delay_sec = "60"
+
+[jobs.cron]
+expression = "0 * * * *"
+command = "cd $HOME/git/util-repos/shock-relay && /usr/bin/env python3 services/gmail-imap/send_digest.py --config services/gmail-imap/config.local.yaml >> $HOME/.local/share/shock-relay/gmail-digest-cron.log 2>&1"
+comments = ["Auto-generated from systemd timer: every 1h"]

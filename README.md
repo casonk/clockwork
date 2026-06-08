@@ -61,7 +61,8 @@ TLS is blocked unless you also set `CLOCKWORK_WEB_ALLOW_REMOTE_WITHOUT_MTLS=1`.
 For agentic maintenance manifests that carry provider/model defaults in
 `[jobs.environment]`, the edit modal now surfaces those defaults directly so
 they can be changed without manually editing TOML. Optional local-only
-credential/profile overrides still belong in `environment_files`.
+credential/profile overrides still belong in `environment_files`. Interval
+timers expose their boot delay and repeat cadence in the same edit modal.
 
 System-scope jobs (`scope = "system"`) require elevated writes.  The app uses a
 sudoers drop-in (`config/sudoers/clockwork-web`) and a wrapper script
@@ -83,6 +84,7 @@ clockwork render --manifest examples/archility/archility-weekly.toml --target sy
 clockwork render --manifest examples/fedora-debugg/crash-snapshot.toml --target systemd-user
 clockwork render --manifest examples/personal-finance/intraday-snapshots.toml --target systemd-user
 clockwork render --manifest examples/personal-finance/monthly-controller.toml --target cron
+clockwork render --manifest examples/shock-relay/gmail-digest.toml --target systemd-user
 clockwork render --manifest examples/traction-control/bug-sweep-agentic.toml --target systemd-user
 clockwork render --manifest examples/traction-control/template-consolidation-agentic.toml --target systemd-user
 clockwork render --manifest examples/traction-control/ci-repair-agentic.toml --target systemd-user
@@ -94,6 +96,7 @@ Write scheduler artifacts to a target directory or file:
 clockwork install --manifest examples/archility/archility-weekly.toml --target systemd-user
 clockwork install --manifest examples/fedora-debugg/crash-snapshot.toml --target systemd-user
 clockwork install --manifest examples/snowbridge/wireguard-endpoint-monitor.toml --target systemd-system
+clockwork install --manifest examples/shock-relay/gmail-digest.toml --target systemd-user
 clockwork install --manifest examples/personal-finance/monthly-controller.toml --target cron --output /tmp/personal-finance.crontab
 clockwork install --manifest examples/traction-control/bug-sweep-agentic.toml --target systemd-user
 clockwork install --manifest examples/traction-control/template-consolidation-agentic.toml --target systemd-user
@@ -148,6 +151,7 @@ The first migration targets are the repos where scheduling is already explicit:
   - `examples/personal-finance/monthly-controller.toml` keeps the monthly all-accounts cron example
 - `intake`: generated user-level daemon and report timer units
 - `fedora-debugg`: recurring snapshot workflow that refreshes the tachometer sidecar
+- `shock-relay`: shared Gmail notification digest timer
 - `snowbridge`: installed system service + interval timer
 - `traction-control`: daily governance audit plus daily bug sweep and every-other-day agentic template consolidation and CI repair
 - `doseido`: repo-local service/orchestrator conventions
