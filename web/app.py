@@ -1554,20 +1554,28 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
     path = local if local.exists() else base
     raw: list = list(tomlkit.loads(path.read_text()).get("services", [])) if path.exists() else []
 
+    # Pre-extract the native RDP URL so it can be merged into the Guacamole card.
+    rdp_url = next(
+        (_svc_url(s) for s in raw if str(s.get("name", "")) == "pit-box-rdp"), ""
+    )
+
     groups: dict[str, list[dict]] = {g: [] for g in _GROUP_ORDER}
     for svc in raw:
         name = str(svc.get("name", ""))
+        if name == "pit-box-rdp":
+            continue  # merged into pit-box-remote-desktop card
         group = _REPO_GROUP.get(str(svc.get("owner_repo", "")), "Other")
-        groups.setdefault(group, []).append(
-            {
-                "name": name,
-                "display": str(svc.get("description", name)),
-                "url": _svc_url(svc),
-                "hostname": str(svc.get("hostname", "")),
-                "access_mode": str(svc.get("access_mode", "")),
-                "icon": _SERVICE_ICONS.get(name, "🔗"),
-            }
-        )
+        card: dict = {
+            "name": name,
+            "display": str(svc.get("description", name)),
+            "url": _svc_url(svc),
+            "hostname": str(svc.get("hostname", "")),
+            "access_mode": str(svc.get("access_mode", "")),
+            "icon": _SERVICE_ICONS.get(name, "🔗"),
+        }
+        if name == "pit-box-remote-desktop":
+            card["rdp_url"] = rdp_url
+        groups.setdefault(group, []).append(card)
 
     groups["Clockwork"].append(
         {
