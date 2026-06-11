@@ -47,6 +47,12 @@ INTAKE_DB = Path(
 GROCERY_RULES_FILE = Path(
     os.environ.get("CLOCKWORK_GROCERY_RULES_FILE", BASE_DIR / "config" / "grocery-rules.json")
 )
+SHOPPING_FILE = Path(
+    os.environ.get("CLOCKWORK_SHOPPING_FILE", BASE_DIR / "config" / "shopping.json")
+)
+SHOPPING_RULES_FILE = Path(
+    os.environ.get("CLOCKWORK_SHOPPING_RULES_FILE", BASE_DIR / "config" / "shopping-rules.json")
+)
 _OLLAMA_BASE = os.environ.get("CREW_CHIEF_URL", "http://localhost:11434")
 _OLLAMA_MODEL = os.environ.get("CLOCKWORK_GROCERY_MODEL", "qwen2.5-coder:7b")
 
@@ -1009,6 +1015,52 @@ _GROCERY_ALIASES: dict[str, tuple[str, ...]] = {
     "sake": ("sake",),
 }
 
+# ---------------------------------------------------------------------------
+# Shopping — intake sync helpers
+# ---------------------------------------------------------------------------
+
+_SHOPPING_ALIASES: dict[str, tuple[str, ...]] = {
+    "t-shirt": ("tee", "graphic tee"),
+    "jeans": ("denim", "levi", "wrangler"),
+    "shorts": ("board short", "gym short"),
+    "jacket": ("coat", "parka", "windbreaker"),
+    "hoodie": ("sweatshirt", "pullover"),
+    "socks": ("sock",),
+    "underwear": ("briefs", "boxers"),
+    "shoes": ("shoe", "footwear"),
+    "sneakers": ("nike", "adidas", "new balance", "jordan", "converse", "vans"),
+    "boots": ("boot",),
+    "hat": ("cap", "beanie"),
+    "belt": ("leather belt",),
+    "sweater": ("cardigan", "knit"),
+    "pants": ("trousers", "slacks", "chinos"),
+    "towels": ("towel",),
+    "sheets": ("sheet set", "bed sheet"),
+    "pillows": ("pillow",),
+    "blanket": ("comforter", "throw"),
+    "lamp": ("floor lamp", "table lamp"),
+    "shelf": ("shelving", "bookcase"),
+    "storage bins": ("storage box", "organizer"),
+    "hangers": ("hanger",),
+    "detergent": ("tide", "arm hammer", "persil", "gain"),
+    "toilet paper": ("charmin", "cottonelle", "scott tissue"),
+    "paper towels": ("bounty", "viva"),
+    "trash bags": ("hefty", "glad bags"),
+    "cleaning supplies": ("clorox", "lysol", "windex"),
+    "lightbulbs": ("bulb", "led"),
+    "batteries": ("duracell", "energizer"),
+    "yoga mat": ("yoga mat",),
+    "water bottle": ("hydro flask", "nalgene", "stanley"),
+    "gym bag": ("duffel",),
+    "backpack": ("rucksack",),
+    "tent": ("camping tent",),
+    "sleeping bag": ("sleep bag",),
+    "sunscreen": ("sunblock", "spf"),
+    "bug spray": ("insect repellent", "deet"),
+    "bicycle": ("bike",),
+    "helmet": ("bike helmet",),
+}
+
 
 def _norm_text(text: str) -> str:
     """Lowercase; keep only letters, digits, and spaces."""
@@ -1033,13 +1085,21 @@ def _word_hits(grocery_word: str, desc_words: list[str]) -> bool:
     return False
 
 
-def _item_matches_desc(item_name: str, description: str) -> bool:
-    """Return True when *item_name* (a grocery list entry) matches *description* (a receipt line)."""
+def _item_matches_desc(
+    item_name: str,
+    description: str,
+    aliases: dict[str, tuple[str, ...]] | None = None,
+) -> bool:
+    """Return True when *item_name* matches *description* (a receipt line).
+
+    *aliases* defaults to _GROCERY_ALIASES when None.
+    """
     desc_norm = _norm_text(description)
     desc_words = desc_norm.split()
 
+    _aliases = _GROCERY_ALIASES if aliases is None else aliases
     item_lower = item_name.lower()
-    candidates: list[str] = [item_lower, *_GROCERY_ALIASES.get(item_lower, ())]
+    candidates: list[str] = [item_lower, *_aliases.get(item_lower, ())]
 
     for candidate in candidates:
         cand_words = _norm_text(candidate).split()
@@ -1127,6 +1187,81 @@ def _sync_from_intake(
     return len(marked), marked
 
 
+def _sync_shopping_from_intake(
+    db_path: Path,
+    data: dict,
+    since: str | None = None,
+) -> tuple[int, list[str]]:
+    """Query intake for all receipts and mark matching shopping items as owned.
+
+    Returns (items_marked, list_of_item_labels).
+    *since* is an ISO date string (YYYY-MM-DD); defaults to 30 days ago.
+    """
+    import sqlite3
+    from datetime import date, timedelta
+
+    if not db_path.exists():
+        return 0, []
+
+    if since is None:
+        since = (date.today() - timedelta(days=30)).isoformat()
+
+    conn = sqlite3.connect(str(db_path))
+    rows = conn.execute(
+        """
+        SELECT items_json FROM receipts
+        WHERE items_json IS NOT NULL
+          AND items_json != '[]'
+          AND scan_date >= ?
+        ORDER BY scan_date DESC
+        """,
+        (since,),
+    ).fetchall()
+    conn.close()
+
+    descriptions: list[str] = []
+    for (items_json,) in rows:
+        try:
+            for item in json.loads(items_json):
+                desc = str(item.get("description") or "").strip()
+                if desc:
+                    descriptions.append(desc)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Merge AI-generated rules into a temporary alias table for this run
+    ai_aliases: dict[str, tuple[str, ...]] = {}
+    rules = load_shopping_rules()
+    for item_name, tokens in rules.get("aliases", {}).items():
+        if isinstance(tokens, list):
+            ai_aliases[item_name.lower()] = tuple(str(t) for t in tokens)
+
+    marked: list[str] = []
+    for cat in data["categories"]:
+        for item in cat["items"]:
+            if item.get("owned", False):
+                continue
+            name = item["name"]
+            name_lower = name.lower()
+            prev = _SHOPPING_ALIASES.get(name_lower)
+            if name_lower in ai_aliases:
+                _SHOPPING_ALIASES[name_lower] = (
+                    *(prev or ()),
+                    *ai_aliases[name_lower],
+                )
+            try:
+                if any(_item_matches_desc(name, d, _SHOPPING_ALIASES) for d in descriptions):
+                    item["owned"] = True
+                    marked.append(f"{cat['name']}: {name}")
+            finally:
+                if prev is None:
+                    _SHOPPING_ALIASES.pop(name_lower, None)
+                elif name_lower in ai_aliases:
+                    _SHOPPING_ALIASES[name_lower] = prev
+
+    return len(marked), marked
+
+
 # ---------------------------------------------------------------------------
 # Grocery — AI helpers (Ollama via stdlib urllib)
 # ---------------------------------------------------------------------------
@@ -1181,6 +1316,19 @@ def load_grocery_rules() -> dict:
 
 def save_grocery_rules(rules: dict) -> None:
     GROCERY_RULES_FILE.write_text(json.dumps(rules, indent=2))
+
+
+def load_shopping_rules() -> dict:
+    if SHOPPING_RULES_FILE.exists():
+        try:
+            return json.loads(SHOPPING_RULES_FILE.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"aliases": {}, "types": {}}
+
+
+def save_shopping_rules(rules: dict) -> None:
+    SHOPPING_RULES_FILE.write_text(json.dumps(rules, indent=2))
 
 
 def _ai_categorize(data: dict) -> tuple[int, str]:
@@ -1317,6 +1465,144 @@ Return ONLY a JSON object — no markdown, no explanation:
         __import__("datetime").datetime.now().isoformat(timespec="seconds")
     )
     save_grocery_rules(rules)
+    return added, _OLLAMA_MODEL
+
+
+def _ai_categorize_shopping(data: dict) -> tuple[int, str]:
+    """Ask the LLM to assign a consumer type to every uncategorized shopping item.
+
+    Updates *data* in-place, adding/updating a ``type`` field on each item.
+    Returns (items_updated, model_used).
+    """
+    all_items: list[dict] = [
+        {"name": item["name"], "category": cat["name"]}
+        for cat in data["categories"]
+        for item in cat["items"]
+        if not item.get("type")
+    ]
+    if not all_items:
+        return 0, _OLLAMA_MODEL
+
+    names_csv = "\n".join(f"- {it['name']} (in {it['category']})" for it in all_items)
+    prompt = f"""\
+You are a consumer shopping classification assistant.
+
+Classify each item below into exactly one type from this list:
+Tops, Bottoms, Outerwear, Footwear, Accessories, Underwear, Bedding, Bath, Cleaning, Lighting, Storage, Furniture, Fitness, Camping, Sports, Electronics
+
+Items:
+{names_csv}
+
+Return ONLY a JSON object — no markdown, no explanation:
+{{"types": {{"T-Shirt": "Tops", "Jeans": "Bottoms", "Tent": "Camping", ...}}}}
+"""
+    raw = _ollama_generate(prompt)
+    parsed = _extract_json(raw)
+    if not isinstance(parsed, dict) or "types" not in parsed:
+        raise ValueError(f"Unexpected model output: {raw[:200]}")
+
+    type_map: dict[str, str] = {str(k).lower(): str(v) for k, v in parsed["types"].items()}
+    updated = 0
+    for cat in data["categories"]:
+        for item in cat["items"]:
+            t = type_map.get(item["name"].lower())
+            if t:
+                item["type"] = t
+                updated += 1
+    return updated, _OLLAMA_MODEL
+
+
+def _ai_generate_shopping_rules(
+    data: dict, db_path: Path, since: str | None = None
+) -> tuple[int, str]:
+    """Ask the LLM to generate receipt-to-item alias rules from recent receipts.
+
+    Saves results to SHOPPING_RULES_FILE.  Returns (new_aliases_added, model_used).
+    """
+    import sqlite3
+    from datetime import date, timedelta
+
+    if since is None:
+        since = (date.today() - timedelta(days=60)).isoformat()
+
+    conn = sqlite3.connect(str(db_path))
+    rows = conn.execute(
+        """
+        SELECT items_json FROM receipts
+        WHERE items_json IS NOT NULL
+          AND items_json != '[]'
+          AND scan_date >= ?
+        ORDER BY scan_date DESC
+        LIMIT 200
+        """,
+        (since,),
+    ).fetchall()
+    conn.close()
+
+    seen: set[str] = set()
+    descriptions: list[str] = []
+    for (items_json,) in rows:
+        try:
+            for item in json.loads(items_json):
+                d = str(item.get("description") or "").strip()
+                if d and d not in seen:
+                    seen.add(d)
+                    descriptions.append(d)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if not descriptions:
+        return 0, _OLLAMA_MODEL
+
+    all_item_names = [item["name"] for cat in data["categories"] for item in cat["items"]]
+    items_csv = ", ".join(all_item_names)
+    descs_sample = "\n".join(f"- {d}" for d in descriptions[:80])
+
+    prompt = f"""\
+You are a consumer receipt alias generator. Receipt OCR descriptions often contain brand
+names, abbreviations, and product codes. Your job: given receipt descriptions and a
+shopping item list, produce short keyword tokens that appear in the descriptions and
+reliably identify each shopping item.
+
+Receipt OCR descriptions (sample):
+{descs_sample}
+
+Shopping item list:
+{items_csv}
+
+Rules:
+- Only create aliases for items where the descriptions contain useful, non-obvious tokens
+- Tokens should be 1–3 words, lowercase
+- Skip items whose name already appears verbatim in receipts
+- Prefer brand fragments and abbreviations over generic words
+
+Return ONLY a JSON object — no markdown, no explanation:
+{{"aliases": {{"T-Shirt": ["tee", "graphic"], "Sneakers": ["nike", "adidas"]}}}}
+"""
+    raw = _ollama_generate(prompt)
+    parsed = _extract_json(raw)
+    if not isinstance(parsed, dict) or "aliases" not in parsed:
+        raise ValueError(f"Unexpected model output: {raw[:200]}")
+
+    new_aliases: dict[str, list[str]] = {}
+    for item_name, tokens in parsed["aliases"].items():
+        if isinstance(tokens, list) and tokens:
+            new_aliases[str(item_name)] = [str(t).lower() for t in tokens if t]
+
+    rules = load_shopping_rules()
+    existing = rules.get("aliases", {})
+    added = 0
+    for item_name, tokens in new_aliases.items():
+        prev = existing.get(item_name, [])
+        merged = list(dict.fromkeys([*prev, *tokens]))
+        if len(merged) > len(prev):
+            added += len(merged) - len(prev)
+        existing[item_name] = merged
+    rules["aliases"] = existing
+    rules["rules_generated_at"] = (
+        __import__("datetime").datetime.now().isoformat(timespec="seconds")
+    )
+    save_shopping_rules(rules)
     return added, _OLLAMA_MODEL
 
 
@@ -1505,6 +1791,186 @@ def _slug(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Routes — shopping
+# ---------------------------------------------------------------------------
+
+
+def load_shopping() -> dict:
+    if SHOPPING_FILE.exists():
+        return json.loads(SHOPPING_FILE.read_text())
+    return {"categories": []}
+
+
+def save_shopping(data: dict) -> None:
+    SHOPPING_FILE.write_text(json.dumps(data, indent=2))
+
+
+def _find_shopping_category(data: dict, name: str) -> dict | None:
+    return next((c for c in data["categories"] if c["name"] == name), None)
+
+
+@app.get("/shopping")
+def shopping():
+    data = load_shopping()
+    total = sum(len(c["items"]) for c in data["categories"])
+    owned_count = sum(1 for c in data["categories"] for i in c["items"] if i.get("owned"))
+    rules = load_shopping_rules()
+    rules_count = sum(len(v) for v in rules.get("aliases", {}).values())
+    return render_template(
+        "shopping.html",
+        data=data,
+        total=total,
+        owned_count=owned_count,
+        last_synced_at=data.get("last_synced_at"),
+        intake_available=INTAKE_DB.exists(),
+        ollama_available=_ollama_available(),
+        rules_count=rules_count,
+        rules_generated_at=rules.get("rules_generated_at"),
+    )
+
+
+@app.post("/shopping/add-category")
+def shopping_add_category():
+    name = request.form.get("category", "").strip()
+    if not name:
+        flash("Category name cannot be empty.", "error")
+        return redirect(url_for("shopping"))
+    data = load_shopping()
+    if _find_shopping_category(data, name):
+        flash(f'Category "{name}" already exists.', "error")
+        return redirect(url_for("shopping"))
+    data["categories"].append({"name": name, "items": []})
+    save_shopping(data)
+    return redirect(url_for("shopping"))
+
+
+@app.post("/shopping/delete-category")
+def shopping_delete_category():
+    name = request.form.get("category", "").strip()
+    data = load_shopping()
+    data["categories"] = [c for c in data["categories"] if c["name"] != name]
+    save_shopping(data)
+    return redirect(url_for("shopping"))
+
+
+@app.post("/shopping/add-item")
+def shopping_add_item():
+    category = request.form.get("category", "").strip()
+    item_name = request.form.get("item", "").strip()
+    if not item_name:
+        return redirect(url_for("shopping"))
+    data = load_shopping()
+    cat = _find_shopping_category(data, category)
+    if cat is None:
+        flash(f'Category "{category}" not found.', "error")
+        return redirect(url_for("shopping"))
+    if any(i["name"].lower() == item_name.lower() for i in cat["items"]):
+        flash(f'"{item_name}" is already in {category}.', "error")
+        return redirect(url_for("shopping"))
+    cat["items"].append({"name": item_name, "owned": False})
+    save_shopping(data)
+    return redirect(url_for("shopping") + f"#{_slug(category)}")
+
+
+@app.post("/shopping/toggle-item")
+def shopping_toggle_item():
+    category = request.form.get("category", "").strip()
+    item_name = request.form.get("item", "").strip()
+    data = load_shopping()
+    cat = _find_shopping_category(data, category)
+    if cat:
+        for item in cat["items"]:
+            if item["name"] == item_name:
+                item["owned"] = not item.get("owned", False)
+                break
+    save_shopping(data)
+    return redirect(url_for("shopping") + f"#{_slug(category)}")
+
+
+@app.post("/shopping/delete-item")
+def shopping_delete_item():
+    category = request.form.get("category", "").strip()
+    item_name = request.form.get("item", "").strip()
+    data = load_shopping()
+    cat = _find_shopping_category(data, category)
+    if cat:
+        cat["items"] = [i for i in cat["items"] if i["name"] != item_name]
+    save_shopping(data)
+    return redirect(url_for("shopping") + f"#{_slug(category)}")
+
+
+@app.post("/shopping/reset")
+def shopping_reset():
+    data = load_shopping()
+    for cat in data["categories"]:
+        for item in cat["items"]:
+            item["owned"] = False
+    save_shopping(data)
+    flash("All items marked as wanted.", "success")
+    return redirect(url_for("shopping"))
+
+
+@app.post("/shopping/sync-intake")
+def shopping_sync_intake():
+    since = request.form.get("since", "").strip() or None
+    data = load_shopping()
+    count, marked = _sync_shopping_from_intake(INTAKE_DB, data, since=since)
+    if not INTAKE_DB.exists():
+        flash("Intake DB not found — set CLOCKWORK_INTAKE_DB.", "error")
+        return redirect(url_for("shopping"))
+    if count == 0:
+        flash("No new matches found in recent receipts.", "success")
+    else:
+        data["last_synced_at"] = __import__("datetime").datetime.now().isoformat(timespec="seconds")
+        save_shopping(data)
+        flash(
+            f"Marked {count} item{'s' if count != 1 else ''} as owned: {', '.join(marked)}.",
+            "success",
+        )
+    return redirect(url_for("shopping"))
+
+
+@app.post("/shopping/ai-categorize")
+def shopping_ai_categorize():
+    if not _ollama_available():
+        flash("Ollama is not reachable — start crew-chief before using AI features.", "error")
+        return redirect(url_for("shopping"))
+    data = load_shopping()
+    try:
+        count, model = _ai_categorize_shopping(data)
+    except Exception as exc:
+        flash(f"AI categorize failed: {exc}", "error")
+        return redirect(url_for("shopping"))
+    if count == 0:
+        flash("All items already have types — nothing to categorize.", "success")
+    else:
+        save_shopping(data)
+        flash(f"Assigned types to {count} item{'s' if count != 1 else ''} via {model}.", "success")
+    return redirect(url_for("shopping"))
+
+
+@app.post("/shopping/ai-rules")
+def shopping_ai_rules():
+    if not _ollama_available():
+        flash("Ollama is not reachable — start crew-chief before using AI features.", "error")
+        return redirect(url_for("shopping"))
+    if not INTAKE_DB.exists():
+        flash("Intake DB not found — set CLOCKWORK_INTAKE_DB.", "error")
+        return redirect(url_for("shopping"))
+    data = load_shopping()
+    try:
+        added, model = _ai_generate_shopping_rules(data, INTAKE_DB)
+    except Exception as exc:
+        flash(f"AI rules generation failed: {exc}", "error")
+        return redirect(url_for("shopping"))
+    if added == 0:
+        flash("No new alias tokens generated — try after more receipts are scanned.", "success")
+    else:
+        flash(f"Added {added} new alias token{'s' if added != 1 else ''} via {model}.", "success")
+    return redirect(url_for("shopping"))
+
+
+# ---------------------------------------------------------------------------
 # Routes — home portal
 # ---------------------------------------------------------------------------
 
@@ -1555,9 +2021,7 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
     raw: list = list(tomlkit.loads(path.read_text()).get("services", [])) if path.exists() else []
 
     # Pre-extract the native RDP URL so it can be merged into the Guacamole card.
-    rdp_url = next(
-        (_svc_url(s) for s in raw if str(s.get("name", "")) == "pit-box-rdp"), ""
-    )
+    rdp_url = next((_svc_url(s) for s in raw if str(s.get("name", "")) == "pit-box-rdp"), "")
 
     groups: dict[str, list[dict]] = {g: [] for g in _GROUP_ORDER}
     for svc in raw:
@@ -1585,6 +2049,16 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
             "hostname": "",
             "access_mode": "shared-mtls",
             "icon": "🛒",
+        }
+    )
+    groups["Clockwork"].append(
+        {
+            "name": "clockwork-shopping",
+            "display": "Shopping",
+            "url": "/shopping",
+            "hostname": "",
+            "access_mode": "shared-mtls",
+            "icon": "🛍️",
         }
     )
 
