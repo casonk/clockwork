@@ -154,7 +154,8 @@
       line-height: 1.4;
     }
     .btn-action:hover { opacity: 0.8; }
-    .btn-login   { background: var(--accent-dim); color: var(--accent); }
+    .btn-login   { background: var(--accent-dim);  color: var(--accent);  }
+    .btn-app     { background: var(--purple-dim); color: var(--purple); }
     .btn-rebuild { background: var(--surface2);   color: var(--muted);  }
     .btn-rebuild:disabled { opacity: 0.5; cursor: not-allowed; }
     .card-actions form { flex: 1; display: flex; }
@@ -202,10 +203,13 @@
       <div class="card card-split">
         <div class="card-top">
           <span class="card-icon">{{ card.icon }}</span>
-          <span class="card-name">{{ card.display }}</span>
+          <span class="card-name">Remote Desktop</span>
         </div>
         <div class="card-actions">
-          <a href="{{ card.url }}" class="btn-action btn-login" target="_blank" rel="noopener noreferrer">Login</a>
+          <a href="{{ card.url }}" class="btn-action btn-login" target="_blank" rel="noopener noreferrer">Browser</a>
+          {% if card.rdp_url %}
+          <a href="{{ card.rdp_url }}" class="btn-action btn-app">App</a>
+          {% endif %}
           <form method="post" action="/rebuild/guacamole">
             <button type="submit" class="btn-action btn-rebuild"
               onclick="this.disabled=true;this.textContent='…';this.form.submit()">Rebuild</button>
