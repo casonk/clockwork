@@ -123,6 +123,42 @@
     .badge-snowbridge-mtls { background: var(--purple-dim); color: var(--purple); }
     .badge-vpn-only-direct { background: var(--red-dim);    color: var(--red);    }
 
+    /* Split-action card (e.g. Guacamole: Login + Rebuild) */
+    .card-split {
+      text-decoration: none;
+      color: var(--text);
+      cursor: default;
+    }
+    .card-split:hover {
+      border-color: var(--border);
+      transform: none;
+      box-shadow: none;
+    }
+    .card-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: auto;
+    }
+    .btn-action {
+      flex: 1;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      text-align: center;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      line-height: 1.4;
+    }
+    .btn-action:hover { opacity: 0.8; }
+    .btn-login   { background: var(--accent-dim); color: var(--accent); }
+    .btn-rebuild { background: var(--surface2);   color: var(--muted);  }
+    .btn-rebuild:disabled { opacity: 0.5; cursor: not-allowed; }
+    .card-actions form { flex: 1; display: flex; }
+
     @media (max-width: 640px) {
       main { padding: 18px 12px 60px; }
       .card-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -144,11 +180,39 @@
 </header>
 
 <main>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+  <div style="margin-bottom:18px;display:flex;flex-direction:column;gap:6px;">
+    {% for cat, msg in messages %}
+    <div style="padding:10px 14px;border-radius:8px;font-size:13px;
+      background:{% if cat=='success' %}var(--accent-dim){% else %}var(--red-dim){% endif %};
+      color:{% if cat=='success' %}var(--accent){% else %}var(--red){% endif %};">
+      {{ msg }}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endwith %}
   {% for group_name, cards in groups %}
   <div class="group">
     <div class="group-label">{{ group_name }}</div>
     <div class="card-grid">
       {% for card in cards %}
+      {% if card.name == "pit-box-remote-desktop" %}
+      <div class="card card-split">
+        <div class="card-top">
+          <span class="card-icon">{{ card.icon }}</span>
+          <span class="card-name">{{ card.display }}</span>
+        </div>
+        <div class="card-actions">
+          <a href="{{ card.url }}" class="btn-action btn-login" target="_blank" rel="noopener noreferrer">Login</a>
+          <form method="post" action="/rebuild/guacamole">
+            <button type="submit" class="btn-action btn-rebuild"
+              onclick="this.disabled=true;this.textContent='…';this.form.submit()">Rebuild</button>
+          </form>
+        </div>
+      </div>
+      {% else %}
       {% set is_relative = card.url.startswith('/') %}
       <a href="{{ card.url }}"
          class="card"
@@ -169,6 +233,7 @@
           {% endif %}
         </div>
       </a>
+      {% endif %}
       {% endfor %}
     </div>
   </div>

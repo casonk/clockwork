@@ -17,3 +17,6 @@ user ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
 # Start / enable / stop / disable system-scope units
 user ALL=(root) NOPASSWD: /usr/bin/systemctl enable --now *
 user ALL=(root) NOPASSWD: /usr/bin/systemctl disable --now *
+
+# Rebuild the Guacamole remote-desktop gateway (render + install)
+user ALL=(root) NOPASSWD: /usr/local/bin/pit-box-rebuild-guacamole
