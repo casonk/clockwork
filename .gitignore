@@ -22,6 +22,8 @@ CLAUDE.md
 
 .tachometer/
 config/web-state.json
+config/groceries.json
+config/grocery-rules.json
 *.crontab
 config/web/caddy/*.local
 *.local.toml
