@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Groceries — Clockwork</title>
+  <title>Shopping — Clockwork</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -64,7 +64,7 @@
     }
     .progress-fill {
       height: 100%;
-      background: var(--green);
+      background: var(--accent);
       transition: width 0.3s;
     }
 
@@ -132,7 +132,7 @@
       font-size: 11px; padding: 2px 8px; border-radius: 99px;
       background: var(--surface); color: var(--muted); border: 1px solid var(--border);
     }
-    .category-count .needs { color: var(--red); font-weight: 700; }
+    .category-count .wanted { color: var(--accent); font-weight: 700; }
 
     /* ── Item list ── */
     .items { padding: 6px 0; }
@@ -161,17 +161,17 @@
       transition: background 0.15s, border-color 0.15s;
       flex-shrink: 0;
     }
-    .check-btn.stocked {
-      background: var(--green-dim);
-      border-color: var(--green);
-      color: var(--green);
+    .check-btn.owned {
+      background: var(--accent-dim);
+      border-color: var(--accent);
+      color: var(--accent);
     }
-    .check-btn.not-stocked {
+    .check-btn.not-owned {
       background: transparent;
       border-color: var(--border);
       color: transparent;
     }
-    .check-btn.not-stocked:hover {
+    .check-btn.not-owned:hover {
       border-color: var(--muted);
     }
 
@@ -180,12 +180,12 @@
       font-size: 14px;
       user-select: none;
     }
-    .item-name.stocked {
+    .item-name.owned {
       color: var(--muted);
       text-decoration: line-through;
       text-decoration-color: var(--muted);
     }
-    .item-name.not-stocked {
+    .item-name.not-owned {
       color: var(--text);
     }
 
@@ -296,7 +296,7 @@
       white-space: nowrap;
     }
     .reset-btn:hover { color: var(--yellow); border-color: var(--yellow); }
-    .sync-btn:hover  { color: var(--green);  border-color: var(--green); }
+    .sync-btn:hover  { color: var(--accent); border-color: var(--accent); }
     .sync-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .last-synced { font-size: 11px; color: var(--muted); white-space: nowrap; }
 
@@ -306,20 +306,22 @@
       text-transform: uppercase; padding: 1px 6px; border-radius: 4px;
       flex-shrink: 0; white-space: nowrap;
     }
-    .type-Meat       { background:#4d1a1a; color:#e05252; }
-    .type-Seafood    { background:#0d2d4d; color:#4a9eff; }
-    .type-Produce    { background:#1a4d30; color:#3ecf6e; }
-    .type-Dairy      { background:#4d3d0a; color:#e0b832; }
-    .type-Bakery     { background:#3d2010; color:#d4845a; }
-    .type-Beverages  { background:#1a1a4d; color:#7b6ff0; }
-    .type-Spirits    { background:#2d0a4d; color:#b07bff; }
-    .type-Spices     { background:#4d2a00; color:#e67e22; }
-    .type-Condiments { background:#0a3330; color:#1abc9c; }
-    .type-Pantry     { background:#1e2030; color:#8890b0; }
-    .type-Snacks     { background:#3d2a00; color:#f39c12; }
-    .type-Frozen     { background:#0a1f3d; color:#3498db; }
-    .type-Flavor     { background:#1a0a3d; color:#c07bff; }
-    .type-Drinks     { background:#0a2a3d; color:#5bc0de; }
+    .type-Tops        { background:#1a2a4d; color:#5b9eff; }
+    .type-Bottoms     { background:#1a0a3d; color:#a07bff; }
+    .type-Outerwear   { background:#0d2d4d; color:#4a9eff; }
+    .type-Footwear    { background:#2d1a10; color:#d4845a; }
+    .type-Accessories { background:#3d2a00; color:#f39c12; }
+    .type-Underwear   { background:#2d0a4d; color:#b07bff; }
+    .type-Bedding     { background:#1a4d30; color:#3ecf6e; }
+    .type-Bath        { background:#0a3330; color:#1abc9c; }
+    .type-Cleaning    { background:#1a1a4d; color:#7b6ff0; }
+    .type-Lighting    { background:#4d3d0a; color:#e0b832; }
+    .type-Storage     { background:#1e2030; color:#8890b0; }
+    .type-Furniture   { background:#3d1a10; color:#c0714a; }
+    .type-Fitness     { background:#1a4d1a; color:#3ecf3e; }
+    .type-Camping     { background:#2d3d10; color:#a0c040; }
+    .type-Sports      { background:#4d1a1a; color:#e05252; }
+    .type-Electronics { background:#0a2a3d; color:#5bc0de; }
     /* fallback for any AI-invented type */
     [class^="type-"] { background:#1e2030; color:#8890b0; }
 
@@ -344,9 +346,9 @@
     <a href="/home" class="back-link" title="Home">🏠</a>
     <a href="/" class="back-link" title="Clockwork">⏰</a>
     <div>
-      <h1>🛒 Groceries</h1>
+      <h1>🛍️ Shopping</h1>
       <div class="subtitle">
-        {% if total == 0 %}No items yet{% else %}{{ stocked }} / {{ total }} stocked{% endif %}
+        {% if total == 0 %}No items yet{% else %}{{ owned_count }} / {{ total }} owned{% endif %}
       </div>
     </div>
   </div>
@@ -357,33 +359,33 @@
     {% if rules_count %}
     <span class="rules-chip" title="{{ rules_generated_at or 'AI-generated' }}">{{ rules_count }} AI rules</span>
     {% endif %}
-    <form method="post" action="/groceries/sync-intake">
+    <form method="post" action="/shopping/sync-intake">
       <button type="submit" class="sync-btn"
-              {% if not intake_available %}disabled title="Intake DB not found"{% else %}title="Mark items as stocked based on recent grocery receipts"{% endif %}>
+              {% if not intake_available %}disabled title="Intake DB not found"{% else %}title="Mark items as owned based on recent receipts"{% endif %}>
         ⟳ Sync
       </button>
     </form>
-    <form method="post" action="/groceries/ai-categorize">
+    <form method="post" action="/shopping/ai-categorize">
       <button type="submit" class="sync-btn"
               {% if not ollama_available %}disabled title="Ollama not running"{% else %}title="Use AI to assign a type label to every item"{% endif %}>
         ✦ Categorize
       </button>
     </form>
-    <form method="post" action="/groceries/ai-rules">
+    <form method="post" action="/shopping/ai-rules">
       <button type="submit" class="sync-btn"
               {% if not ollama_available or not intake_available %}disabled title="Requires Ollama + Intake DB"{% else %}title="Use AI to generate receipt-to-item alias rules from recent receipts"{% endif %}>
         ✦ Gen Rules
       </button>
     </form>
-    <form method="post" action="/groceries/reset">
-      <button type="submit" class="reset-btn" title="Mark everything as not stocked">↺ Reset</button>
+    <form method="post" action="/shopping/reset">
+      <button type="submit" class="reset-btn" title="Mark everything as wanted">↺ Reset</button>
     </form>
   </div>
 </header>
 
 {% if total > 0 %}
 <div class="progress-bar">
-  <div class="progress-fill" style="width: {{ (stocked / total * 100) | int }}%"></div>
+  <div class="progress-fill" style="width: {{ (owned_count / total * 100) | int }}%"></div>
 </div>
 {% endif %}
 
@@ -410,44 +412,44 @@
 
   {% for cat in data.categories %}
   {% set cat_slug = cat.name | lower | replace(' ', '-') %}
-  {% set needs = cat['items'] | rejectattr('stocked') | list | length %}
+  {% set wanted = cat['items'] | rejectattr('owned') | list | length %}
   <div class="category" id="{{ cat_slug }}">
 
     <div class="category-header">
       <span class="category-name">{{ cat.name }}</span>
       <span class="category-count">
-        {% if needs > 0 %}<span class="needs">{{ needs }} needed</span>{% else %}all stocked{% endif %}
+        {% if wanted > 0 %}<span class="wanted">{{ wanted }} wanted</span>{% else %}all owned{% endif %}
       </span>
-      <form method="post" action="/groceries/delete-category" style="line-height:0">
+      <form method="post" action="/shopping/delete-category" style="line-height:0">
         <input type="hidden" name="category" value="{{ cat.name }}">
         <button type="submit" class="cat-delete-btn" title="Delete category">×</button>
       </form>
     </div>
 
     <div class="items">
-      {# Not-stocked items first, then stocked #}
-      {% set ns_items = cat['items'] | rejectattr('stocked') | list %}
-      {% set s_items  = cat['items'] | selectattr('stocked') | list %}
-      {% for item in ns_items + s_items %}
+      {# Wanted items first, then owned #}
+      {% set wanted_items = cat['items'] | rejectattr('owned') | list %}
+      {% set owned_items  = cat['items'] | selectattr('owned') | list %}
+      {% for item in wanted_items + owned_items %}
       <div class="item">
-        <form class="check-form" method="post" action="/groceries/toggle-item">
+        <form class="check-form" method="post" action="/shopping/toggle-item">
           <input type="hidden" name="category" value="{{ cat.name }}">
           <input type="hidden" name="item"     value="{{ item.name }}">
           <button type="submit"
-                  class="check-btn {{ 'stocked' if item.stocked else 'not-stocked' }}"
-                  title="{{ 'Mark as needed' if item.stocked else 'Mark as stocked' }}">
-            {% if item.stocked %}✓{% endif %}
+                  class="check-btn {{ 'owned' if item.owned else 'not-owned' }}"
+                  title="{{ 'Mark as wanted' if item.owned else 'Mark as owned' }}">
+            {% if item.owned %}✓{% endif %}
           </button>
         </form>
 
-        <span class="item-name {{ 'stocked' if item.stocked else 'not-stocked' }}">
+        <span class="item-name {{ 'owned' if item.owned else 'not-owned' }}">
           {{ item.name }}
         </span>
         {% if item.type %}
         <span class="type-badge type-{{ item.type }}">{{ item.type }}</span>
         {% endif %}
 
-        <form class="delete-form" method="post" action="/groceries/delete-item">
+        <form class="delete-form" method="post" action="/shopping/delete-item">
           <input type="hidden" name="category" value="{{ cat.name }}">
           <input type="hidden" name="item"     value="{{ item.name }}">
           <button type="submit" class="delete-btn" title="Remove item">×</button>
@@ -461,7 +463,7 @@
     </div>
 
     <div class="add-item-row">
-      <form method="post" action="/groceries/add-item" style="display:contents">
+      <form method="post" action="/shopping/add-item" style="display:contents">
         <input type="hidden" name="category" value="{{ cat.name }}">
         <input type="text" name="item" placeholder="Add item…" autocomplete="off">
         <button type="submit" class="add-item-btn">+ Add</button>
@@ -472,8 +474,8 @@
   {% endfor %}
 
   <div class="add-category">
-    <form method="post" action="/groceries/add-category" style="display:contents">
-      <input type="text" name="category" placeholder="New category (e.g. Dairy, Produce)…" autocomplete="off">
+    <form method="post" action="/shopping/add-category" style="display:contents">
+      <input type="text" name="category" placeholder="New category (e.g. Electronics, Personal Care)…" autocomplete="off">
       <button type="submit" class="add-category-btn">+ Category</button>
     </form>
   </div>
