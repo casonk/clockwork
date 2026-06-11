@@ -285,8 +285,8 @@
     }
     .add-category-btn:hover { background: var(--accent-dim); }
 
-    /* ── Reset button ── */
-    .reset-btn {
+    /* ── Action buttons (reset / sync) ── */
+    .reset-btn, .sync-btn {
       display: inline-flex; align-items: center; gap: 5px;
       padding: 5px 12px; border-radius: 6px;
       border: 1px solid var(--border);
@@ -296,6 +296,39 @@
       white-space: nowrap;
     }
     .reset-btn:hover { color: var(--yellow); border-color: var(--yellow); }
+    .sync-btn:hover  { color: var(--green);  border-color: var(--green); }
+    .sync-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .last-synced { font-size: 11px; color: var(--muted); white-space: nowrap; }
+
+    /* ── Type badges ── */
+    .type-badge {
+      font-size: 10px; font-weight: 700; letter-spacing: 0.4px;
+      text-transform: uppercase; padding: 1px 6px; border-radius: 4px;
+      flex-shrink: 0; white-space: nowrap;
+    }
+    .type-Meat       { background:#4d1a1a; color:#e05252; }
+    .type-Seafood    { background:#0d2d4d; color:#4a9eff; }
+    .type-Produce    { background:#1a4d30; color:#3ecf6e; }
+    .type-Dairy      { background:#4d3d0a; color:#e0b832; }
+    .type-Bakery     { background:#3d2010; color:#d4845a; }
+    .type-Beverages  { background:#1a1a4d; color:#7b6ff0; }
+    .type-Spirits    { background:#2d0a4d; color:#b07bff; }
+    .type-Spices     { background:#4d2a00; color:#e67e22; }
+    .type-Condiments { background:#0a3330; color:#1abc9c; }
+    .type-Pantry     { background:#1e2030; color:#8890b0; }
+    .type-Snacks     { background:#3d2a00; color:#f39c12; }
+    .type-Frozen     { background:#0a1f3d; color:#3498db; }
+    .type-Flavor     { background:#1a0a3d; color:#c07bff; }
+    .type-Drinks     { background:#0a2a3d; color:#5bc0de; }
+    /* fallback for any AI-invented type */
+    [class^="type-"] { background:#1e2030; color:#8890b0; }
+
+    /* ── Rules indicator ── */
+    .rules-chip {
+      font-size: 11px; color: var(--muted); white-space: nowrap;
+      padding: 3px 8px; border-radius: 5px;
+      border: 1px solid var(--border); background: var(--surface2);
+    }
 
     /* ── Mobile ── */
     @media (max-width: 600px) {
@@ -317,9 +350,35 @@
       </div>
     </div>
   </div>
-  <form method="post" action="/groceries/reset">
-    <button type="submit" class="reset-btn" title="Mark everything as not stocked">↺ Reset</button>
-  </form>
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    {% if last_synced_at %}
+    <span class="last-synced" title="Last synced from intake">⟳ {{ last_synced_at[:16] | replace('T',' ') }}</span>
+    {% endif %}
+    {% if rules_count %}
+    <span class="rules-chip" title="{{ rules_generated_at or 'AI-generated' }}">{{ rules_count }} AI rules</span>
+    {% endif %}
+    <form method="post" action="/groceries/sync-intake">
+      <button type="submit" class="sync-btn"
+              {% if not intake_available %}disabled title="Intake DB not found"{% else %}title="Mark items as stocked based on recent grocery receipts"{% endif %}>
+        ⟳ Sync
+      </button>
+    </form>
+    <form method="post" action="/groceries/ai-categorize">
+      <button type="submit" class="sync-btn"
+              {% if not ollama_available %}disabled title="Ollama not running"{% else %}title="Use AI to assign a type label to every item"{% endif %}>
+        ✦ Categorize
+      </button>
+    </form>
+    <form method="post" action="/groceries/ai-rules">
+      <button type="submit" class="sync-btn"
+              {% if not ollama_available or not intake_available %}disabled title="Requires Ollama + Intake DB"{% else %}title="Use AI to generate receipt-to-item alias rules from recent receipts"{% endif %}>
+        ✦ Gen Rules
+      </button>
+    </form>
+    <form method="post" action="/groceries/reset">
+      <button type="submit" class="reset-btn" title="Mark everything as not stocked">↺ Reset</button>
+    </form>
+  </div>
 </header>
 
 {% if total > 0 %}
@@ -384,6 +443,9 @@
         <span class="item-name {{ 'stocked' if item.stocked else 'not-stocked' }}">
           {{ item.name }}
         </span>
+        {% if item.type %}
+        <span class="type-badge type-{{ item.type }}">{{ item.type }}</span>
+        {% endif %}
 
         <form class="delete-form" method="post" action="/groceries/delete-item">
           <input type="hidden" name="category" value="{{ cat.name }}">

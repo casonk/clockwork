@@ -41,6 +41,14 @@ GROCERIES_FILE = Path(
 WIRING_HARNESS_DIR = Path(
     os.environ.get("CLOCKWORK_WIRING_HARNESS_DIR", BASE_DIR.parent / "wiring-harness")
 )
+INTAKE_DB = Path(
+    os.environ.get("CLOCKWORK_INTAKE_DB", BASE_DIR.parent / "intake" / "data" / "intake.db")
+)
+GROCERY_RULES_FILE = Path(
+    os.environ.get("CLOCKWORK_GROCERY_RULES_FILE", BASE_DIR / "config" / "grocery-rules.json")
+)
+_OLLAMA_BASE = os.environ.get("CREW_CHIEF_URL", "http://localhost:11434")
+_OLLAMA_MODEL = os.environ.get("CLOCKWORK_GROCERY_MODEL", "qwen2.5-coder:7b")
 
 
 def _resolve_manifest_path(canonical_rel: str) -> Path:
@@ -908,6 +916,411 @@ def job_logs(unit: str):
 
 
 # ---------------------------------------------------------------------------
+# Grocery — intake sync helpers
+# ---------------------------------------------------------------------------
+
+# Extra match tokens per grocery item name (lowercase).  Brand names, common
+# OCR fragments, and singular/plural alternates that won't appear verbatim.
+_GROCERY_ALIASES: dict[str, tuple[str, ...]] = {
+    "beer": (
+        "bud",
+        "coors",
+        "miller",
+        "heineken",
+        "corona",
+        "modelo",
+        "ale",
+        "lager",
+        "ipa",
+        "stout",
+        "pilsner",
+        "busch",
+        "natty",
+        "michelob",
+    ),
+    "pop": (
+        "cola",
+        "pepsi",
+        "coke",
+        "sprite",
+        "fanta",
+        "soda",
+        "7up",
+        "canada dry",
+        "mountain dew",
+        "dr pepper",
+        "ginger ale",
+        "mt dew",
+    ),
+    "orange juice": ("tropicana", "simply orange", "minute maid", "oj"),
+    "apple juice": ("motts", "mott"),
+    "salmon": ("atlantic salmon", "sockeye", "pink salmon", "lox"),
+    "shrimp": ("prawn",),
+    "instant ramen": ("ramen", "maruchan", "nissin", "top ramen"),
+    "avocado": ("hass", "avacado"),
+    "potatoes": ("potato", "russet", "yukon"),
+    "onions": ("onion",),
+    "green beans": ("green bean", "string bean"),
+    "salad": ("lettuce", "spinach", "romaine", "arugula", "mixed greens"),
+    "bread": ("loaf", "sourdough", "ciabatta", "baguette", "wheat bread", "white bread"),
+    "bagels": ("bagel",),
+    "chips": ("doritos", "lays", "pringles", "fritos", "cheetos", "tortilla chip"),
+    "chocolate": ("choc", "cocoa", "hershey", "ghirardelli", "lindt", "dove"),
+    "hot sauce": ("tabasco", "sriracha", "franks", "cholula"),
+    "soy sauce": ("soy sauce",),
+    "bbq sauce": ("bbq", "barbeque", "barbecue"),
+    "caesar dressing": ("caesar",),
+    "olive oil": ("evoo",),
+    "cream cheese": ("philly", "philadelphia"),
+    "coffee": ("folgers", "maxwell", "starbucks", "dunkin", "nescafe", "espresso"),
+    "tea": ("lipton", "bigelow", "celestial", "chai"),
+    "milk": ("dairy", "whole milk", "2 percent", "skim milk", "almond milk", "oat milk"),
+    "cheese": ("cheddar", "mozzarella", "gouda", "swiss", "parmesan", "brie", "feta"),
+    "yogurt": ("greek yogurt", "chobani", "fage", "siggi"),
+    "mushrooms": ("mushroom",),
+    "peppers": ("bell pepper", "jalapeno", "habanero", "serrano"),
+    "cherries": ("cherry",),
+    "banana": ("bananas",),
+    "apple": ("apples", "gala", "fuji", "granny smith", "honeycrisp"),
+    "orange": ("oranges", "navel", "clementine", "mandarin"),
+    "mango": ("mangos", "mangoes"),
+    "kiwi": ("kiwis",),
+    "chicken": ("poultry", "breast", "thigh", "drumstick", "tyson", "perdue", "rotisserie"),
+    "beef": ("ground beef", "steak", "sirloin", "ribeye", "chuck", "brisket", "angus"),
+    "pork": ("bacon", "ham", "pork chop", "tenderloin", "ribs"),
+    "sausage": ("bratwurst", "kielbasa", "chorizo", "andouille", "italian sausage"),
+    "soup": ("broth", "bouillon", "ramen broth", "chowder", "bisque"),
+    "rice": ("white rice", "brown rice", "basmati", "jasmine", "uncle bens", "uncle ben"),
+    "corn": (
+        "sweet corn",
+        "canned corn",
+    ),
+    "tomato": ("tomatoes", "roma", "cherry tomato", "beefsteak"),
+    "garlic": ("minced garlic",),
+    "jam": ("jelly", "preserves", "marmalade"),
+    "eggs": ("egg",),
+    "butter": ("margarine", "country crock", "land o lakes", "lurpak"),
+    "mayo": ("mayonnaise", "hellmans", "best foods", "dukes"),
+    "honey": ("raw honey",),
+    "salt": ("sea salt", "kosher salt", "table salt"),
+    "mustard": ("dijon",),
+    "ketchup": ("heinz ketchup", "hunts ketchup"),
+    "muffins": ("muffin",),
+    "sake": ("sake",),
+}
+
+
+def _norm_text(text: str) -> str:
+    """Lowercase; keep only letters, digits, and spaces."""
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", text.lower())).strip()
+
+
+def _word_hits(grocery_word: str, desc_words: list[str]) -> bool:
+    """Return True when grocery_word has an exact or stem match in desc_words."""
+    gw = grocery_word.strip()
+    if not gw or len(gw) < 3:
+        return gw in desc_words
+    for dw in desc_words:
+        if gw == dw:
+            return True
+        # prefix overlap (handles 'potato'/'potatoes', 'mushroom'/'mushrooms')
+        shorter, longer = (gw, dw) if len(gw) <= len(dw) else (dw, gw)
+        if len(shorter) >= 4 and longer.startswith(shorter):
+            return True
+        # grocery word is a substring of a dense OCR token like "EGGS6CT"
+        if len(gw) >= 4 and gw in dw:
+            return True
+    return False
+
+
+def _item_matches_desc(item_name: str, description: str) -> bool:
+    """Return True when *item_name* (a grocery list entry) matches *description* (a receipt line)."""
+    desc_norm = _norm_text(description)
+    desc_words = desc_norm.split()
+
+    item_lower = item_name.lower()
+    candidates: list[str] = [item_lower, *_GROCERY_ALIASES.get(item_lower, ())]
+
+    for candidate in candidates:
+        cand_words = _norm_text(candidate).split()
+        if not cand_words:
+            continue
+        if all(_word_hits(cw, desc_words) for cw in cand_words):
+            return True
+    return False
+
+
+def _sync_from_intake(
+    db_path: Path,
+    data: dict,
+    since: str | None = None,
+) -> tuple[int, list[str]]:
+    """Query intake for grocery receipts and mark matching items as stocked.
+
+    Returns (items_marked, list_of_item_labels) so the caller can flash results.
+    *since* is an ISO date string (YYYY-MM-DD); defaults to 30 days ago.
+    """
+    import sqlite3
+    from datetime import date, timedelta
+
+    if not db_path.exists():
+        return 0, []
+
+    if since is None:
+        since = (date.today() - timedelta(days=30)).isoformat()
+
+    conn = sqlite3.connect(str(db_path))
+    rows = conn.execute(
+        """
+        SELECT items_json FROM receipts
+        WHERE category LIKE 'grocery%'
+          AND items_json IS NOT NULL
+          AND items_json != '[]'
+          AND scan_date >= ?
+        ORDER BY scan_date DESC
+        """,
+        (since,),
+    ).fetchall()
+    conn.close()
+
+    descriptions: list[str] = []
+    for (items_json,) in rows:
+        try:
+            for item in json.loads(items_json):
+                desc = str(item.get("description") or "").strip()
+                if desc:
+                    descriptions.append(desc)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Merge AI-generated rules into a temporary alias table for this run
+    ai_aliases: dict[str, tuple[str, ...]] = {}
+    rules = load_grocery_rules()
+    for item_name, tokens in rules.get("aliases", {}).items():
+        if isinstance(tokens, list):
+            ai_aliases[item_name.lower()] = tuple(str(t) for t in tokens)
+
+    marked: list[str] = []
+    for cat in data["categories"]:
+        for item in cat["items"]:
+            if item["stocked"]:
+                continue
+            name = item["name"]
+            # temporarily inject AI aliases so _item_matches_desc sees them
+            name_lower = name.lower()
+            prev = _GROCERY_ALIASES.get(name_lower)
+            if name_lower in ai_aliases:
+                _GROCERY_ALIASES[name_lower] = (
+                    *(prev or ()),
+                    *ai_aliases[name_lower],
+                )
+            try:
+                if any(_item_matches_desc(name, d) for d in descriptions):
+                    item["stocked"] = True
+                    marked.append(f"{cat['name']}: {name}")
+            finally:
+                if prev is None:
+                    _GROCERY_ALIASES.pop(name_lower, None)
+                elif name_lower in ai_aliases:
+                    _GROCERY_ALIASES[name_lower] = prev
+
+    return len(marked), marked
+
+
+# ---------------------------------------------------------------------------
+# Grocery — AI helpers (Ollama via stdlib urllib)
+# ---------------------------------------------------------------------------
+
+
+def _ollama_available() -> bool:
+    """Return True when the local Ollama service is reachable."""
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"{_OLLAMA_BASE}/", timeout=3):
+            return True
+    except Exception:
+        return False
+
+
+def _ollama_generate(prompt: str, *, timeout: int = 180) -> str:
+    """POST to Ollama /api/generate and return the response text."""
+    import urllib.request
+
+    payload = json.dumps({"model": _OLLAMA_MODEL, "prompt": prompt, "stream": False}).encode()
+    req = urllib.request.Request(
+        f"{_OLLAMA_BASE}/api/generate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read()).get("response", "")
+
+
+def _extract_json(text: str) -> object:
+    """Return the first JSON object or array found in *text* (strips markdown fences)."""
+    text = re.sub(r"```(?:json)?\s*", "", text).strip()
+    for i, ch in enumerate(text):
+        if ch in "{[":
+            try:
+                return json.loads(text[i:])
+            except json.JSONDecodeError:
+                pass
+    return json.loads(text)
+
+
+def load_grocery_rules() -> dict:
+    if GROCERY_RULES_FILE.exists():
+        try:
+            return json.loads(GROCERY_RULES_FILE.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"aliases": {}, "types": {}}
+
+
+def save_grocery_rules(rules: dict) -> None:
+    GROCERY_RULES_FILE.write_text(json.dumps(rules, indent=2))
+
+
+def _ai_categorize(data: dict) -> tuple[int, str]:
+    """Ask the LLM to assign a grocery type to every uncategorized item.
+
+    Updates *data* in-place, adding/updating a ``type`` field on each item.
+    Returns (items_updated, model_used).
+    """
+    all_items: list[dict] = [
+        {"name": item["name"], "category": cat["name"]}
+        for cat in data["categories"]
+        for item in cat["items"]
+        if not item.get("type")
+    ]
+    if not all_items:
+        return 0, _OLLAMA_MODEL
+
+    names_csv = "\n".join(f"- {it['name']} (in {it['category']})" for it in all_items)
+    prompt = f"""\
+You are a grocery classification assistant.
+
+Classify each item below into exactly one type from this list:
+Meat, Seafood, Produce, Dairy, Bakery, Beverages, Spirits, Spices, Condiments, Pantry, Snacks, Frozen
+
+Items:
+{names_csv}
+
+Return ONLY a JSON object — no markdown, no explanation:
+{{"types": {{"Bread": "Bakery", "Chicken": "Meat", "Beer": "Spirits", ...}}}}
+"""
+    raw = _ollama_generate(prompt)
+    parsed = _extract_json(raw)
+    if not isinstance(parsed, dict) or "types" not in parsed:
+        raise ValueError(f"Unexpected model output: {raw[:200]}")
+
+    type_map: dict[str, str] = {str(k).lower(): str(v) for k, v in parsed["types"].items()}
+    updated = 0
+    for cat in data["categories"]:
+        for item in cat["items"]:
+            t = type_map.get(item["name"].lower())
+            if t:
+                item["type"] = t
+                updated += 1
+    return updated, _OLLAMA_MODEL
+
+
+def _ai_generate_rules(data: dict, db_path: Path, since: str | None = None) -> tuple[int, str]:
+    """Ask the LLM to generate receipt-to-item alias rules from recent grocery receipts.
+
+    Saves results to GROCERY_RULES_FILE.  Returns (new_aliases_added, model_used).
+    """
+    import sqlite3
+    from datetime import date, timedelta
+
+    if since is None:
+        since = (date.today() - timedelta(days=60)).isoformat()
+
+    conn = sqlite3.connect(str(db_path))
+    rows = conn.execute(
+        """
+        SELECT items_json FROM receipts
+        WHERE category LIKE 'grocery%'
+          AND items_json IS NOT NULL
+          AND items_json != '[]'
+          AND scan_date >= ?
+        ORDER BY scan_date DESC
+        LIMIT 200
+        """,
+        (since,),
+    ).fetchall()
+    conn.close()
+
+    seen: set[str] = set()
+    descriptions: list[str] = []
+    for (items_json,) in rows:
+        try:
+            for item in json.loads(items_json):
+                d = str(item.get("description") or "").strip()
+                if d and d not in seen:
+                    seen.add(d)
+                    descriptions.append(d)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if not descriptions:
+        return 0, _OLLAMA_MODEL
+
+    all_item_names = [item["name"] for cat in data["categories"] for item in cat["items"]]
+    items_csv = ", ".join(all_item_names)
+    descs_sample = "\n".join(f"- {d}" for d in descriptions[:80])
+
+    prompt = f"""\
+You are a grocery receipt alias generator. Receipt OCR descriptions often contain brand
+names, abbreviations, and product codes. Your job: given receipt descriptions and a
+grocery item list, produce short keyword tokens that appear in the descriptions and
+reliably identify each grocery item.
+
+Receipt OCR descriptions (sample):
+{descs_sample}
+
+Grocery item list:
+{items_csv}
+
+Rules:
+- Only create aliases for items where the descriptions contain useful, non-obvious tokens
+- Tokens should be 1–3 words, lowercase
+- Skip items whose name already appears verbatim in receipts
+- Prefer brand fragments and abbreviations over generic words
+
+Return ONLY a JSON object — no markdown, no explanation:
+{{"aliases": {{"Beer": ["bud", "coors", "natty light"], "Cherries": ["blkchry", "cherry"]}}}}
+"""
+    raw = _ollama_generate(prompt)
+    parsed = _extract_json(raw)
+    if not isinstance(parsed, dict) or "aliases" not in parsed:
+        raise ValueError(f"Unexpected model output: {raw[:200]}")
+
+    new_aliases: dict[str, list[str]] = {}
+    for item_name, tokens in parsed["aliases"].items():
+        if isinstance(tokens, list) and tokens:
+            new_aliases[str(item_name)] = [str(t).lower() for t in tokens if t]
+
+    rules = load_grocery_rules()
+    existing = rules.get("aliases", {})
+    added = 0
+    for item_name, tokens in new_aliases.items():
+        prev = existing.get(item_name, [])
+        merged = list(dict.fromkeys([*prev, *tokens]))  # dedupe, preserve order
+        if len(merged) > len(prev):
+            added += len(merged) - len(prev)
+        existing[item_name] = merged
+    rules["aliases"] = existing
+    rules["rules_generated_at"] = (
+        __import__("datetime").datetime.now().isoformat(timespec="seconds")
+    )
+    save_grocery_rules(rules)
+    return added, _OLLAMA_MODEL
+
+
+# ---------------------------------------------------------------------------
 # Routes — groceries
 # ---------------------------------------------------------------------------
 
@@ -931,7 +1344,19 @@ def groceries():
     data = load_groceries()
     total = sum(len(c["items"]) for c in data["categories"])
     stocked = sum(1 for c in data["categories"] for i in c["items"] if i["stocked"])
-    return render_template("groceries.html", data=data, total=total, stocked=stocked)
+    rules = load_grocery_rules()
+    rules_count = sum(len(v) for v in rules.get("aliases", {}).values())
+    return render_template(
+        "groceries.html",
+        data=data,
+        total=total,
+        stocked=stocked,
+        last_synced_at=data.get("last_synced_at"),
+        intake_available=INTAKE_DB.exists(),
+        ollama_available=_ollama_available(),
+        rules_count=rules_count,
+        rules_generated_at=rules.get("rules_generated_at"),
+    )
 
 
 @app.post("/groceries/add-category")
@@ -1015,6 +1440,66 @@ def groceries_reset():
     return redirect(url_for("groceries"))
 
 
+@app.post("/groceries/sync-intake")
+def groceries_sync_intake():
+    since = request.form.get("since", "").strip() or None
+    data = load_groceries()
+    count, marked = _sync_from_intake(INTAKE_DB, data, since=since)
+    if not INTAKE_DB.exists():
+        flash("Intake DB not found — set CLOCKWORK_INTAKE_DB.", "error")
+        return redirect(url_for("groceries"))
+    if count == 0:
+        flash("No new matches found in recent grocery receipts.", "success")
+    else:
+        data["last_synced_at"] = __import__("datetime").datetime.now().isoformat(timespec="seconds")
+        save_groceries(data)
+        flash(
+            f"Marked {count} item{'s' if count != 1 else ''} as stocked: {', '.join(marked)}.",
+            "success",
+        )
+    return redirect(url_for("groceries"))
+
+
+@app.post("/groceries/ai-categorize")
+def groceries_ai_categorize():
+    if not _ollama_available():
+        flash("Ollama is not reachable — start crew-chief before using AI features.", "error")
+        return redirect(url_for("groceries"))
+    data = load_groceries()
+    try:
+        count, model = _ai_categorize(data)
+    except Exception as exc:
+        flash(f"AI categorize failed: {exc}", "error")
+        return redirect(url_for("groceries"))
+    if count == 0:
+        flash("All items already have types — nothing to categorize.", "success")
+    else:
+        save_groceries(data)
+        flash(f"Assigned types to {count} item{'s' if count != 1 else ''} via {model}.", "success")
+    return redirect(url_for("groceries"))
+
+
+@app.post("/groceries/ai-rules")
+def groceries_ai_rules():
+    if not _ollama_available():
+        flash("Ollama is not reachable — start crew-chief before using AI features.", "error")
+        return redirect(url_for("groceries"))
+    if not INTAKE_DB.exists():
+        flash("Intake DB not found — set CLOCKWORK_INTAKE_DB.", "error")
+        return redirect(url_for("groceries"))
+    data = load_groceries()
+    try:
+        added, model = _ai_generate_rules(data, INTAKE_DB)
+    except Exception as exc:
+        flash(f"AI rules generation failed: {exc}", "error")
+        return redirect(url_for("groceries"))
+    if added == 0:
+        flash("No new alias tokens generated — try after more receipts are scanned.", "success")
+    else:
+        flash(f"Added {added} new alias token{'s' if added != 1 else ''} via {model}.", "success")
+    return redirect(url_for("groceries"))
+
+
 def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
 
@@ -1073,23 +1558,27 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
     for svc in raw:
         name = str(svc.get("name", ""))
         group = _REPO_GROUP.get(str(svc.get("owner_repo", "")), "Other")
-        groups.setdefault(group, []).append({
-            "name": name,
-            "display": str(svc.get("description", name)),
-            "url": _svc_url(svc),
-            "hostname": str(svc.get("hostname", "")),
-            "access_mode": str(svc.get("access_mode", "")),
-            "icon": _SERVICE_ICONS.get(name, "🔗"),
-        })
+        groups.setdefault(group, []).append(
+            {
+                "name": name,
+                "display": str(svc.get("description", name)),
+                "url": _svc_url(svc),
+                "hostname": str(svc.get("hostname", "")),
+                "access_mode": str(svc.get("access_mode", "")),
+                "icon": _SERVICE_ICONS.get(name, "🔗"),
+            }
+        )
 
-    groups["Clockwork"].append({
-        "name": "clockwork-groceries",
-        "display": "Groceries",
-        "url": "/groceries",
-        "hostname": "",
-        "access_mode": "shared-mtls",
-        "icon": "🛒",
-    })
+    groups["Clockwork"].append(
+        {
+            "name": "clockwork-groceries",
+            "display": "Groceries",
+            "url": "/groceries",
+            "hostname": "",
+            "access_mode": "shared-mtls",
+            "icon": "🛒",
+        }
+    )
 
     ordered = _GROUP_ORDER + sorted(set(groups) - set(_GROUP_ORDER))
     return [(g, cards) for g in ordered if (cards := groups.get(g))]
@@ -1098,6 +1587,16 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
 @app.get("/home")
 def home():
     return render_template("home.html", groups=_load_portal_groups())
+
+
+@app.post("/rebuild/guacamole")
+def rebuild_guacamole():
+    rc, out = _run("sudo", "-n", "/usr/local/bin/pit-box-rebuild-guacamole", timeout=120)
+    if rc == 0:
+        flash("Guacamole rebuilt successfully.", "success")
+    else:
+        flash(f"Rebuild failed (exit {rc}): {out}", "error")
+    return redirect(url_for("home"))
 
 
 # ---------------------------------------------------------------------------
