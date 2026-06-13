@@ -145,8 +145,8 @@ def _inject_csrf_token() -> dict[str, object]:
 
 
 @app.context_processor
-def _inject_nav_shortcuts() -> dict[str, object]:
-    return {"nav_shortcuts": _load_nav_shortcuts()}
+def _inject_nav_categories() -> dict[str, object]:
+    return {"nav_categories": _load_nav_categories()}
 
 
 @app.before_request
@@ -2025,12 +2025,7 @@ def shopping_ai_rules():
 # Routes — home portal
 # ---------------------------------------------------------------------------
 
-_NAV_SERVICE_NAMES: tuple[str, ...] = (
-    "pit-box-webterm",
-    "nordility-web",
-    "magneto-web",
-    "intake-reports",
-)
+_NAV_CATEGORY_GROUPS: tuple[str, ...] = ("Monitoring", "Pit Box", "Infrastructure", "AI")
 
 _SERVICE_ICONS: dict[str, str] = {
     "clockwork-web": "⏰",
@@ -2072,25 +2067,22 @@ def _svc_url(svc: dict) -> str:
     return f"https://{host}:{port}" if port and port not in (80, 443) else f"https://{host}"
 
 
-def _load_nav_shortcuts() -> list[dict]:
-    """Return icon/href/title dicts for the global nav bar (external services)."""
+def _group_anchor(name: str) -> str:
+    return name.lower().replace(" ", "-")
+
+
+def _load_nav_categories() -> list[dict]:
+    """Return {label, href} for non-empty portal groups shown in the global nav."""
     local = WIRING_HARNESS_DIR / "services.local.toml"
     base = WIRING_HARNESS_DIR / "services.toml"
     path = local if local.exists() else base
     raw: list = list(tomlkit.loads(path.read_text()).get("services", [])) if path.exists() else []
-    by_name = {str(s.get("name", "")): s for s in raw}
-    shortcuts = []
-    for name in _NAV_SERVICE_NAMES:
-        svc = by_name.get(name)
-        if svc:
-            shortcuts.append(
-                {
-                    "href": _svc_url(svc),
-                    "icon": _SERVICE_ICONS.get(name, "🔗"),
-                    "title": str(svc.get("description", name)),
-                }
-            )
-    return shortcuts
+    populated = {_REPO_GROUP.get(str(s.get("owner_repo", ""))) for s in raw}
+    return [
+        {"label": g, "href": f"/home#{_group_anchor(g)}"}
+        for g in _NAV_CATEGORY_GROUPS
+        if g in populated
+    ]
 
 
 def _load_portal_groups() -> list[tuple[str, list[dict]]]:
