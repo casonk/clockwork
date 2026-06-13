@@ -199,9 +199,7 @@ def test_load_shopping_rules_returns_empty_when_missing(shopping_rules_file):
 
 
 def test_load_shopping_rules_reads_existing(shopping_rules_file):
-    shopping_rules_file.write_text(
-        json.dumps({"aliases": {"Jeans": ["levi"]}, "types": {}})
-    )
+    shopping_rules_file.write_text(json.dumps({"aliases": {"Jeans": ["levi"]}, "types": {}}))
     result = web_app.load_shopping_rules()
     assert result["aliases"]["Jeans"] == ["levi"]
 
@@ -236,27 +234,17 @@ def test_sync_shopping_marks_matching_items_owned(sample_shopping_data, shopping
 
 
 def test_sync_shopping_skips_already_owned(sample_shopping_data, shopping_intake_db):
-    web_app._sync_shopping_from_intake(
-        shopping_intake_db, sample_shopping_data, since="2026-05-01"
-    )
+    web_app._sync_shopping_from_intake(shopping_intake_db, sample_shopping_data, since="2026-05-01")
     jacket = next(
-        i
-        for c in sample_shopping_data["categories"]
-        for i in c["items"]
-        if i["name"] == "Jacket"
+        i for c in sample_shopping_data["categories"] for i in c["items"] if i["name"] == "Jacket"
     )
     assert jacket["owned"] is True
 
 
 def test_sync_shopping_does_not_mark_unrelated_item(sample_shopping_data, shopping_intake_db):
-    web_app._sync_shopping_from_intake(
-        shopping_intake_db, sample_shopping_data, since="2026-05-01"
-    )
+    web_app._sync_shopping_from_intake(shopping_intake_db, sample_shopping_data, since="2026-05-01")
     backpack = next(
-        i
-        for c in sample_shopping_data["categories"]
-        for i in c["items"]
-        if i["name"] == "Backpack"
+        i for c in sample_shopping_data["categories"] for i in c["items"] if i["name"] == "Backpack"
     )
     assert backpack["owned"] is False
 
@@ -277,11 +265,11 @@ def test_sync_shopping_respects_since_date(sample_shopping_data, shopping_intake
     assert count_narrow >= 1  # at least the recent receipt matched something
 
 
-def test_sync_shopping_uses_ai_rules(
-    sample_shopping_data, shopping_intake_db, shopping_rules_file
-):
+def test_sync_shopping_uses_ai_rules(sample_shopping_data, shopping_intake_db, shopping_rules_file):
     # Add an AI rule that maps "duct tape" → Backpack (artificial, just tests the plumbing)
-    shopping_rules_file.write_text(json.dumps({"aliases": {"Backpack": ["duct tape"]}, "types": {}}))
+    shopping_rules_file.write_text(
+        json.dumps({"aliases": {"Backpack": ["duct tape"]}, "types": {}})
+    )
     conn = sqlite3.connect(str(shopping_intake_db))
     conn.execute(
         "INSERT INTO receipts VALUES (?, ?, ?, ?, ?)",
@@ -614,9 +602,7 @@ def test_sync_shopping_intake_route_no_matches_flashes_info(
 # ---------------------------------------------------------------------------
 
 
-def test_ai_categorize_shopping_route_applies_types(
-    client, shopping_file, monkeypatch
-):
+def test_ai_categorize_shopping_route_applies_types(client, shopping_file, monkeypatch):
     monkeypatch.setattr(web_app, "_ollama_available", lambda: True)
     monkeypatch.setattr(web_app, "_ollama_generate", lambda *a, **kw: _CATEGORIZE_RESPONSE)
     resp = client.post(
@@ -732,9 +718,7 @@ def test_get_shopping_passes_rules_count(client, shopping_rules_file, monkeypatc
     assert b"3 AI rules" in resp.data
 
 
-def test_get_shopping_shows_type_badge_after_categorize(
-    client, shopping_file, monkeypatch
-):
+def test_get_shopping_shows_type_badge_after_categorize(client, shopping_file, monkeypatch):
     data = json.loads(shopping_file.read_text())
     data["categories"][0]["items"][0]["type"] = "Tops"
     shopping_file.write_text(json.dumps(data))
