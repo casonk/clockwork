@@ -2029,6 +2029,7 @@ _NAV_SERVICE_NAMES: tuple[str, ...] = (
     "pit-box-webterm",
     "nordility-web",
     "magneto-web",
+    "intake-reports",
 )
 
 _SERVICE_ICONS: dict[str, str] = {
