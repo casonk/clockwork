@@ -144,6 +144,11 @@ def _inject_csrf_token() -> dict[str, object]:
     return {"csrf_token": _csrf_token()}
 
 
+@app.context_processor
+def _inject_nav_shortcuts() -> dict[str, object]:
+    return {"nav_shortcuts": _load_nav_shortcuts()}
+
+
 @app.before_request
 def _protect_state_changing_requests() -> None:
     """Reject cross-origin state-changing requests."""
@@ -2020,6 +2025,12 @@ def shopping_ai_rules():
 # Routes — home portal
 # ---------------------------------------------------------------------------
 
+_NAV_SERVICE_NAMES: tuple[str, ...] = (
+    "pit-box-webterm",
+    "nordility-web",
+    "magneto-web",
+)
+
 _SERVICE_ICONS: dict[str, str] = {
     "clockwork-web": "⏰",
     "tachometer-dashboard": "📊",
@@ -2058,6 +2069,27 @@ def _svc_url(svc: dict) -> str:
     if mode in ("shared-mtls", "snowbridge-mtls"):
         return f"https://{host}"
     return f"https://{host}:{port}" if port and port not in (80, 443) else f"https://{host}"
+
+
+def _load_nav_shortcuts() -> list[dict]:
+    """Return icon/href/title dicts for the global nav bar (external services)."""
+    local = WIRING_HARNESS_DIR / "services.local.toml"
+    base = WIRING_HARNESS_DIR / "services.toml"
+    path = local if local.exists() else base
+    raw: list = list(tomlkit.loads(path.read_text()).get("services", [])) if path.exists() else []
+    by_name = {str(s.get("name", "")): s for s in raw}
+    shortcuts = []
+    for name in _NAV_SERVICE_NAMES:
+        svc = by_name.get(name)
+        if svc:
+            shortcuts.append(
+                {
+                    "href": _svc_url(svc),
+                    "icon": _SERVICE_ICONS.get(name, "🔗"),
+                    "title": str(svc.get("description", name)),
+                }
+            )
+    return shortcuts
 
 
 def _load_portal_groups() -> list[tuple[str, list[dict]]]:
