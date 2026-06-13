@@ -64,3 +64,25 @@ should change how future sessions work in this repo.
 
 - If a scheduled workflow is meant to be tuned from the Clockwork web UI, expose `OnBootSec` and `OnUnitActiveSec` for interval timers, not only `OnCalendar` for calendar timers.
 - Keep workload behavior in the downstream repo; Clockwork should own the schedule manifest, install path, and web-editable cadence.
+
+### 2026-06-12 — Externalized UI state must be seeded before switching service env
+
+- When a Clockwork web tool moves mutable JSON state out of `config/` via an
+  environment variable such as `CLOCKWORK_GROCERIES_FILE`, seed the target file
+  before restarting the live service.
+- If the target lives in a downstream repo's `data/` directory, make that
+  runtime state explicitly ignored in the downstream repo so UI edits do not
+  become accidental source changes.
+
+### 2026-06-12 — Same-origin POST checks must account for reverse proxies
+
+- When Clockwork runs behind Caddy, Flask may see `request.host` as the
+  loopback backend while the browser sends `Origin` or `Referer` for the public
+  proxy host.
+- Same-origin checks for form POSTs should compare against trusted forwarded
+  host headers such as `X-Forwarded-Host`, not only the backend host, or
+  legitimate UI actions will fail with `403 Forbidden`.
+- If the proxy also sets `Referrer-Policy: no-referrer`, plain HTML form posts
+  may arrive without both `Origin` and `Referer`. Accept explicit browser
+  `Sec-Fetch-Site: same-origin` metadata as the fallback signal for those
+  requests, or Safari and similar clients can still hit false `403` responses.

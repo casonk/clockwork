@@ -131,6 +131,57 @@ def test_edit_job_updates_interval_timer_cadence(tmp_path, monkeypatch):
     assert timer["on_unit_active_sec"] == "30m"
 
 
+def test_state_changing_post_allows_forwarded_same_origin(tmp_path, monkeypatch):
+    manifest_path = tmp_path / "shock-relay" / "gmail-digest.toml"
+    _write_interval_manifest(manifest_path)
+    monkeypatch.setattr(web_app, "EXAMPLES_DIR", tmp_path)
+
+    client = web_app.app.test_client()
+    response = client.post(
+        "/edit/job",
+        data={
+            "manifest_path": "shock-relay/gmail-digest.toml",
+            "job_name": "shock-relay-gmail-digest",
+            "description": "Send queued digest emails",
+            "exec_start": "/usr/bin/env python3 %h/git/util-repos/shock-relay/services/gmail-imap/send_digest.py",
+            "working_directory": "%h/git/util-repos/shock-relay",
+        },
+        headers={
+            "Host": "127.0.0.1:5000",
+            "Origin": "https://clockwork.example",
+            "X-Forwarded-Host": "clockwork.example",
+        },
+    )
+
+    assert response.status_code == 302
+
+
+def test_state_changing_post_allows_same_origin_fetch_metadata_without_origin(
+    tmp_path, monkeypatch
+):
+    manifest_path = tmp_path / "shock-relay" / "gmail-digest.toml"
+    _write_interval_manifest(manifest_path)
+    monkeypatch.setattr(web_app, "EXAMPLES_DIR", tmp_path)
+
+    client = web_app.app.test_client()
+    response = client.post(
+        "/edit/job",
+        data={
+            "manifest_path": "shock-relay/gmail-digest.toml",
+            "job_name": "shock-relay-gmail-digest",
+            "description": "Send queued digest emails",
+            "exec_start": "/usr/bin/env python3 %h/git/util-repos/shock-relay/services/gmail-imap/send_digest.py",
+            "working_directory": "%h/git/util-repos/shock-relay",
+        },
+        headers={
+            "Host": "127.0.0.1:5000",
+            "Sec-Fetch-Site": "same-origin",
+        },
+    )
+
+    assert response.status_code == 302
+
+
 def test_fetch_all_statuses_uses_cron_status_for_cron_only_and_cron_selected_jobs(monkeypatch):
     cron_calls: list[str] = []
     unit_calls: list[str] = []

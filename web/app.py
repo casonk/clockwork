@@ -106,6 +106,21 @@ def _journal_line_counts_as_success(line: str) -> bool:
     return _is_zero_error_summary(line) or "finished" in low or "succeeded" in low
 
 
+def _request_host_candidates() -> set[str]:
+    """Return hostnames that legitimately represent this request.
+
+    Flask sees the backend host when the app is behind Caddy, while browsers
+    send Origin/Referer for the public proxy host.
+    """
+    candidates = {request.host}
+    for header in ("X-Forwarded-Host", "X-Original-Host"):
+        value = request.headers.get(header, "")
+        if not value:
+            continue
+        candidates.add(value.split(",", 1)[0].strip())
+    return {host for host in candidates if host}
+
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("CLOCKWORK_WEB_SECRET") or secrets.token_hex(32)
 
@@ -116,7 +131,12 @@ def _protect_state_changing_requests() -> None:
     if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
         return
     source = request.headers.get("Origin") or request.headers.get("Referer")
-    if source and same_origin_host(source, request.host):
+    if source and any(same_origin_host(source, host) for host in _request_host_candidates()):
+        return
+    # Safari and plain HTML form posts can omit Origin, and our proxy currently
+    # strips Referer with Referrer-Policy: no-referrer. Accept explicit browser
+    # same-origin fetch metadata as the fallback signal for real same-site posts.
+    if not source and request.headers.get("Sec-Fetch-Site") == "same-origin":
         return
     abort(403, description="Cross-origin state-changing request blocked.")
 
