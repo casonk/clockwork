@@ -178,6 +178,7 @@
     <a href="/groceries" class="nav-link" title="Groceries">🛒</a>
     <a href="/shopping" class="nav-link" title="Shopping">🛍️</a>
     <a href="/" class="nav-link" title="Clockwork">⏰</a>
+    {% for s in nav_shortcuts %}<a href="{{ s.href }}" class="nav-link" title="{{ s.title }}" target="_blank" rel="noopener noreferrer">{{ s.icon }}</a>{% endfor %}
   </div>
 </header>
 
