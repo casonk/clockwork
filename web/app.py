@@ -461,7 +461,12 @@ def fetch_all_statuses(repos: dict) -> dict[str, dict]:
                 if job.get("cron") and job.get("target") == "cron":
                     statuses[key] = build_cron_status(job)
                 elif not job.get("cron") or job.get("timer"):
-                    statuses[key] = unit_status(primary_unit(job), scope=job.get("scope", "user"))
+                    status = unit_status(primary_unit(job), scope=job.get("scope", "user"))
+                    if not status.get("next_run_iso") and job.get("cron"):
+                        cron_status = build_cron_status(job)
+                        status["next_run_text"] = cron_status.get("next_run_text", "")
+                        status["next_run_iso"] = cron_status.get("next_run_iso", "")
+                    statuses[key] = status
                 else:
                     statuses[key] = build_cron_status(job)
     return statuses

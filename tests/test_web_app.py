@@ -248,10 +248,16 @@ def test_fetch_all_statuses_uses_cron_status_for_cron_only_and_cron_selected_job
         }
     )
 
-    assert cron_calls == ["cron-only", "dual-cron"]
+    assert cron_calls == ["cron-only", "dual-cron", "dual-systemd"]
     assert unit_calls == ["dual-systemd.timer"]
     assert statuses["archility/archility-daily.toml:cron-only"]["active_state"] == "cron"
     assert statuses["archility/archility-daily.toml:dual-cron"]["next_run_text"] == "next dual-cron"
+    # systemd returned no next_run_iso, so cron expression is used as fallback
+    assert (
+        statuses["archility/archility-daily.toml:dual-systemd"]["next_run_text"]
+        == "next dual-systemd"
+    )
+    assert statuses["archility/archility-daily.toml:dual-systemd"]["active_state"] == "inactive"
 
 
 def test_job_details_treats_non_fatal_log_lines_as_warnings(monkeypatch):
