@@ -86,3 +86,12 @@ should change how future sessions work in this repo.
   may arrive without both `Origin` and `Referer`. Accept explicit browser
   `Sec-Fetch-Site: same-origin` metadata as the fallback signal for those
   requests, or Safari and similar clients can still hit false `403` responses.
+
+### 2026-06-12 — Plain HTML form flows need CSRF tokens, not only header heuristics
+
+- Reverse-proxy-aware `Origin` and `Referer` checks are still not enough for
+  all browsers: some plain form submits omit both headers and may also omit
+  fetch metadata.
+- For Clockwork's grocery, shopping, and web-control forms, render a session
+  CSRF token into every POST form and accept that token server-side before
+  falling back to same-origin header checks.

@@ -426,6 +426,7 @@
     <div class="ctrl-group">
       <span class="ctrl-label">All:</span>
       <form method="post" action="/toggle/all">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button type="submit" class="toggle-btn neutral">⏻ Toggle All</button>
       </form>
     </div>
@@ -435,6 +436,7 @@
     <div class="ctrl-group">
       <span class="ctrl-label">Target:</span>
       <form method="post" action="/toggle/target/global">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <div class="pill">
           <button type="submit" name="_t" value="systemd"
                   class="pill-btn {% if global_target == 'systemd' %}active{% endif %}">
@@ -496,6 +498,7 @@
       </div>
       <div class="repo-controls" onclick="event.stopPropagation()">
         <form method="post" action="/toggle/repo/{{ repo_name }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <button type="submit" class="toggle-btn {{ 'on' if repo.enabled else 'off' }}">
             {{ '● Enabled' if repo.enabled else '○ Disabled' }}
           </button>
@@ -542,6 +545,7 @@
                 {# ── Per-job cron/systemd pill (all scheduled jobs) ── #}
                 {% if job.timer or job.cron %}
                 <form method="post" action="/toggle/target/job" onclick="event.stopPropagation()">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                   <input type="hidden" name="manifest_path" value="{{ manifest.path }}">
                   <input type="hidden" name="job_name" value="{{ job.name }}">
                   <div class="pill">
@@ -562,6 +566,7 @@
 
                 {# ── Enable / disable ── #}
                 <form method="post" action="/toggle/job" onclick="event.stopPropagation()">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                   <input type="hidden" name="manifest_path" value="{{ manifest.path }}">
                   <input type="hidden" name="job_name" value="{{ job.name }}">
                   <button type="submit" class="toggle-btn {{ 'on' if job.enabled else 'off' }}">
@@ -571,6 +576,7 @@
 
                 {# ── Restart ── #}
                 <form method="post" action="/restart/job" onclick="event.stopPropagation()">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                   <input type="hidden" name="manifest_path" value="{{ manifest.path }}">
                   <input type="hidden" name="job_name" value="{{ job.name }}">
                   <button type="submit" class="icon-btn" title="Restart service">⟳</button>
@@ -692,6 +698,7 @@
     <h3>Edit Job</h3>
     <div class="modal-job-name" id="modal-job-label"></div>
     <form method="post" action="/edit/job">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="manifest_path" id="f-manifest-path">
       <input type="hidden" name="job_name"      id="f-job-name">
       <input type="hidden" name="provider_env_key" id="f-provider-env-key">

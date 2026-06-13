@@ -360,24 +360,28 @@
     <span class="rules-chip" title="{{ rules_generated_at or 'AI-generated' }}">{{ rules_count }} AI rules</span>
     {% endif %}
     <form method="post" action="/shopping/sync-intake">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button type="submit" class="sync-btn"
               {% if not intake_available %}disabled title="Intake DB not found"{% else %}title="Mark items as owned based on recent receipts"{% endif %}>
         ⟳ Sync
       </button>
     </form>
     <form method="post" action="/shopping/ai-categorize">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button type="submit" class="sync-btn"
               {% if not ollama_available %}disabled title="Ollama not running"{% else %}title="Use AI to assign a type label to every item"{% endif %}>
         ✦ Categorize
       </button>
     </form>
     <form method="post" action="/shopping/ai-rules">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button type="submit" class="sync-btn"
               {% if not ollama_available or not intake_available %}disabled title="Requires Ollama + Intake DB"{% else %}title="Use AI to generate receipt-to-item alias rules from recent receipts"{% endif %}>
         ✦ Gen Rules
       </button>
     </form>
     <form method="post" action="/shopping/reset">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button type="submit" class="reset-btn" title="Mark everything as wanted">↺ Reset</button>
     </form>
   </div>
@@ -421,6 +425,7 @@
         {% if wanted > 0 %}<span class="wanted">{{ wanted }} wanted</span>{% else %}all owned{% endif %}
       </span>
       <form method="post" action="/shopping/delete-category" style="line-height:0">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="category" value="{{ cat.name }}">
         <button type="submit" class="cat-delete-btn" title="Delete category">×</button>
       </form>
@@ -433,6 +438,7 @@
       {% for item in wanted_items + owned_items %}
       <div class="item">
         <form class="check-form" method="post" action="/shopping/toggle-item">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="category" value="{{ cat.name }}">
           <input type="hidden" name="item"     value="{{ item.name }}">
           <button type="submit"
@@ -450,6 +456,7 @@
         {% endif %}
 
         <form class="delete-form" method="post" action="/shopping/delete-item">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="category" value="{{ cat.name }}">
           <input type="hidden" name="item"     value="{{ item.name }}">
           <button type="submit" class="delete-btn" title="Remove item">×</button>
@@ -464,6 +471,7 @@
 
     <div class="add-item-row">
       <form method="post" action="/shopping/add-item" style="display:contents">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="category" value="{{ cat.name }}">
         <input type="text" name="item" placeholder="Add item…" autocomplete="off">
         <button type="submit" class="add-item-btn">+ Add</button>
@@ -475,6 +483,7 @@
 
   <div class="add-category">
     <form method="post" action="/shopping/add-category" style="display:contents">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="text" name="category" placeholder="New category (e.g. Electronics, Personal Care)…" autocomplete="off">
       <button type="submit" class="add-category-btn">+ Category</button>
     </form>
