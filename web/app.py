@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 
 import tomlkit
-from flask import Flask, abort, flash, jsonify, redirect, render_template, request, url_for
+from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for
 
 try:
     from web.security import same_origin_host, validate_remote_bind
@@ -125,10 +125,31 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("CLOCKWORK_WEB_SECRET") or secrets.token_hex(32)
 
 
+def _csrf_token() -> str:
+    token = session.get("_csrf_token", "")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["_csrf_token"] = token
+    return token
+
+
+def _has_valid_csrf_token() -> bool:
+    expected = session.get("_csrf_token", "")
+    provided = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token", "")
+    return bool(expected and provided and secrets.compare_digest(expected, provided))
+
+
+@app.context_processor
+def _inject_csrf_token() -> dict[str, object]:
+    return {"csrf_token": _csrf_token()}
+
+
 @app.before_request
 def _protect_state_changing_requests() -> None:
     """Reject cross-origin state-changing requests."""
     if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return
+    if _has_valid_csrf_token():
         return
     source = request.headers.get("Origin") or request.headers.get("Referer")
     if source and any(same_origin_host(source, host) for host in _request_host_candidates()):

@@ -211,6 +211,7 @@
           <a href="{{ card.rdp_url }}" class="btn-action btn-app">App</a>
           {% endif %}
           <form method="post" action="/rebuild/guacamole">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button type="submit" class="btn-action btn-rebuild"
               onclick="this.disabled=true;this.textContent='…';this.form.submit()">Rebuild</button>
           </form>
