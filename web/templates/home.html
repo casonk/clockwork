@@ -178,7 +178,7 @@
     <a href="/groceries" class="nav-link" title="Groceries">🛒</a>
     <a href="/shopping" class="nav-link" title="Shopping">🛍️</a>
     <a href="/" class="nav-link" title="Clockwork">⏰</a>
-    {% for s in nav_shortcuts %}<a href="{{ s.href }}" class="nav-link" title="{{ s.title }}" target="_blank" rel="noopener noreferrer">{{ s.icon }}</a>{% endfor %}
+    {% for cat in nav_categories %}<a href="{{ cat.href }}" class="nav-link" style="font-size:13px;font-weight:500">{{ cat.label }}</a>{% endfor %}
   </div>
 </header>
 
@@ -197,7 +197,7 @@
   {% endif %}
   {% endwith %}
   {% for group_name, cards in groups %}
-  <div class="group">
+  <div class="group" id="{{ group_name | lower | replace(' ', '-') }}">
     <div class="group-label">{{ group_name }}</div>
     <div class="card-grid">
       {% for card in cards %}

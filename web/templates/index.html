@@ -420,7 +420,7 @@
     <a href="/home" style="font-size:18px; text-decoration:none; opacity:0.6; transition:opacity 0.15s;" title="Home" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">🏠</a>
     <a href="/groceries" style="font-size:18px; text-decoration:none; opacity:0.6; transition:opacity 0.15s;" title="Groceries" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">🛒</a>
     <a href="/shopping" style="font-size:18px; text-decoration:none; opacity:0.6; transition:opacity 0.15s;" title="Shopping" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">🛍️</a>
-    {% for s in nav_shortcuts %}<a href="{{ s.href }}" style="font-size:18px; text-decoration:none; opacity:0.6; transition:opacity 0.15s;" title="{{ s.title }}" target="_blank" rel="noopener noreferrer" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">{{ s.icon }}</a>{% endfor %}
+    {% for cat in nav_categories %}<a href="{{ cat.href }}" style="font-size:13px; font-weight:500; text-decoration:none; opacity:0.6; transition:opacity 0.15s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">{{ cat.label }}</a>{% endfor %}
   </div>
 
   <div class="global-controls">
