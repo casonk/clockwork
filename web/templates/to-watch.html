@@ -213,9 +213,10 @@
     .torrent-name {
       flex: 1; font-size: 12px; color: var(--text);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      min-width: 0;
+      min-width: 0; cursor: pointer;
     }
-    .torrent-name:hover { color: var(--accent); cursor: default; }
+    .torrent-name:hover { color: var(--accent); }
+    .torrent-name.expanded { white-space: normal; overflow: visible; text-overflow: unset; }
 
     .quality-pill {
       font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px;
@@ -691,7 +692,7 @@
         const sizeStr = r.size_str || (r.size_bytes ? fmtBytes(r.size_bytes) : '');
         inner += `
           <div class="torrent-result">
-            <span class="torrent-name" title="${esc(r.name)}">${esc(r.name)}</span>
+            <span class="torrent-name" title="Click to expand" onclick="this.classList.toggle('expanded')">${esc(r.name)}</span>
             ${r.quality ? `<span class="${qc}">${esc(r.quality)}</span>` : ''}
             <span class="seeds-count ${seedClass}">↑${r.seeders}</span>
             ${sizeStr ? `<span class="torrent-size">${esc(sizeStr)}</span>` : ''}
