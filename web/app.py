@@ -1184,9 +1184,12 @@ def _sync_from_intake(
     """Query intake for grocery receipts and mark matching items as stocked.
 
     Returns (items_marked, list_of_item_labels) so the caller can flash results.
-    *since* is an ISO date string (YYYY-MM-DD); defaults to last_synced_at date
-    (so items manually unchecked after a sync aren't re-triggered by the same
-    receipt), falling back to 30 days ago on first sync.
+    *since* is an ISO date string (YYYY-MM-DD); defaults to 30 days ago.
+
+    Per-item receipt dedup: data["seen_receipts"] maps item_name_lower → list of
+    receipt filenames already matched.  The same receipt can never re-trigger the
+    same item, so manually unchecking an item is always respected — only a new
+    receipt (different filename) will re-mark it.
     """
     import sqlite3
     from datetime import date, timedelta
@@ -1195,13 +1198,12 @@ def _sync_from_intake(
         return 0, []
 
     if since is None:
-        last = data.get("last_synced_at")
-        since = last[:10] if last else (date.today() - timedelta(days=30)).isoformat()
+        since = (date.today() - timedelta(days=30)).isoformat()
 
     conn = sqlite3.connect(str(db_path))
     rows = conn.execute(
         """
-        SELECT items_json FROM receipts
+        SELECT filename, items_json FROM receipts
         WHERE category LIKE 'grocery%'
           AND items_json IS NOT NULL
           AND items_json != '[]'
@@ -1212,15 +1214,17 @@ def _sync_from_intake(
     ).fetchall()
     conn.close()
 
-    descriptions: list[str] = []
-    for (items_json,) in rows:
-        try:
-            for item in json.loads(items_json):
-                desc = str(item.get("description") or "").strip()
+    # Build per-receipt description lists
+    receipt_descs: list[tuple[str, list[str]]] = []
+    for filename, items_json in rows:
+        descs: list[str] = []
+        with contextlib.suppress(json.JSONDecodeError, TypeError):
+            for entry in json.loads(items_json):
+                desc = str(entry.get("description") or "").strip()
                 if desc:
-                    descriptions.append(desc)
-        except (json.JSONDecodeError, TypeError):
-            pass
+                    descs.append(desc)
+        if descs:
+            receipt_descs.append((filename, descs))
 
     # Merge AI-generated rules into a temporary alias table for this run
     ai_aliases: dict[str, tuple[str, ...]] = {}
@@ -1229,24 +1233,30 @@ def _sync_from_intake(
         if isinstance(tokens, list):
             ai_aliases[item_name.lower()] = tuple(str(t) for t in tokens)
 
+    seen: dict[str, list[str]] = data.setdefault("seen_receipts", {})
+
     marked: list[str] = []
     for cat in data["categories"]:
         for item in cat["items"]:
             if item["stocked"]:
                 continue
             name = item["name"]
-            # temporarily inject AI aliases so _item_matches_desc sees them
             name_lower = name.lower()
+            item_seen = set(seen.get(name_lower, []))
+
             prev = _GROCERY_ALIASES.get(name_lower)
             if name_lower in ai_aliases:
-                _GROCERY_ALIASES[name_lower] = (
-                    *(prev or ()),
-                    *ai_aliases[name_lower],
-                )
+                _GROCERY_ALIASES[name_lower] = (*(prev or ()), *ai_aliases[name_lower])
             try:
-                if any(_item_matches_desc(name, d) for d in descriptions):
-                    item["stocked"] = True
-                    marked.append(f"{cat['name']}: {name}")
+                for filename, descs in receipt_descs:
+                    if filename in item_seen:
+                        continue
+                    if any(_item_matches_desc(name, d) for d in descs):
+                        item["stocked"] = True
+                        item_seen.add(filename)
+                        seen[name_lower] = list(item_seen)
+                        marked.append(f"{cat['name']}: {name}")
+                        break
             finally:
                 if prev is None:
                     _GROCERY_ALIASES.pop(name_lower, None)
@@ -1264,9 +1274,12 @@ def _sync_shopping_from_intake(
     """Query intake for all receipts and mark matching shopping items as owned.
 
     Returns (items_marked, list_of_item_labels).
-    *since* is an ISO date string (YYYY-MM-DD); defaults to last_synced_at date
-    (so items manually unchecked after a sync aren't re-triggered by the same
-    receipt), falling back to 30 days ago on first sync.
+    *since* is an ISO date string (YYYY-MM-DD); defaults to 30 days ago.
+
+    Per-item receipt dedup: data["seen_receipts"] maps item_name_lower → list of
+    receipt filenames already matched.  The same receipt can never re-trigger the
+    same item, so manually unchecking an item is always respected — only a new
+    receipt (different filename) will re-mark it.
     """
     import sqlite3
     from datetime import date, timedelta
@@ -1275,13 +1288,12 @@ def _sync_shopping_from_intake(
         return 0, []
 
     if since is None:
-        last = data.get("last_synced_at")
-        since = last[:10] if last else (date.today() - timedelta(days=30)).isoformat()
+        since = (date.today() - timedelta(days=30)).isoformat()
 
     conn = sqlite3.connect(str(db_path))
     rows = conn.execute(
         """
-        SELECT items_json FROM receipts
+        SELECT filename, items_json FROM receipts
         WHERE items_json IS NOT NULL
           AND items_json != '[]'
           AND scan_date >= ?
@@ -1291,15 +1303,17 @@ def _sync_shopping_from_intake(
     ).fetchall()
     conn.close()
 
-    descriptions: list[str] = []
-    for (items_json,) in rows:
-        try:
-            for item in json.loads(items_json):
-                desc = str(item.get("description") or "").strip()
+    # Build per-receipt description lists
+    receipt_descs: list[tuple[str, list[str]]] = []
+    for filename, items_json in rows:
+        descs: list[str] = []
+        with contextlib.suppress(json.JSONDecodeError, TypeError):
+            for entry in json.loads(items_json):
+                desc = str(entry.get("description") or "").strip()
                 if desc:
-                    descriptions.append(desc)
-        except (json.JSONDecodeError, TypeError):
-            pass
+                    descs.append(desc)
+        if descs:
+            receipt_descs.append((filename, descs))
 
     # Merge AI-generated rules into a temporary alias table for this run
     ai_aliases: dict[str, tuple[str, ...]] = {}
@@ -1308,6 +1322,8 @@ def _sync_shopping_from_intake(
         if isinstance(tokens, list):
             ai_aliases[item_name.lower()] = tuple(str(t) for t in tokens)
 
+    seen: dict[str, list[str]] = data.setdefault("seen_receipts", {})
+
     marked: list[str] = []
     for cat in data["categories"]:
         for item in cat["items"]:
@@ -1315,16 +1331,21 @@ def _sync_shopping_from_intake(
                 continue
             name = item["name"]
             name_lower = name.lower()
+            item_seen = set(seen.get(name_lower, []))
+
             prev = _SHOPPING_ALIASES.get(name_lower)
             if name_lower in ai_aliases:
-                _SHOPPING_ALIASES[name_lower] = (
-                    *(prev or ()),
-                    *ai_aliases[name_lower],
-                )
+                _SHOPPING_ALIASES[name_lower] = (*(prev or ()), *ai_aliases[name_lower])
             try:
-                if any(_item_matches_desc(name, d, _SHOPPING_ALIASES) for d in descriptions):
-                    item["owned"] = True
-                    marked.append(f"{cat['name']}: {name}")
+                for filename, descs in receipt_descs:
+                    if filename in item_seen:
+                        continue
+                    if any(_item_matches_desc(name, d, _SHOPPING_ALIASES) for d in descs):
+                        item["owned"] = True
+                        item_seen.add(filename)
+                        seen[name_lower] = list(item_seen)
+                        marked.append(f"{cat['name']}: {name}")
+                        break
             finally:
                 if prev is None:
                     _SHOPPING_ALIASES.pop(name_lower, None)
