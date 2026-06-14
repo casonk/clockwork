@@ -835,26 +835,26 @@
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const json = await resp.json();
 
-      const moved = json.moved || [];
+      const linked = json.linked || [];
       const skipped = json.skipped || [];
       const errors = json.errors || [];
 
-      if (moved.length === 0 && errors.length === 0) {
+      if (linked.length === 0 && errors.length === 0) {
         const reason = skipped.length > 0
           ? `${skipped.length} item${skipped.length !== 1 ? 's' : ''} skipped (in progress or already in library)`
           : 'No completed downloads found in torrent dir.';
         flash(reason, skipped.length > 0 ? 'success' : 'error');
       } else {
-        if (moved.length > 0) {
+        if (linked.length > 0) {
           const byType = {};
-          for (const m of moved) { byType[m.type] = (byType[m.type] || 0) + 1; }
+          for (const m of linked) { byType[m.type] = (byType[m.type] || 0) + 1; }
           const summary = Object.entries(byType).map(([t, n]) => `${n} ${t}`).join(', ');
-          flash(`Sorted ${moved.length} item${moved.length !== 1 ? 's' : ''}: ${summary}.`);
+          flash(`Linked ${linked.length} item${linked.length !== 1 ? 's' : ''} into library: ${summary}.`);
         }
-        for (const e of errors) flash(`Error moving "${e.name}": ${e.error}`, 'error');
+        for (const e of errors) flash(`Error linking "${e.name}": ${e.error}`, 'error');
       }
 
-      if (moved.length > 0) {
+      if (linked.length > 0) {
         // Re-run library check to refresh the dots, then restore button
         if (btn) { btn.classList.remove('sorting'); btn.textContent = '📦 Sort Downloads'; }
         await checkLibrary();
