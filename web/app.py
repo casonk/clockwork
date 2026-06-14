@@ -1184,7 +1184,9 @@ def _sync_from_intake(
     """Query intake for grocery receipts and mark matching items as stocked.
 
     Returns (items_marked, list_of_item_labels) so the caller can flash results.
-    *since* is an ISO date string (YYYY-MM-DD); defaults to 30 days ago.
+    *since* is an ISO date string (YYYY-MM-DD); defaults to last_synced_at date
+    (so items manually unchecked after a sync aren't re-triggered by the same
+    receipt), falling back to 30 days ago on first sync.
     """
     import sqlite3
     from datetime import date, timedelta
@@ -1193,7 +1195,8 @@ def _sync_from_intake(
         return 0, []
 
     if since is None:
-        since = (date.today() - timedelta(days=30)).isoformat()
+        last = data.get("last_synced_at")
+        since = last[:10] if last else (date.today() - timedelta(days=30)).isoformat()
 
     conn = sqlite3.connect(str(db_path))
     rows = conn.execute(
@@ -1261,7 +1264,9 @@ def _sync_shopping_from_intake(
     """Query intake for all receipts and mark matching shopping items as owned.
 
     Returns (items_marked, list_of_item_labels).
-    *since* is an ISO date string (YYYY-MM-DD); defaults to 30 days ago.
+    *since* is an ISO date string (YYYY-MM-DD); defaults to last_synced_at date
+    (so items manually unchecked after a sync aren't re-triggered by the same
+    receipt), falling back to 30 days ago on first sync.
     """
     import sqlite3
     from datetime import date, timedelta
@@ -1270,7 +1275,8 @@ def _sync_shopping_from_intake(
         return 0, []
 
     if since is None:
-        since = (date.today() - timedelta(days=30)).isoformat()
+        last = data.get("last_synced_at")
+        since = last[:10] if last else (date.today() - timedelta(days=30)).isoformat()
 
     conn = sqlite3.connect(str(db_path))
     rows = conn.execute(
