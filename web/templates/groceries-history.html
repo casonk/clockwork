@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grocery History — Clockwork</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --surface2: #22263a; --border: #2e3250;
+      --accent: #5b7fff; --accent-dim: #2d3f8a;
+      --green: #3ecf6e; --green-dim: #1a4d30;
+      --red: #e05252; --red-dim: #4d1a1a;
+      --yellow: #e0b832; --muted: #8890b0; --text: #e2e4f0;
+    }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; line-height: 1.5; min-height: 100vh; }
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 20px; display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 10; }
+    .back-link { font-size: 20px; text-decoration: none; opacity: 0.7; transition: opacity 0.15s; }
+    .back-link:hover { opacity: 1; }
+    header h1 { font-size: 17px; font-weight: 700; }
+    .subtitle { color: var(--muted); font-size: 12px; }
+    main { max-width: 860px; margin: 0 auto; padding: 24px 16px 80px; }
+
+    .section-label { font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+
+    /* Recurring items */
+    .recurring-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 32px; }
+    .recurring-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px; border-radius: 99px;
+      background: var(--surface); border: 1px solid var(--border);
+      font-size: 12px; color: var(--text);
+    }
+    .recurring-count { font-size: 10px; font-weight: 700; color: var(--accent); }
+
+    /* Filter bar */
+    .filter-bar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+    .filter-bar input[type="text"] {
+      flex: 1; min-width: 160px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 6px; padding: 7px 10px; color: var(--text); font-size: 13px; outline: none;
+    }
+    .filter-bar input[type="text"]:focus { border-color: var(--accent); }
+    .filter-bar input[type="text"]::placeholder { color: var(--muted); }
+    .filter-select {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+      padding: 7px 10px; color: var(--text); font-size: 13px; outline: none; cursor: pointer;
+    }
+    .filter-select:focus { border-color: var(--accent); }
+
+    /* History table */
+    .history-table { width: 100%; border-collapse: collapse; }
+    .history-table th { font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: var(--muted); padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+    .history-table td { padding: 8px 10px; border-bottom: 1px solid rgba(46,50,80,0.4); font-size: 13px; vertical-align: middle; }
+    .history-table tr:last-child td { border-bottom: none; }
+    .history-table tr.hidden-row { display: none; }
+
+    .ts-cell { color: var(--muted); font-size: 11px; white-space: nowrap; font-family: ui-monospace, monospace; }
+    .action-badge {
+      display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: 0.3px;
+      padding: 2px 7px; border-radius: 4px; white-space: nowrap;
+    }
+    .action-add      { background: var(--green-dim); color: var(--green); }
+    .action-remove   { background: var(--red-dim); color: var(--red); }
+    .action-stocked  { background: var(--accent-dim); color: var(--accent); }
+    .action-unstocked { background: #22263a; color: var(--muted); border: 1px solid var(--border); }
+    .action-reset    { background: #3d2000; color: #ff9a40; }
+    .action-sync     { background: var(--green-dim); color: var(--green); }
+    .action-restore  { background: #1a0a3d; color: #a07bff; }
+    .action-add-category    { background: var(--accent-dim); color: var(--accent); }
+    .action-delete-category { background: var(--red-dim); color: var(--red); }
+    .action-other    { background: var(--surface2); color: var(--muted); }
+
+    .item-cell { font-weight: 500; }
+    .cat-cell  { color: var(--muted); font-size: 12px; }
+    .detail-cell { color: var(--muted); font-size: 12px; font-style: italic; }
+
+    .empty-state { text-align: center; color: var(--muted); padding: 48px 0; font-size: 14px; }
+
+    @media (max-width: 600px) {
+      .history-table th:nth-child(3), .history-table td:nth-child(3) { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <a href="/groceries" class="back-link" title="Groceries">🛒</a>
+  <a href="/home" class="back-link" title="Home">🏠</a>
+  <div>
+    <h1>📋 Grocery History</h1>
+    <div class="subtitle">{{ entries|length }} event{{ 's' if entries|length != 1 else '' }}</div>
+  </div>
+</header>
+
+<main>
+
+{% if recurring %}
+<div class="section-label" style="margin-top:0">Recurring Items</div>
+<div class="recurring-grid">
+  {% for name, count in recurring %}
+  <span class="recurring-chip">{{ name }} <span class="recurring-count">×{{ count }}</span></span>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="section-label">Full Log</div>
+
+{% if not entries %}
+<div class="empty-state">No history yet — changes will appear here as you use the grocery list.</div>
+{% else %}
+
+<div class="filter-bar">
+  <input type="text" id="filter-text" placeholder="Filter by item or category…" oninput="applyFilter()">
+  <select class="filter-select" id="filter-action" onchange="applyFilter()">
+    <option value="">All actions</option>
+    <option value="add">add</option>
+    <option value="remove">remove</option>
+    <option value="stocked">stocked</option>
+    <option value="unstocked">unstocked</option>
+    <option value="reset">reset</option>
+    <option value="sync">sync</option>
+    <option value="restore">restore</option>
+  </select>
+</div>
+
+<table class="history-table" id="history-table">
+  <thead>
+    <tr>
+      <th>Time</th>
+      <th>Action</th>
+      <th>Category</th>
+      <th>Item</th>
+      <th>Detail</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for e in entries %}
+    {% set action = e.action | lower | replace('-', '') %}
+    <tr data-action="{{ e.action }}" data-item="{{ e.item or '' }}" data-cat="{{ e.category or '' }}">
+      <td class="ts-cell">{{ e.ts | replace('T', ' ') }}</td>
+      <td><span class="action-badge action-{{ e.action | lower | replace('_', '-') }}
+        {%- if e.action not in ('add','remove','stocked','unstocked','reset','sync','restore','add-category','delete-category') %} action-other{% endif %}">
+        {{ e.action }}</span></td>
+      <td class="cat-cell">{{ e.category or '—' }}</td>
+      <td class="item-cell">{{ e.item or '' }}</td>
+      <td class="detail-cell">{{ e.detail or '' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<script>
+  function applyFilter() {
+    const text = document.getElementById('filter-text').value.toLowerCase();
+    const action = document.getElementById('filter-action').value;
+    document.querySelectorAll('#history-table tbody tr').forEach(row => {
+      const matchText = !text ||
+        row.dataset.item.toLowerCase().includes(text) ||
+        row.dataset.cat.toLowerCase().includes(text);
+      const matchAction = !action || row.dataset.action === action;
+      row.classList.toggle('hidden-row', !(matchText && matchAction));
+    });
+  }
+</script>
+
+{% endif %}
+
+</main>
+</body>
+</html>

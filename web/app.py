@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
+import datetime
 import json
 import os
 import re
 import secrets
+import shutil
 import ssl
 import subprocess
 from pathlib import Path
@@ -57,6 +60,16 @@ _OLLAMA_BASE = os.environ.get("CREW_CHIEF_URL", "http://localhost:11434")
 _OLLAMA_MODEL = os.environ.get("CLOCKWORK_GROCERY_MODEL", "qwen2.5-coder:7b")
 WATCH_DIR = Path(os.environ.get("CLOCKWORK_WATCH_DIR", "/mnt/16tb-sata/watch"))
 MAGNETO_URL = os.environ.get("CLOCKWORK_MAGNETO_URL", "http://127.0.0.1:5400")
+GROCERIES_HISTORY_FILE = Path(
+    os.environ.get(
+        "CLOCKWORK_GROCERIES_HISTORY_FILE", BASE_DIR / "config" / "groceries-history.jsonl"
+    )
+)
+SHOPPING_HISTORY_FILE = Path(
+    os.environ.get(
+        "CLOCKWORK_SHOPPING_HISTORY_FILE", BASE_DIR / "config" / "shopping-history.jsonl"
+    )
+)
 
 
 def _resolve_manifest_path(canonical_rel: str) -> Path:
@@ -1664,6 +1677,64 @@ Return ONLY a JSON object — no markdown, no explanation:
 # ---------------------------------------------------------------------------
 
 
+def _backup_slots(path: Path) -> tuple[Path, Path, Path]:
+    """Return (hot, cold, archive) sibling paths for a data file."""
+    stem = path.stem
+    return (
+        path.parent / f"{stem}.hot.json",
+        path.parent / f"{stem}.cold.json",
+        path.parent / f"{stem}.archive.json",
+    )
+
+
+def _rotate_backup(path: Path) -> None:
+    """Rotate hot→cold→archive before a write."""
+    hot, cold, archive = _backup_slots(path)
+    if cold.exists():
+        cold.replace(archive)
+    if hot.exists():
+        hot.replace(cold)
+    if path.exists():
+        shutil.copy2(path, hot)
+
+
+def _log_event(
+    history_file: Path,
+    action: str,
+    *,
+    item: str | None = None,
+    category: str | None = None,
+    detail: str | None = None,
+) -> None:
+    """Append one JSON line to a history log."""
+    entry: dict = {
+        "ts": datetime.datetime.now().isoformat(timespec="seconds"),
+        "action": action,
+    }
+    if category:
+        entry["category"] = category
+    if item:
+        entry["item"] = item
+    if detail:
+        entry["detail"] = detail
+    with history_file.open("a") as fh:
+        fh.write(json.dumps(entry) + "\n")
+
+
+def _read_history(history_file: Path) -> list[dict]:
+    """Return history entries newest-first."""
+    if not history_file.exists():
+        return []
+    entries = []
+    for line in history_file.read_text().splitlines():
+        line = line.strip()
+        if line:
+            with contextlib.suppress(json.JSONDecodeError):
+                entries.append(json.loads(line))
+    entries.reverse()
+    return entries
+
+
 def load_groceries() -> dict:
     if GROCERIES_FILE.exists():
         return json.loads(GROCERIES_FILE.read_text())
@@ -1671,11 +1742,26 @@ def load_groceries() -> dict:
 
 
 def save_groceries(data: dict) -> None:
+    _rotate_backup(GROCERIES_FILE)
     GROCERIES_FILE.write_text(json.dumps(data, indent=2))
 
 
 def _find_category(data: dict, name: str) -> dict | None:
     return next((c for c in data["categories"] if c["name"] == name), None)
+
+
+def _backup_slot_info(path: Path) -> tuple[list[bool], list[str]]:
+    """Return (exists_list, mtime_list) for hot/cold/archive slots."""
+    slots = _backup_slots(path)
+    exists = [s.exists() for s in slots]
+    mtimes = []
+    for s, ex in zip(slots, exists, strict=False):
+        if ex:
+            ts = datetime.datetime.fromtimestamp(s.stat().st_mtime)
+            mtimes.append(ts.strftime("%b %-d %H:%M"))
+        else:
+            mtimes.append("")
+    return exists, mtimes
 
 
 @app.get("/groceries")
@@ -1685,6 +1771,7 @@ def groceries():
     stocked = sum(1 for c in data["categories"] for i in c["items"] if i["stocked"])
     rules = load_grocery_rules()
     rules_count = sum(len(v) for v in rules.get("aliases", {}).values())
+    backup_exists, backup_mtimes = _backup_slot_info(GROCERIES_FILE)
     return render_template(
         "groceries.html",
         data=data,
@@ -1695,6 +1782,8 @@ def groceries():
         ollama_available=_ollama_available(),
         rules_count=rules_count,
         rules_generated_at=rules.get("rules_generated_at"),
+        backup_slots_exist=backup_exists,
+        backup_slots_mtime=backup_mtimes,
     )
 
 
@@ -1710,6 +1799,7 @@ def groceries_add_category():
         return redirect(url_for("groceries"))
     data["categories"].append({"name": name, "items": []})
     save_groceries(data)
+    _log_event(GROCERIES_HISTORY_FILE, "add-category", category=name)
     return redirect(url_for("groceries"))
 
 
@@ -1719,6 +1809,7 @@ def groceries_delete_category():
     data = load_groceries()
     data["categories"] = [c for c in data["categories"] if c["name"] != name]
     save_groceries(data)
+    _log_event(GROCERIES_HISTORY_FILE, "delete-category", category=name)
     return redirect(url_for("groceries"))
 
 
@@ -1738,6 +1829,7 @@ def groceries_add_item():
         return redirect(url_for("groceries"))
     cat["items"].append({"name": item_name, "stocked": False})
     save_groceries(data)
+    _log_event(GROCERIES_HISTORY_FILE, "add", item=item_name, category=category)
     return redirect(url_for("groceries") + f"#{_slug(category)}")
 
 
@@ -1747,12 +1839,21 @@ def groceries_toggle_item():
     item_name = request.form.get("item", "").strip()
     data = load_groceries()
     cat = _find_category(data, category)
+    new_state = None
     if cat:
         for item in cat["items"]:
             if item["name"] == item_name:
                 item["stocked"] = not item["stocked"]
+                new_state = item["stocked"]
                 break
     save_groceries(data)
+    if new_state is not None:
+        _log_event(
+            GROCERIES_HISTORY_FILE,
+            "stocked" if new_state else "unstocked",
+            item=item_name,
+            category=category,
+        )
     return redirect(url_for("groceries") + f"#{_slug(category)}")
 
 
@@ -1765,6 +1866,7 @@ def groceries_delete_item():
     if cat:
         cat["items"] = [i for i in cat["items"] if i["name"] != item_name]
     save_groceries(data)
+    _log_event(GROCERIES_HISTORY_FILE, "remove", item=item_name, category=category)
     return redirect(url_for("groceries") + f"#{_slug(category)}")
 
 
@@ -1775,6 +1877,7 @@ def groceries_reset():
         for item in cat["items"]:
             item["stocked"] = False
     save_groceries(data)
+    _log_event(GROCERIES_HISTORY_FILE, "reset")
     flash("All items marked as not stocked.", "success")
     return redirect(url_for("groceries"))
 
@@ -1790,8 +1893,9 @@ def groceries_sync_intake():
     if count == 0:
         flash("No new matches found in recent grocery receipts.", "success")
     else:
-        data["last_synced_at"] = __import__("datetime").datetime.now().isoformat(timespec="seconds")
+        data["last_synced_at"] = datetime.datetime.now().isoformat(timespec="seconds")
         save_groceries(data)
+        _log_event(GROCERIES_HISTORY_FILE, "sync", detail=f"stocked {count}: {', '.join(marked)}")
         flash(
             f"Marked {count} item{'s' if count != 1 else ''} as stocked: {', '.join(marked)}.",
             "success",
@@ -1839,6 +1943,36 @@ def groceries_ai_rules():
     return redirect(url_for("groceries"))
 
 
+@app.post("/groceries/restore")
+def groceries_restore():
+    slot = request.form.get("slot", "").strip()
+    if slot not in ("hot", "cold", "archive"):
+        flash("Invalid backup slot.", "error")
+        return redirect(url_for("groceries"))
+    hot, cold, archive = _backup_slots(GROCERIES_FILE)
+    slot_file = {"hot": hot, "cold": cold, "archive": archive}[slot]
+    if not slot_file.exists():
+        flash(f"No {slot} backup found.", "error")
+        return redirect(url_for("groceries"))
+    _rotate_backup(GROCERIES_FILE)
+    shutil.copy2(slot_file, GROCERIES_FILE)
+    _log_event(GROCERIES_HISTORY_FILE, "restore", detail=f"from {slot}")
+    flash(f"Restored groceries from {slot} backup.", "success")
+    return redirect(url_for("groceries"))
+
+
+@app.get("/groceries/history")
+def groceries_history():
+    entries = _read_history(GROCERIES_HISTORY_FILE)
+    # Recurring item summary: count add+remove events per item name
+    counts: dict[str, int] = {}
+    for e in entries:
+        if e.get("action") in ("add", "remove") and e.get("item"):
+            counts[e["item"]] = counts.get(e["item"], 0) + 1
+    recurring = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:20]
+    return render_template("groceries-history.html", entries=entries, recurring=recurring)
+
+
 def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
 
@@ -1855,6 +1989,7 @@ def load_shopping() -> dict:
 
 
 def save_shopping(data: dict) -> None:
+    _rotate_backup(SHOPPING_FILE)
     SHOPPING_FILE.write_text(json.dumps(data, indent=2))
 
 
@@ -1869,6 +2004,7 @@ def shopping():
     owned_count = sum(1 for c in data["categories"] for i in c["items"] if i.get("owned"))
     rules = load_shopping_rules()
     rules_count = sum(len(v) for v in rules.get("aliases", {}).values())
+    backup_exists, backup_mtimes = _backup_slot_info(SHOPPING_FILE)
     return render_template(
         "shopping.html",
         data=data,
@@ -1879,6 +2015,8 @@ def shopping():
         ollama_available=_ollama_available(),
         rules_count=rules_count,
         rules_generated_at=rules.get("rules_generated_at"),
+        backup_slots_exist=backup_exists,
+        backup_slots_mtime=backup_mtimes,
     )
 
 
@@ -1894,6 +2032,7 @@ def shopping_add_category():
         return redirect(url_for("shopping"))
     data["categories"].append({"name": name, "items": []})
     save_shopping(data)
+    _log_event(SHOPPING_HISTORY_FILE, "add-category", category=name)
     return redirect(url_for("shopping"))
 
 
@@ -1903,6 +2042,7 @@ def shopping_delete_category():
     data = load_shopping()
     data["categories"] = [c for c in data["categories"] if c["name"] != name]
     save_shopping(data)
+    _log_event(SHOPPING_HISTORY_FILE, "delete-category", category=name)
     return redirect(url_for("shopping"))
 
 
@@ -1922,6 +2062,7 @@ def shopping_add_item():
         return redirect(url_for("shopping"))
     cat["items"].append({"name": item_name, "owned": False})
     save_shopping(data)
+    _log_event(SHOPPING_HISTORY_FILE, "add", item=item_name, category=category)
     return redirect(url_for("shopping") + f"#{_slug(category)}")
 
 
@@ -1931,12 +2072,21 @@ def shopping_toggle_item():
     item_name = request.form.get("item", "").strip()
     data = load_shopping()
     cat = _find_shopping_category(data, category)
+    new_state = None
     if cat:
         for item in cat["items"]:
             if item["name"] == item_name:
                 item["owned"] = not item.get("owned", False)
+                new_state = item["owned"]
                 break
     save_shopping(data)
+    if new_state is not None:
+        _log_event(
+            SHOPPING_HISTORY_FILE,
+            "owned" if new_state else "wanted",
+            item=item_name,
+            category=category,
+        )
     return redirect(url_for("shopping") + f"#{_slug(category)}")
 
 
@@ -1949,6 +2099,7 @@ def shopping_delete_item():
     if cat:
         cat["items"] = [i for i in cat["items"] if i["name"] != item_name]
     save_shopping(data)
+    _log_event(SHOPPING_HISTORY_FILE, "remove", item=item_name, category=category)
     return redirect(url_for("shopping") + f"#{_slug(category)}")
 
 
@@ -1959,6 +2110,7 @@ def shopping_reset():
         for item in cat["items"]:
             item["owned"] = False
     save_shopping(data)
+    _log_event(SHOPPING_HISTORY_FILE, "reset")
     flash("All items marked as wanted.", "success")
     return redirect(url_for("shopping"))
 
@@ -1974,8 +2126,9 @@ def shopping_sync_intake():
     if count == 0:
         flash("No new matches found in recent receipts.", "success")
     else:
-        data["last_synced_at"] = __import__("datetime").datetime.now().isoformat(timespec="seconds")
+        data["last_synced_at"] = datetime.datetime.now().isoformat(timespec="seconds")
         save_shopping(data)
+        _log_event(SHOPPING_HISTORY_FILE, "sync", detail=f"owned {count}: {', '.join(marked)}")
         flash(
             f"Marked {count} item{'s' if count != 1 else ''} as owned: {', '.join(marked)}.",
             "success",
@@ -2021,6 +2174,35 @@ def shopping_ai_rules():
     else:
         flash(f"Added {added} new alias token{'s' if added != 1 else ''} via {model}.", "success")
     return redirect(url_for("shopping"))
+
+
+@app.post("/shopping/restore")
+def shopping_restore():
+    slot = request.form.get("slot", "").strip()
+    if slot not in ("hot", "cold", "archive"):
+        flash("Invalid backup slot.", "error")
+        return redirect(url_for("shopping"))
+    hot, cold, archive = _backup_slots(SHOPPING_FILE)
+    slot_file = {"hot": hot, "cold": cold, "archive": archive}[slot]
+    if not slot_file.exists():
+        flash(f"No {slot} backup found.", "error")
+        return redirect(url_for("shopping"))
+    _rotate_backup(SHOPPING_FILE)
+    shutil.copy2(slot_file, SHOPPING_FILE)
+    _log_event(SHOPPING_HISTORY_FILE, "restore", detail=f"from {slot}")
+    flash(f"Restored shopping list from {slot} backup.", "success")
+    return redirect(url_for("shopping"))
+
+
+@app.get("/shopping/history")
+def shopping_history():
+    entries = _read_history(SHOPPING_HISTORY_FILE)
+    counts: dict[str, int] = {}
+    for e in entries:
+        if e.get("action") in ("add", "remove") and e.get("item"):
+            counts[e["item"]] = counts.get(e["item"], 0) + 1
+    recurring = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:20]
+    return render_template("shopping-history.html", entries=entries, recurring=recurring)
 
 
 # ---------------------------------------------------------------------------
