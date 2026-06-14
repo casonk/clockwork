@@ -59,6 +59,13 @@ SHOPPING_RULES_FILE = Path(
 _OLLAMA_BASE = os.environ.get("CREW_CHIEF_URL", "http://localhost:11434")
 _OLLAMA_MODEL = os.environ.get("CLOCKWORK_GROCERY_MODEL", "qwen2.5-coder:7b")
 WATCH_DIR = Path(os.environ.get("CLOCKWORK_WATCH_DIR", "/mnt/16tb-sata/watch"))
+# Additional dirs to scan for library check (e.g. Magneto/Transmission download dir).
+# Colon-separated. Defaults to the Magneto default download location.
+_EXTRA_WATCH_DIRS: list[Path] = [
+    Path(d)
+    for d in os.environ.get("CLOCKWORK_TORRENT_DIRS", "/srv/snowbridge/share/torrents").split(":")
+    if d.strip()
+]
 MAGNETO_URL = os.environ.get("CLOCKWORK_MAGNETO_URL", "http://127.0.0.1:5400")
 GROCERIES_HISTORY_FILE = Path(
     os.environ.get(
@@ -2422,7 +2429,9 @@ def watch_check():
     Request body: {"titles": [{"title": "...", "year": "..."|null}, ...]}
     Response: {"available": bool, "matches": {"<title>": {"found": bool, "match": "<entry name>"|null}}}
     """
-    if not WATCH_DIR.exists():
+    scan_dirs = [WATCH_DIR] + [d for d in _EXTRA_WATCH_DIRS if d != WATCH_DIR]
+    accessible = [d for d in scan_dirs if d.exists()]
+    if not accessible:
         return jsonify({"available": False, "matches": {}})
 
     try:
@@ -2431,13 +2440,12 @@ def watch_check():
     except Exception:
         return jsonify({"available": False, "matches": {}}), 400
 
-    # Build normalised entry index once.
+    # Build normalised entry index across all accessible scan directories.
     entries: list[tuple[str, str]] = []
-    try:
-        for entry in WATCH_DIR.iterdir():
-            entries.append((entry.name, _normalize_media_title(entry.name)))
-    except OSError:
-        return jsonify({"available": False, "matches": {}}), 500
+    for scan_dir in accessible:
+        with contextlib.suppress(OSError):
+            for entry in scan_dir.iterdir():
+                entries.append((entry.name, _normalize_media_title(entry.name)))
 
     matches: dict[str, dict] = {}
     for item in items:
