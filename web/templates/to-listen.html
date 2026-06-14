@@ -102,7 +102,11 @@
     }
     .category-count .to-do { color: var(--accent); font-weight: 700; }
 
-    .items { padding: 6px 0; }
+    .items { padding: 6px 0; max-height: 452px; overflow-y: auto; }
+    .items::-webkit-scrollbar { width: 4px; }
+    .items::-webkit-scrollbar-track { background: transparent; }
+    .items::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .items::-webkit-scrollbar-thumb:hover { background: var(--muted); }
     .item {
       display: flex; align-items: center; gap: 8px;
       padding: 4px 14px; min-height: 44px;
