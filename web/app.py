@@ -2299,17 +2299,20 @@ def _classify_media(name: str) -> str:
 
 
 def _sort_downloads_to_library() -> dict:
-    """Move completed downloads from torrent dirs to their library destinations.
+    """Symlink completed downloads into their library destinations.
 
-    Returns {"moved": [...], "skipped": [...], "errors": [...]}.
+    Creates a symlink in the library dir pointing back to the original file/folder
+    in the torrent dir so Transmission can continue seeding without interruption.
+
+    Returns {"linked": [...], "skipped": [...], "errors": [...]}.
     """
     dest_map = {"movie": _MOVIE_DIR, "tv": _TV_DIR, "anime": _ANIME_DIR}
 
-    # Source dirs: extra watch dirs that are not already the library destinations
+    # Source dirs: torrent dirs that are not already a library destination
     library_dirs = set(dest_map.values())
     src_dirs = [d for d in _EXTRA_WATCH_DIRS if d.exists() and d not in library_dirs]
 
-    moved: list[dict] = []
+    linked: list[dict] = []
     skipped: list[dict] = []
     errors: list[dict] = []
 
@@ -2330,20 +2333,20 @@ def _sort_downloads_to_library() -> dict:
 
             media_type = _classify_media(entry.name)
             dest_dir = dest_map[media_type]
-            dest = dest_dir / entry.name
+            link = dest_dir / entry.name
 
-            if dest.exists():
+            if link.exists() or link.is_symlink():
                 skipped.append({"name": entry.name, "reason": "already in library"})
                 continue
 
             try:
                 dest_dir.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(entry), str(dest))
-                moved.append({"name": entry.name, "type": media_type, "dest": str(dest_dir)})
+                link.symlink_to(entry.resolve())
+                linked.append({"name": entry.name, "type": media_type, "dest": str(dest_dir)})
             except OSError as exc:
                 errors.append({"name": entry.name, "error": str(exc)})
 
-    return {"moved": moved, "skipped": skipped, "errors": errors}
+    return {"linked": linked, "skipped": skipped, "errors": errors}
 
 
 def _normalize_media_title(s: str) -> str:
