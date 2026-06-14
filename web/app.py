@@ -55,6 +55,8 @@ SHOPPING_RULES_FILE = Path(
 )
 _OLLAMA_BASE = os.environ.get("CREW_CHIEF_URL", "http://localhost:11434")
 _OLLAMA_MODEL = os.environ.get("CLOCKWORK_GROCERY_MODEL", "qwen2.5-coder:7b")
+WATCH_DIR = Path(os.environ.get("CLOCKWORK_WATCH_DIR", "/mnt/16tb-sata/watch"))
+MAGNETO_URL = os.environ.get("CLOCKWORK_MAGNETO_URL", "http://127.0.0.1:5400")
 
 
 def _resolve_manifest_path(canonical_rel: str) -> Path:
@@ -2022,6 +2024,267 @@ def shopping_ai_rules():
 
 
 # ---------------------------------------------------------------------------
+# Routes — to-watch
+# ---------------------------------------------------------------------------
+
+# Quality/format tokens stripped before fuzzy-matching filenames.
+_QUALITY_RE = re.compile(
+    r"\b(?:1080p|720p|2160p|4k|uhd|blu.?ray|bdrip|brrip|webrip|web.?dl|web|hdtv"
+    r"|dvdrip|dvdscr|hdrip|hevc|h\.?264|h\.?265|x\.?264|x\.?265|avc|aac|dts"
+    r"|dd[p]?5|atmos|10bit|remux|remastered|extended|theatrical|criterion"
+    r"|amzn|pmntp|heve|mpeg2|divx|xvid|hd|cam|ts|r5|scr|dsr|pdvd|hq"
+    r"|dolby|s\d{2}e\d{2}|season\s*\d+|s\d{2}|bone|ethel|etrg|yts\.\w+|yify"
+    r"|sartre|galax[a-z]+|handjob|syncup|byndr|kyogo|yt[a-z]+)\b",
+    re.IGNORECASE,
+)
+
+
+def _normalize_media_title(s: str) -> str:
+    s = s.lower()
+    s = re.sub(r"[\._]", " ", s)  # dots/underscores → space
+    s = re.sub(r"\[.*?\]", " ", s)  # [1080p], [YTS.MX], ...
+    s = re.sub(r"\([^)]*\)", " ", s)  # (1999), (2008), (2007-2009)
+    s = _QUALITY_RE.sub(" ", s)
+    s = re.sub(r"\b\d{4}\b", " ", s)  # bare year tokens
+    s = re.sub(r"\bwww\.\S+", " ", s)  # www.UIndex.org prefixes
+    s = re.sub(r"[^a-z0-9 ]", " ", s)  # strip remaining punctuation
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def _titles_match(norm_title: str, norm_entry: str) -> bool:
+    """Return True if every significant word in norm_title appears in norm_entry."""
+    title_words = norm_title.split()
+    sig = {w for w in title_words if len(w) >= 3}
+    if not sig:
+        sig = set(title_words)
+    entry_words = set(norm_entry.split())
+    return bool(sig) and sig <= entry_words
+
+
+# Common public announce trackers appended to every constructed magnet link.
+_ANNOUNCE_TRACKERS = (
+    "udp://tracker.opentrackr.org:1337/announce",
+    "udp://open.tracker.cl:1337/announce",
+    "udp://tracker.openbittorrent.com:6969/announce",
+    "udp://tracker.torrent.eu.org:451/announce",
+)
+
+
+def _build_magnet(infohash: str, name: str) -> str:
+    import urllib.parse as _up
+
+    dn = _up.quote_plus(name)
+    tr = "&".join(f"tr={_up.quote_plus(t)}" for t in _ANNOUNCE_TRACKERS)
+    return f"magnet:?xt=urn:btih:{infohash}&dn={dn}&{tr}"
+
+
+def _extract_quality(name: str) -> str:
+    for q in ("2160p", "4K", "1080p", "720p", "480p"):
+        if q.lower() in name.lower():
+            return "4K" if q == "4K" else q
+    return ""
+
+
+def _search_torrents_csv(query: str, limit: int = 20) -> list[dict]:
+    """Search torrents-csv.com and return results sorted by seeders."""
+    import urllib.parse as _up
+    import urllib.request as _ur
+
+    qs = _up.urlencode({"q": query, "size": min(limit, 100)})
+    try:
+        with _ur.urlopen(f"https://torrents-csv.com/service/search?{qs}", timeout=10) as resp:
+            data = json.loads(resp.read())
+    except Exception:
+        return []
+    results = []
+    for t in data.get("torrents") or []:
+        ih = str(t.get("infohash") or "").strip()
+        name = str(t.get("name") or "").strip()
+        if not ih or not name:
+            continue
+        results.append(
+            {
+                "name": name,
+                "infohash": ih,
+                "magnet": _build_magnet(ih, name),
+                "seeders": int(t.get("seeders") or 0),
+                "leechers": int(t.get("leechers") or 0),
+                "size_bytes": int(t.get("size_bytes") or 0),
+                "quality": _extract_quality(name),
+                "source": "torrents-csv",
+            }
+        )
+    return sorted(results, key=lambda r: r["seeders"], reverse=True)[:limit]
+
+
+def _search_nyaa(query: str, limit: int = 20) -> list[dict]:
+    """Search Nyaa.si RSS and return anime results sorted by seeders."""
+    import urllib.parse as _up
+    import urllib.request as _ur
+    import xml.etree.ElementTree as _ET
+
+    qs = _up.urlencode({"page": "rss", "q": query, "c": "1_0", "f": "0"})
+    try:
+        with _ur.urlopen(f"https://nyaa.si/?{qs}", timeout=10) as resp:
+            raw = resp.read()
+    except Exception:
+        return []
+    try:
+        root = _ET.fromstring(raw)
+    except _ET.ParseError:
+        return []
+    ns = {"nyaa": "https://nyaa.si/xmlns/nyaa"}
+    channel = root.find("channel")
+    if channel is None:
+        return []
+    results = []
+    for item in channel.findall("item")[:limit]:
+        title = str(item.findtext("title") or "").strip()
+        infohash = str(item.findtext("nyaa:infoHash", "", ns)).strip()
+        if not title or not infohash:
+            continue
+        results.append(
+            {
+                "name": title,
+                "infohash": infohash,
+                "magnet": _build_magnet(infohash, title),
+                "seeders": int(item.findtext("nyaa:seeders", "0", ns) or 0),
+                "leechers": int(item.findtext("nyaa:leechers", "0", ns) or 0),
+                "size_bytes": 0,
+                "size_str": str(item.findtext("nyaa:size", "", ns)),
+                "quality": _extract_quality(title),
+                "source": "nyaa",
+            }
+        )
+    return sorted(results, key=lambda r: r["seeders"], reverse=True)
+
+
+def _proxy_to_magneto(magnet: str) -> tuple[bool, str]:
+    """Submit a magnet link to the local Magneto instance via its web UI."""
+    import http.cookiejar as _cj
+    import urllib.parse as _up
+    import urllib.request as _ur
+
+    try:
+        jar = _cj.CookieJar()
+        opener = _ur.build_opener(_ur.HTTPCookieProcessor(jar))
+        resp = opener.open(f"{MAGNETO_URL}/", timeout=8)
+        html = resp.read().decode("utf-8", errors="replace")
+        m = re.search(r'name="csrf_token"\s+value="([^"]+)"', html)
+        if not m:
+            return False, "No CSRF token found in Magneto response."
+        data = _up.urlencode({"magnet": magnet, "csrf_token": m.group(1)}).encode()
+        req = _ur.Request(
+            f"{MAGNETO_URL}/torrents",
+            data=data,
+            headers={"Referer": f"{MAGNETO_URL}/"},
+        )
+        opener.open(req, timeout=10)
+        return True, ""
+    except Exception as exc:
+        return False, str(exc)
+
+
+@app.get("/to-watch")
+def to_watch():
+    return render_template("to-watch.html", watch_available=WATCH_DIR.exists())
+
+
+@app.get("/to-read")
+def to_read():
+    return render_template("to-read.html")
+
+
+@app.get("/to-listen")
+def to_listen():
+    return render_template("to-listen.html")
+
+
+@app.get("/to-do")
+def to_do():
+    return render_template("to-do.html")
+
+
+@app.post("/api/watch-check")
+def watch_check():
+    """Fuzzy-match a list of titles against entries in WATCH_DIR.
+
+    Request body: {"titles": [{"title": "...", "year": "..."|null}, ...]}
+    Response: {"available": bool, "matches": {"<title>": {"found": bool, "match": "<entry name>"|null}}}
+    """
+    if not WATCH_DIR.exists():
+        return jsonify({"available": False, "matches": {}})
+
+    try:
+        payload = request.get_json(force=True) or {}
+        items = payload.get("titles", [])
+    except Exception:
+        return jsonify({"available": False, "matches": {}}), 400
+
+    # Build normalised entry index once.
+    entries: list[tuple[str, str]] = []
+    try:
+        for entry in WATCH_DIR.iterdir():
+            entries.append((entry.name, _normalize_media_title(entry.name)))
+    except OSError:
+        return jsonify({"available": False, "matches": {}}), 500
+
+    matches: dict[str, dict] = {}
+    for item in items:
+        title = str(item.get("title", "")).strip()
+        if not title:
+            continue
+        norm = _normalize_media_title(title)
+        found_name: str | None = None
+        for raw_name, norm_name in entries:
+            if _titles_match(norm, norm_name):
+                found_name = raw_name
+                break
+        matches[title] = {"found": found_name is not None, "match": found_name}
+
+    return jsonify({"available": True, "matches": matches})
+
+
+@app.get("/api/torrent-search")
+def torrent_search():
+    """Search for torrents matching a title.
+
+    Query params: q (required), cat (optional category name)
+    Response: {"results": [{name, infohash, magnet, seeders, leechers, size_bytes, quality, source}]}
+    """
+    q = request.args.get("q", "").strip()
+    cat = request.args.get("cat", "").strip().lower()
+    if not q:
+        return jsonify({"results": []})
+    if cat == "anime":
+        results = _search_nyaa(q)
+    else:
+        results = _search_torrents_csv(q)
+    return jsonify({"results": results})
+
+
+@app.post("/api/torrent-add")
+def torrent_add():
+    """Proxy a magnet link to the local Magneto instance.
+
+    Request body: {"magnet": "magnet:?..."}
+    Response: {"ok": bool, "error": str}
+    """
+    try:
+        payload = request.get_json(force=True) or {}
+        magnet = str(payload.get("magnet") or "").strip()
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid request body."}), 400
+    if not magnet.startswith("magnet:"):
+        return jsonify({"ok": False, "error": "Not a valid magnet link."}), 400
+    ok, err = _proxy_to_magneto(magnet)
+    if ok:
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "error": err}), 502
+
+
+# ---------------------------------------------------------------------------
 # Routes — home portal
 # ---------------------------------------------------------------------------
 
@@ -2130,6 +2393,46 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
             "hostname": "",
             "access_mode": "shared-mtls",
             "icon": "🛍️",
+        }
+    )
+    groups["Clockwork"].append(
+        {
+            "name": "clockwork-to-watch",
+            "display": "To Watch",
+            "url": "/to-watch",
+            "hostname": "",
+            "access_mode": "shared-mtls",
+            "icon": "📺",
+        }
+    )
+    groups["Clockwork"].append(
+        {
+            "name": "clockwork-to-read",
+            "display": "To Read",
+            "url": "/to-read",
+            "hostname": "",
+            "access_mode": "shared-mtls",
+            "icon": "📚",
+        }
+    )
+    groups["Clockwork"].append(
+        {
+            "name": "clockwork-to-listen",
+            "display": "To Listen",
+            "url": "/to-listen",
+            "hostname": "",
+            "access_mode": "shared-mtls",
+            "icon": "🎧",
+        }
+    )
+    groups["Clockwork"].append(
+        {
+            "name": "clockwork-to-do",
+            "display": "To Do",
+            "url": "/to-do",
+            "hostname": "",
+            "access_mode": "shared-mtls",
+            "icon": "✅",
         }
     )
 
