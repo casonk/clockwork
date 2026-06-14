@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1, user-scalable=yes">
-  <title>To Listen — Clockwork</title>
+  <title>To Watch — Clockwork</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -20,14 +20,12 @@
       --red:       #e05252;
       --red-dim:   #4d1a1a;
       --yellow:    #e0b832;
-      --orange:    #ff9a40;
-      --orange-dim:#3d2000;
-      --purple:    #a07bff;
-      --purple-dim:#1a0a3d;
-      --cyan:      #1abc9c;
-      --cyan-dim:  #0a3330;
+      --yellow-dim:#4d3d0a;
       --text:      #e2e4f0;
       --muted:     #8890b0;
+      --cyan:      #1abc9c;
+      --cyan-dim:  #0a3330;
+      --mono:      "JetBrains Mono", "Fira Code", ui-monospace, monospace;
     }
 
     body {
@@ -39,6 +37,7 @@
       min-height: 100vh;
     }
 
+    /* ── Header ── */
     header {
       background: var(--surface);
       border-bottom: 1px solid var(--border);
@@ -57,9 +56,11 @@
     header h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; }
     .subtitle { color: var(--muted); font-size: 12px; }
 
+    /* ── Progress bar ── */
     .progress-bar { height: 3px; background: var(--border); }
     .progress-fill { height: 100%; background: var(--accent); transition: width 0.3s; }
 
+    /* ── Flash ── */
     #flash-list {
       max-width: 680px; margin: 14px auto 0;
       padding: 0 14px; display: flex; flex-direction: column; gap: 5px;
@@ -78,11 +79,14 @@
     }
     .flash-close:hover { opacity: 1; }
 
+    /* ── Layout ── */
     main { max-width: 680px; margin: 0 auto; padding: 18px 14px 100px; }
 
+    /* ── Empty state ── */
     .empty-state { text-align: center; color: var(--muted); padding: 48px 24px; font-size: 14px; }
     .empty-state p { margin-bottom: 6px; }
 
+    /* ── Category card ── */
     .category {
       background: var(--surface); border: 1px solid var(--border);
       border-radius: 10px; margin-bottom: 14px; overflow: hidden;
@@ -100,8 +104,10 @@
       font-size: 11px; padding: 2px 8px; border-radius: 99px;
       background: var(--surface); color: var(--muted); border: 1px solid var(--border);
     }
-    .category-count .to-do { color: var(--accent); font-weight: 700; }
+    .category-count .to-watch { color: var(--accent); font-weight: 700; }
+    .category-count .lib-found { color: var(--green); font-weight: 700; }
 
+    /* ── Item list ── */
     .items { padding: 6px 0; }
     .item {
       display: flex; align-items: center; gap: 8px;
@@ -109,6 +115,7 @@
     }
     .item:not(:last-child) { border-bottom: 1px solid rgba(46,50,80,0.4); }
 
+    /* Toggle checkbox */
     .check-btn {
       width: 26px; height: 26px;
       display: inline-flex; align-items: center; justify-content: center;
@@ -116,9 +123,9 @@
       background: transparent; cursor: pointer; font-size: 13px;
       transition: background 0.15s, border-color 0.15s; flex-shrink: 0;
     }
-    .check-btn.done   { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
-    .check-btn.undone { background: transparent; border-color: var(--border); color: transparent; }
-    .check-btn.undone:hover { border-color: var(--muted); }
+    .check-btn.watched  { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+    .check-btn.unwatched { background: transparent; border-color: var(--border); color: transparent; }
+    .check-btn.unwatched:hover { border-color: var(--muted); }
 
     .item-body {
       flex: 1; display: flex; align-items: baseline; gap: 6px; min-width: 0;
@@ -127,9 +134,34 @@
       font-size: 14px; user-select: none;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .item-title.done  { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--muted); }
-    .item-title.undone { color: var(--text); }
+    .item-title.watched  { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--muted); }
+    .item-title.unwatched { color: var(--text); }
     .item-year { font-size: 11px; color: var(--muted); flex-shrink: 0; }
+
+    /* ── Library status dot ── */
+    .lib-dot {
+      width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+      transition: background 0.2s;
+    }
+    .lib-dot.found   { background: var(--green); box-shadow: 0 0 5px var(--green); }
+    .lib-dot.missing { background: var(--border); }
+
+    /* ── Find (search) button ── */
+    .find-btn {
+      width: 26px; height: 26px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 6px; border: 1px solid transparent;
+      background: transparent; color: var(--muted);
+      font-size: 13px; cursor: pointer; line-height: 1;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+      opacity: 0.5; flex-shrink: 0;
+    }
+    .item:hover .find-btn { opacity: 1; }
+    .find-btn:hover, .find-btn.active {
+      color: var(--cyan); border-color: var(--cyan-dim); background: var(--cyan-dim);
+      opacity: 1;
+    }
+    .find-btn.searching { animation: pulse 1s infinite; color: var(--cyan); opacity: 1; }
 
     .delete-btn {
       width: 26px; height: 26px;
@@ -143,6 +175,83 @@
     .item:hover .delete-btn { opacity: 1; }
     .delete-btn:hover { color: var(--red); border-color: var(--red-dim); background: var(--red-dim); }
 
+    /* ── Search panel ── */
+    .search-panel {
+      border-top: 1px solid var(--border);
+      background: var(--surface3);
+      padding: 10px 14px;
+      display: none;
+    }
+    .search-panel.open { display: block; }
+
+    .search-panel-header {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 8px; font-size: 11px; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .search-source-badge {
+      font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px;
+      background: var(--surface2); border: 1px solid var(--border); color: var(--muted);
+    }
+    .search-source-badge.nyaa      { background: #1a0a3d; border-color: #a07bff; color: #a07bff; }
+    .search-source-badge.torrents-csv { background: #0a2030; border-color: #3ab0e0; color: #3ab0e0; }
+
+    .search-loading {
+      text-align: center; color: var(--muted); font-size: 12px; padding: 12px 0;
+    }
+    .search-empty {
+      text-align: center; color: var(--muted); font-size: 12px; padding: 10px 0; font-style: italic;
+    }
+
+    .torrent-result {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(46,50,80,0.3);
+    }
+    .torrent-result:last-child { border-bottom: none; }
+
+    .torrent-name {
+      flex: 1; font-size: 12px; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      min-width: 0;
+    }
+    .torrent-name:hover { color: var(--accent); cursor: default; }
+
+    .quality-pill {
+      font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px;
+      flex-shrink: 0; white-space: nowrap; font-family: var(--mono);
+    }
+    .q-2160p, .q-4K { background: #0a3330; color: var(--cyan); border: 1px solid var(--cyan-dim); }
+    .q-1080p         { background: var(--accent-dim); color: var(--accent); border: 1px solid #1a2a5a; }
+    .q-720p          { background: var(--yellow-dim); color: var(--yellow); border: 1px solid #2d2000; }
+    .q-480p          { background: #1e2030; color: var(--muted); border: 1px solid var(--border); }
+
+    .seeds-count {
+      font-size: 11px; font-family: var(--mono); color: var(--green);
+      flex-shrink: 0; white-space: nowrap; min-width: 44px; text-align: right;
+    }
+    .seeds-count.low { color: var(--yellow); }
+    .seeds-count.dead { color: var(--muted); }
+
+    .torrent-size {
+      font-size: 11px; color: var(--muted); flex-shrink: 0;
+      white-space: nowrap; font-family: var(--mono); min-width: 56px; text-align: right;
+    }
+
+    .add-torrent-btn {
+      padding: 3px 10px; border-radius: 5px; border: 1px solid var(--green-dim);
+      background: transparent; color: var(--green);
+      font-size: 11px; font-weight: 600; cursor: pointer;
+      white-space: nowrap; transition: background 0.15s; flex-shrink: 0;
+    }
+    .add-torrent-btn:hover { background: var(--green-dim); }
+    .add-torrent-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .add-torrent-btn.adding { animation: pulse 0.8s infinite; }
+    .add-torrent-btn.added  { color: var(--muted); border-color: var(--border); }
+
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+    /* ── Add item row ── */
     .add-item-row {
       display: flex; gap: 8px; padding: 10px 14px;
       border-top: 1px solid var(--border); background: var(--surface3);
@@ -162,6 +271,7 @@
     }
     .add-item-btn:hover { filter: brightness(1.2); }
 
+    /* ── Delete category button ── */
     .cat-delete-btn {
       width: 24px; height: 24px;
       display: inline-flex; align-items: center; justify-content: center;
@@ -172,6 +282,7 @@
     }
     .cat-delete-btn:hover { opacity: 1; color: var(--red); border-color: var(--red-dim); background: var(--red-dim); }
 
+    /* ── Add category strip ── */
     .add-category {
       background: var(--surface); border: 1px solid var(--border);
       border-radius: 10px; padding: 12px 14px; display: flex; gap: 8px;
@@ -191,15 +302,7 @@
     }
     .add-category-btn:hover { background: var(--accent-dim); }
 
-    .reset-btn {
-      display: inline-flex; align-items: center; gap: 5px;
-      padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border);
-      background: var(--surface2); color: var(--muted);
-      font-size: 12px; font-weight: 600; cursor: pointer;
-      transition: color 0.15s, border-color 0.15s; white-space: nowrap;
-    }
-    .reset-btn:hover { color: var(--yellow); border-color: var(--yellow); }
-
+    /* ── Backup menu ── */
     .backup-wrap { position: relative; }
     .backup-btn {
       display: inline-flex; align-items: center; gap: 5px;
@@ -233,20 +336,43 @@
     .backup-restore-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
     .backup-restore-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
+    /* ── Header action buttons ── */
+    .reset-btn, .lib-check-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--surface2); color: var(--muted);
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      transition: color 0.15s, border-color 0.15s; white-space: nowrap;
+    }
+    .reset-btn:hover { color: var(--yellow); border-color: var(--yellow); }
+    .lib-check-btn:hover { color: var(--green); border-color: var(--green); }
+    .lib-check-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .lib-check-btn.checking { color: var(--accent); border-color: var(--accent); animation: pulse 1s infinite; }
+
+    /* ── Library summary chip ── */
+    .lib-chip {
+      font-size: 11px; color: var(--green); white-space: nowrap;
+      padding: 3px 8px; border-radius: 5px;
+      border: 1px solid var(--green-dim); background: var(--green-dim);
+    }
+
+    /* ── Type badges ── */
     .type-badge {
       font-size: 10px; font-weight: 700; letter-spacing: 0.4px;
       text-transform: uppercase; padding: 1px 6px; border-radius: 4px;
       flex-shrink: 0; white-space: nowrap;
     }
-    .type-Albums     { background:#1a2a4d; color:#5b9eff; }
-    .type-Podcasts   { background:var(--purple-dim); color:var(--purple); }
-    .type-Audiobooks { background:var(--cyan-dim); color:var(--cyan); }
-    .type-Radio      { background:var(--orange-dim); color:var(--orange); }
-    .type-custom     { background:#1e2030; color:#8890b0; }
+    .type-Movies        { background:#1a2a4d; color:#5b9eff; }
+    .type-TV-Shows      { background:#1a0a3d; color:#a07bff; }
+    .type-Anime         { background:#3d0a2d; color:#ff7bb0; }
+    .type-Documentaries { background:#0a3330; color:#1abc9c; }
+    .type-custom        { background:#1e2030; color:#8890b0; }
 
+    /* ── Mobile ── */
     @media (max-width: 600px) {
       header { flex-wrap: wrap; padding: 10px 14px; }
       .item { min-height: 48px; }
+      .torrent-size { display: none; }
     }
   </style>
 </head>
@@ -257,16 +383,19 @@
     <a href="/home" class="back-link" title="Home">🏠</a>
     <a href="/" class="back-link" title="Clockwork">⏰</a>
     <div>
-      <h1>🎧 To Listen</h1>
+      <h1>📺 To Watch</h1>
       <div class="subtitle" id="header-subtitle">Loading…</div>
     </div>
   </div>
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <span class="lib-chip" id="lib-chip" style="display:none"></span>
+    <button class="lib-check-btn" id="lib-check-btn" onclick="checkLibrary()"
+            title="Check which titles exist in the watch folder">⬛ Check Library</button>
     <div class="backup-wrap">
       <button class="backup-btn" onclick="toggleBackupMenu()">↩ Restore</button>
       <div class="backup-panel hidden" id="backup-panel"></div>
     </div>
-    <button class="reset-btn" onclick="resetAll()" title="Mark everything as unlistened">↺ Reset</button>
+    <button class="reset-btn" onclick="resetAll()" title="Mark everything as unwatched">↺ Reset</button>
   </div>
 </header>
 
@@ -279,23 +408,32 @@
 <main id="main"></main>
 
 <script>
-  const STORAGE_KEY = 'to-listen-data';
+  const STORAGE_KEY = 'to-watch-data';
 
   const DEFAULT_DATA = {
     categories: [
-      { name: 'Albums',     items: [] },
-      { name: 'Podcasts',   items: [] },
-      { name: 'Audiobooks', items: [] },
-      { name: 'Radio',      items: [] },
+      { name: 'Movies',        items: [] },
+      { name: 'TV Shows',      items: [] },
+      { name: 'Anime',         items: [] },
+      { name: 'Documentaries', items: [] },
     ]
   };
 
   const TYPE_COLORS = {
-    'Albums':     'Albums',
-    'Podcasts':   'Podcasts',
-    'Audiobooks': 'Audiobooks',
-    'Radio':      'Radio',
+    'Movies':        'Movies',
+    'TV Shows':      'TV-Shows',
+    'Anime':         'Anime',
+    'Documentaries': 'Documentaries',
   };
+
+  // Library check state (in-memory, reset on reload)
+  let libResults = null;
+  let libChecking = false;
+
+  // Open search panels: "ci-ii" → { open: bool, results: [], loading: bool }
+  const searchState = {};
+
+  // ── Persistence ──────────────────────────────────────────────────────────
 
   function load() {
     try {
@@ -321,6 +459,8 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }
 
+  // ── Flash notifications ───────────────────────────────────────────────────
+
   function flash(msg, type = 'success') {
     const list = document.getElementById('flash-list');
     const el = document.createElement('div');
@@ -330,6 +470,8 @@
     list.appendChild(el);
     setTimeout(() => el.remove(), 3500);
   }
+
+  // ── Utilities ─────────────────────────────────────────────────────────────
 
   function parseTitle(raw) {
     const m = raw.trim().match(/^(.+?)\s*\((\d{4})\)\s*$/);
@@ -342,10 +484,25 @@
   }
 
   function totalStats(data) {
-    let total = 0, done = 0;
+    let total = 0, watched = 0;
     for (const cat of data.categories)
-      for (const item of cat.items) { total++; if (item.watched) done++; }
-    return { total, done };
+      for (const item of cat.items) { total++; if (item.watched) watched++; }
+    return { total, watched };
+  }
+
+  function fmtBytes(bytes) {
+    if (!bytes) return '';
+    const units = ['B','KB','MB','GB','TB'];
+    let v = bytes;
+    for (const u of units) {
+      if (v < 1024 || u === 'TB') return `${v.toFixed(u === 'B' ? 0 : 1)} ${u}`;
+      v /= 1024;
+    }
+    return '';
+  }
+
+  function qualityClass(q) {
+    return q ? `quality-pill q-${q.replace(/\s/g,'')}` : '';
   }
 
   function esc(str) {
@@ -354,13 +511,39 @@
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
+  // ── Header update ─────────────────────────────────────────────────────────
+
   function updateHeader(data) {
-    const { total, done } = totalStats(data);
+    const { total, watched } = totalStats(data);
     document.getElementById('header-subtitle').textContent =
-      total === 0 ? 'No items yet' : `${done} / ${total} listened`;
+      total === 0 ? 'No items yet' : `${watched} / ${total} watched`;
     document.getElementById('progress-fill').style.width =
-      total === 0 ? '0%' : `${Math.round(done / total * 100)}%`;
+      total === 0 ? '0%' : `${Math.round(watched / total * 100)}%`;
+
+    const chip = document.getElementById('lib-chip');
+    if (libResults && total > 0) {
+      let found = 0, checked = 0;
+      for (const cat of data.categories)
+        for (const item of cat.items) {
+          const r = libResults[item.title];
+          if (r !== undefined) { checked++; if (r.found) found++; }
+        }
+      if (checked > 0) { chip.textContent = `${found}/${checked} in library`; chip.style.display = ''; }
+      else chip.style.display = 'none';
+    } else {
+      chip.style.display = 'none';
+    }
+
+    const btn = document.getElementById('lib-check-btn');
+    if (libChecking) {
+      btn.disabled = true; btn.classList.add('checking'); btn.textContent = '⬛ Checking…';
+    } else {
+      btn.disabled = false; btn.classList.remove('checking');
+      btn.textContent = libResults ? '⬛ Re-check' : '⬛ Check Library';
+    }
   }
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   function render() {
     const data = load();
@@ -375,16 +558,25 @@
 
     for (let ci = 0; ci < data.categories.length; ci++) {
       const cat = data.categories[ci];
-      const toGo = cat.items.filter(i => !i.watched).length;
+      const toWatch = cat.items.filter(i => !i.watched).length;
       const catSlug = badgeClass(cat.name);
+
+      let catFound = 0;
+      if (libResults) {
+        for (const item of cat.items) {
+          if (libResults[item.title]?.found) catFound++;
+        }
+      }
 
       const card = document.createElement('div');
       card.className = 'category';
       card.id = `cat-${ci}`;
 
-      const countHtml = toGo > 0
-        ? `<span class="to-do">${toGo} to listen</span>`
-        : `all listened`;
+      let countHtml = toWatch > 0
+        ? `<span class="to-watch">${toWatch} to watch</span>`
+        : `all watched`;
+      if (libResults && cat.items.length > 0)
+        countHtml += ` &nbsp;<span class="lib-found">${catFound} in library</span>`;
 
       card.innerHTML = `
         <div class="category-header">
@@ -394,7 +586,7 @@
         </div>
         <div class="items" id="items-${ci}"></div>
         <div class="add-item-row">
-          <input type="text" id="add-input-${ci}" placeholder='Add title or artist…' autocomplete="off">
+          <input type="text" id="add-input-${ci}" placeholder='Add title… or "Title (Year)"' autocomplete="off">
           <button class="add-item-btn" onclick="addItem(${ci})">+ Add</button>
         </div>
       `;
@@ -404,38 +596,68 @@
       document.getElementById(`add-input-${ci}`)
         .addEventListener('keydown', e => { if (e.key === 'Enter') addItem(ci); });
 
-      const unlistened = cat.items.map((item, ii) => ({ item, ii })).filter(x => !x.item.watched);
-      const listened   = cat.items.map((item, ii) => ({ item, ii })).filter(x =>  x.item.watched);
+      const unwatched = cat.items.map((item, ii) => ({ item, ii })).filter(x => !x.item.watched);
+      const watched   = cat.items.map((item, ii) => ({ item, ii })).filter(x =>  x.item.watched);
 
-      if (unlistened.length + listened.length === 0) {
-        itemsEl.innerHTML = `<div class="item" style="color:var(--muted);font-size:12px;font-style:italic;">Nothing here — add something to listen to.</div>`;
+      if (unwatched.length + watched.length === 0) {
+        itemsEl.innerHTML = `<div class="item" style="color:var(--muted);font-size:12px;font-style:italic;">Nothing here — add something to watch.</div>`;
       } else {
-        for (const { item, ii } of [...unlistened, ...listened]) {
+        for (const { item, ii } of [...unwatched, ...watched]) {
+          const libResult = libResults?.[item.title];
+          const libDotHtml = libResult !== undefined
+            ? `<span class="lib-dot ${libResult.found ? 'found' : 'missing'}"
+                     title="${libResult.found ? 'In library: ' + esc(libResult.match || '') : 'Not in library'}"></span>`
+            : '';
+
+          const key = `${ci}-${ii}`;
+          const ss = searchState[key];
+          const findActive = ss?.open;
+
+          // Only show Find button for unwatched items
+          const findBtnHtml = !item.watched
+            ? `<button class="find-btn ${findActive ? 'active' : ''}"
+                       id="find-btn-${key}"
+                       onclick="toggleSearch(${ci},${ii})"
+                       title="${findActive ? 'Close search' : 'Find torrent'}">🔍</button>`
+            : '';
+
           const itemDiv = document.createElement('div');
           itemDiv.className = 'item';
-          itemDiv.id = `item-${ci}-${ii}`;
+          itemDiv.id = `item-${key}`;
           itemDiv.innerHTML = `
-            <button class="check-btn ${item.watched ? 'done' : 'undone'}"
+            <button class="check-btn ${item.watched ? 'watched' : 'unwatched'}"
                     onclick="toggleItem(${ci},${ii})"
-                    title="${item.watched ? 'Mark as unlistened' : 'Mark as listened'}">
+                    title="${item.watched ? 'Mark as unwatched' : 'Mark as watched'}">
               ${item.watched ? '✓' : ''}
             </button>
             <div class="item-body">
-              <span class="item-title ${item.watched ? 'done' : 'undone'}">${esc(item.title)}</span>
+              <span class="item-title ${item.watched ? 'watched' : 'unwatched'}">${esc(item.title)}</span>
               ${item.year ? `<span class="item-year">${esc(item.year)}</span>` : ''}
             </div>
+            ${libDotHtml}
+            ${findBtnHtml}
             <span class="type-badge ${catSlug}">${esc(cat.name)}</span>
             <button class="delete-btn" onclick="deleteItem(${ci},${ii})" title="Remove">×</button>
           `;
           itemsEl.appendChild(itemDiv);
+
+          // Search panel (only for unwatched)
+          if (!item.watched) {
+            const panel = document.createElement('div');
+            panel.className = `search-panel${findActive ? ' open' : ''}`;
+            panel.id = `search-panel-${key}`;
+            itemsEl.appendChild(panel);
+            if (findActive) renderSearchPanel(panel, key, cat.name);
+          }
         }
       }
     }
 
+    // Add category strip
     const strip = document.createElement('div');
     strip.className = 'add-category';
     strip.innerHTML = `
-      <input type="text" id="new-cat-input" placeholder="New list (e.g. Live Shows, Playlists, Mixes)…" autocomplete="off">
+      <input type="text" id="new-cat-input" placeholder="New list (e.g. Shorts, Stand-up, K-Drama)…" autocomplete="off">
       <button class="add-category-btn" onclick="addCategory()">+ List</button>
     `;
     main.appendChild(strip);
@@ -444,9 +666,162 @@
     });
   }
 
+  // ── Search panel rendering ────────────────────────────────────────────────
+
+  function renderSearchPanel(panel, key, catName) {
+    const ss = searchState[key];
+    const source = catName.toLowerCase() === 'anime' ? 'nyaa' : 'torrents-csv';
+
+    let inner = `<div class="search-panel-header">
+      Torrent search
+      <span class="search-source-badge ${source}">${source === 'nyaa' ? 'Nyaa.si' : 'torrents-csv'}</span>
+    </div>`;
+
+    if (ss.loading) {
+      inner += `<div class="search-loading">Searching…</div>`;
+    } else if (!ss.results) {
+      inner += `<div class="search-empty">No results yet.</div>`;
+    } else if (ss.results.length === 0) {
+      inner += `<div class="search-empty">No torrents found.</div>`;
+    } else {
+      for (let ri = 0; ri < ss.results.length; ri++) {
+        const r = ss.results[ri];
+        const qc = qualityClass(r.quality);
+        const seedClass = r.seeders > 20 ? '' : r.seeders > 5 ? 'low' : 'dead';
+        const sizeStr = r.size_str || (r.size_bytes ? fmtBytes(r.size_bytes) : '');
+        inner += `
+          <div class="torrent-result">
+            <span class="torrent-name" title="${esc(r.name)}">${esc(r.name)}</span>
+            ${r.quality ? `<span class="${qc}">${esc(r.quality)}</span>` : ''}
+            <span class="seeds-count ${seedClass}">↑${r.seeders}</span>
+            ${sizeStr ? `<span class="torrent-size">${esc(sizeStr)}</span>` : ''}
+            <button class="add-torrent-btn" id="add-btn-${key}-${ri}"
+                    onclick="addTorrent('${esc(r.magnet)}','${esc(r.name)}','${key}',${ri})"
+                    title="Send to Magneto / Transmission">+ Add</button>
+          </div>`;
+      }
+    }
+
+    panel.innerHTML = inner;
+  }
+
+  // ── Search actions ────────────────────────────────────────────────────────
+
+  async function toggleSearch(ci, ii) {
+    const key = `${ci}-${ii}`;
+    const data = load();
+    const item = data.categories[ci]?.items[ii];
+    if (!item) return;
+
+    const ss = searchState[key];
+    if (ss?.open) {
+      // Close
+      searchState[key] = { open: false };
+      render();
+      return;
+    }
+
+    // Open and trigger search
+    searchState[key] = { open: true, loading: true, results: null };
+    render();
+
+    const q = item.year ? `${item.title} ${item.year}` : item.title;
+    const catName = data.categories[ci].name;
+
+    try {
+      const params = new URLSearchParams({ q, cat: catName });
+      const resp = await fetch(`/api/torrent-search?${params}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const json = await resp.json();
+      searchState[key] = { open: true, loading: false, results: json.results || [] };
+    } catch(e) {
+      searchState[key] = { open: true, loading: false, results: [], error: String(e) };
+      flash(`Torrent search failed: ${e}`, 'error');
+    }
+
+    // Re-render just the panel to avoid wiping focus
+    const panel = document.getElementById(`search-panel-${key}`);
+    if (panel) {
+      const catName2 = data.categories[ci].name;
+      renderSearchPanel(panel, key, catName2);
+    } else {
+      render();
+    }
+  }
+
+  async function addTorrent(magnet, name, key, ri) {
+    const btnId = `add-btn-${key}-${ri}`;
+    const btn = document.getElementById(btnId);
+    if (btn) { btn.disabled = true; btn.classList.add('adding'); btn.textContent = '…'; }
+
+    try {
+      const resp = await fetch('/api/torrent-add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ magnet }),
+      });
+      const json = await resp.json();
+      if (json.ok) {
+        flash(`Added "${name}" to Transmission via Magneto.`);
+        if (btn) { btn.classList.remove('adding'); btn.classList.add('added'); btn.textContent = '✓ Added'; }
+      } else {
+        flash(`Magneto error: ${json.error || 'unknown'}`, 'error');
+        if (btn) { btn.disabled = false; btn.classList.remove('adding'); btn.textContent = '+ Add'; }
+      }
+    } catch(e) {
+      flash(`Failed to reach Magneto: ${e}`, 'error');
+      if (btn) { btn.disabled = false; btn.classList.remove('adding'); btn.textContent = '+ Add'; }
+    }
+  }
+
+  // ── Library check ─────────────────────────────────────────────────────────
+
+  async function checkLibrary() {
+    const data = load();
+    const titles = [];
+    for (const cat of data.categories)
+      for (const item of cat.items)
+        titles.push({ title: item.title, year: item.year || null });
+
+    if (titles.length === 0) { flash('No items to check.', 'error'); return; }
+
+    libChecking = true;
+    updateHeader(data);
+
+    try {
+      const resp = await fetch('/api/watch-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ titles }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const json = await resp.json();
+      if (!json.available) {
+        flash('Watch folder not accessible — check CLOCKWORK_WATCH_DIR.', 'error');
+        libResults = null;
+      } else {
+        libResults = json.matches;
+        const found = Object.values(libResults).filter(r => r.found).length;
+        flash(`Library: ${found} of ${titles.length} title${titles.length !== 1 ? 's' : ''} found in watch folder.`,
+              found > 0 ? 'success' : 'error');
+      }
+    } catch(e) {
+      flash('Library check failed — is Clockwork running?', 'error');
+      libResults = null;
+    }
+
+    libChecking = false;
+    render();
+  }
+
+  // ── Item actions ──────────────────────────────────────────────────────────
+
   function toggleItem(ci, ii) {
     const data = load();
     data.categories[ci].items[ii].watched = !data.categories[ci].items[ii].watched;
+    // Close any open search for this item when marking watched
+    if (data.categories[ci].items[ii].watched)
+      searchState[`${ci}-${ii}`] = { open: false };
     save(data);
     render();
   }
@@ -475,6 +850,7 @@
     const data = load();
     const title = data.categories[ci].items[ii].title;
     data.categories[ci].items.splice(ii, 1);
+    delete searchState[`${ci}-${ii}`];
     save(data);
     flash(`Removed "${title}".`);
     render();
@@ -500,6 +876,9 @@
     const data = load();
     const name = data.categories[ci].name;
     if (!confirm(`Delete the "${name}" list and all its items?`)) return;
+    // Clear any open search panels for this category
+    for (let ii = 0; ii < data.categories[ci].items.length; ii++)
+      delete searchState[`${ci}-${ii}`];
     data.categories.splice(ci, 1);
     save(data);
     flash(`Deleted list "${name}".`);
@@ -507,12 +886,12 @@
   }
 
   function resetAll() {
-    if (!confirm('Mark all items as unlistened?')) return;
+    if (!confirm('Mark all items as unwatched?')) return;
     const data = load();
     for (const cat of data.categories)
       for (const item of cat.items) item.watched = false;
     save(data);
-    flash('Reset — all items marked as unlistened.');
+    flash('Reset — all items marked as unwatched.');
     render();
   }
 
