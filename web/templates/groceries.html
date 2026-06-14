@@ -384,8 +384,45 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button type="submit" class="reset-btn" title="Mark everything as not stocked">↺ Reset</button>
     </form>
+    <div style="position:relative" id="backup-wrap">
+      <button class="sync-btn" onclick="toggleBackupMenu(event)" type="button" title="Restore from backup">↩ Restore</button>
+      <div id="backup-menu" style="display:none;position:absolute;right:0;top:calc(100% + 6px);background:#22263a;border:1px solid #2e3250;border-radius:8px;padding:6px;min-width:220px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);">
+        {% for slot, label in [('hot','Hot'),('cold','Cold'),('archive','Archive')] %}
+        {% set exists = backup_slots_exist[loop.index0] %}
+        {% set mtime = backup_slots_mtime[loop.index0] %}
+        <form method="post" action="/groceries/restore" style="margin:0">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="slot" value="{{ slot }}">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-radius:5px;gap:10px;">
+            <div>
+              <div style="font-size:12px;font-weight:600;color:#e2e4f0">{{ label }}</div>
+              <div style="font-size:10px;color:#8890b0;margin-top:1px">{{ mtime if exists else 'no backup' }}</div>
+            </div>
+            <button type="submit" {% if not exists %}disabled{% endif %}
+                    style="padding:3px 8px;border-radius:4px;border:1px solid #2e3250;background:transparent;color:#8890b0;font-size:11px;font-weight:600;cursor:{% if exists %}pointer{% else %}not-allowed{% endif %};opacity:{% if exists %}1{% else %}0.3{% endif %}">Restore</button>
+          </div>
+        </form>
+        {% endfor %}
+      </div>
+    </div>
+    <a href="/groceries/history" class="sync-btn" style="text-decoration:none" title="View change history">📋 History</a>
   </div>
 </header>
+<script>
+  function toggleBackupMenu(e) {
+    e.stopPropagation();
+    const menu = document.getElementById('backup-menu');
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+    if (menu.style.display === 'block') {
+      document.addEventListener('click', _outsideBackupClick, {once: true});
+    }
+  }
+  function _outsideBackupClick(e) {
+    if (!document.getElementById('backup-wrap').contains(e.target)) {
+      document.getElementById('backup-menu').style.display = 'none';
+    }
+  }
+</script>
 
 {% if total > 0 %}
 <div class="progress-bar">
