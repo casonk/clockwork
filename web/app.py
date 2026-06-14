@@ -66,6 +66,11 @@ _EXTRA_WATCH_DIRS: list[Path] = [
     for d in os.environ.get("CLOCKWORK_TORRENT_DIRS", "/srv/snowbridge/share/torrents").split(":")
     if d.strip()
 ]
+# Destinations for sort-downloads. All default to WATCH_DIR so the feature
+# works out of the box; set env vars to route content types to separate dirs.
+_MOVIE_DIR = Path(os.environ.get("CLOCKWORK_MOVIE_DIR", str(WATCH_DIR)))
+_TV_DIR = Path(os.environ.get("CLOCKWORK_TV_DIR", str(WATCH_DIR)))
+_ANIME_DIR = Path(os.environ.get("CLOCKWORK_ANIME_DIR", str(WATCH_DIR)))
 MAGNETO_URL = os.environ.get("CLOCKWORK_MAGNETO_URL", "http://127.0.0.1:5400")
 GROCERIES_HISTORY_FILE = Path(
     os.environ.get(
@@ -2255,6 +2260,92 @@ _QUALITY_RE = re.compile(
 )
 
 
+# TV show indicators: S01E01, Season 1, S01-S05, or standalone S01 (season pack).
+# "Season" must be followed by a digit to avoid matching titles like "Hunting Season".
+_TV_RE = re.compile(
+    r"s\d{2}e\d{2}"  # S01E01
+    r"|season\s+\d+"  # Season 1
+    r"|s\d{2}-s\d{2}"  # S01-S05 (season range)
+    r"|\bs\d{2}\b",  # S01 (word-bounded season pack)
+    re.IGNORECASE,
+)
+
+# Anime release groups / patterns common on Nyaa
+_ANIME_RE = re.compile(
+    r"\b(subsplease|erai.raws|horriblesubs|nyaa|crunchyroll.rip)\b",
+    re.IGNORECASE,
+)
+
+# File suffixes that indicate an in-progress download
+_INCOMPLETE_SUFFIXES = frozenset({".part", ".!qb", ".ut!", ".crdownload"})
+
+
+def _has_incomplete_files(path: Path) -> bool:
+    """Return True if path or any file inside it is an incomplete download."""
+    if path.is_file():
+        return path.suffix.lower() in _INCOMPLETE_SUFFIXES
+    if path.is_dir():
+        return any(f.suffix.lower() in _INCOMPLETE_SUFFIXES for f in path.rglob("*") if f.is_file())
+    return False
+
+
+def _classify_media(name: str) -> str:
+    """Return 'tv', 'anime', or 'movie' based on filename heuristics."""
+    if _ANIME_RE.search(name):
+        return "anime"
+    if _TV_RE.search(name):
+        return "tv"
+    return "movie"
+
+
+def _sort_downloads_to_library() -> dict:
+    """Move completed downloads from torrent dirs to their library destinations.
+
+    Returns {"moved": [...], "skipped": [...], "errors": [...]}.
+    """
+    dest_map = {"movie": _MOVIE_DIR, "tv": _TV_DIR, "anime": _ANIME_DIR}
+
+    # Source dirs: extra watch dirs that are not already the library destinations
+    library_dirs = set(dest_map.values())
+    src_dirs = [d for d in _EXTRA_WATCH_DIRS if d.exists() and d not in library_dirs]
+
+    moved: list[dict] = []
+    skipped: list[dict] = []
+    errors: list[dict] = []
+
+    for src_dir in src_dirs:
+        try:
+            entries = list(src_dir.iterdir())
+        except OSError as exc:
+            errors.append({"name": str(src_dir), "error": str(exc)})
+            continue
+
+        for entry in entries:
+            if entry.name.startswith("."):
+                continue
+
+            if _has_incomplete_files(entry):
+                skipped.append({"name": entry.name, "reason": "in progress"})
+                continue
+
+            media_type = _classify_media(entry.name)
+            dest_dir = dest_map[media_type]
+            dest = dest_dir / entry.name
+
+            if dest.exists():
+                skipped.append({"name": entry.name, "reason": "already in library"})
+                continue
+
+            try:
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(entry), str(dest))
+                moved.append({"name": entry.name, "type": media_type, "dest": str(dest_dir)})
+            except OSError as exc:
+                errors.append({"name": entry.name, "error": str(exc)})
+
+    return {"moved": moved, "skipped": skipped, "errors": errors}
+
+
 def _normalize_media_title(s: str) -> str:
     s = s.lower()
     s = re.sub(r"[\._]", " ", s)  # dots/underscores → space
@@ -2461,6 +2552,19 @@ def watch_check():
         matches[title] = {"found": found_name is not None, "match": found_name}
 
     return jsonify({"available": True, "matches": matches})
+
+
+@app.post("/api/sort-downloads")
+def sort_downloads_api():
+    """Move completed downloads from torrent dirs to the library.
+
+    Response: {"moved": [...], "skipped": [...], "errors": [...]}
+    Each moved entry: {"name": str, "type": "movie"|"tv"|"anime", "dest": str}
+    Each skipped entry: {"name": str, "reason": str}
+    Each error entry: {"name": str, "error": str}
+    """
+    result = _sort_downloads_to_library()
+    return jsonify(result)
 
 
 @app.get("/api/torrent-search")

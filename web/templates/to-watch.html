@@ -342,7 +342,7 @@
     .backup-restore-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
     /* ── Header action buttons ── */
-    .reset-btn, .lib-check-btn {
+    .reset-btn, .lib-check-btn, .sort-btn {
       display: inline-flex; align-items: center; gap: 5px;
       padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border);
       background: var(--surface2); color: var(--muted);
@@ -353,6 +353,9 @@
     .lib-check-btn:hover { color: var(--green); border-color: var(--green); }
     .lib-check-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .lib-check-btn.checking { color: var(--accent); border-color: var(--accent); animation: pulse 1s infinite; }
+    .sort-btn:hover { color: var(--cyan); border-color: var(--cyan); }
+    .sort-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .sort-btn.sorting { color: var(--accent); border-color: var(--accent); animation: pulse 1s infinite; }
 
     /* ── Library summary chip ── */
     .lib-chip {
@@ -396,6 +399,8 @@
     <span class="lib-chip" id="lib-chip" style="display:none"></span>
     <button class="lib-check-btn" id="lib-check-btn" onclick="checkLibrary()"
             title="Check which titles exist in the watch folder">⬛ Check Library</button>
+    <button class="sort-btn" id="sort-btn" onclick="sortDownloads()"
+            title="Move completed downloads from torrent dir to library">📦 Sort Downloads</button>
     <div class="backup-wrap">
       <button class="backup-btn" onclick="toggleBackupMenu()">↩ Restore</button>
       <div class="backup-panel hidden" id="backup-panel"></div>
@@ -817,6 +822,50 @@
 
     libChecking = false;
     render();
+  }
+
+  // ── Sort downloads ────────────────────────────────────────────────────────
+
+  async function sortDownloads() {
+    const btn = document.getElementById('sort-btn');
+    if (btn) { btn.disabled = true; btn.classList.add('sorting'); btn.textContent = '⏳ Sorting…'; }
+
+    try {
+      const resp = await fetch('/api/sort-downloads', { method: 'POST' });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const json = await resp.json();
+
+      const moved = json.moved || [];
+      const skipped = json.skipped || [];
+      const errors = json.errors || [];
+
+      if (moved.length === 0 && errors.length === 0) {
+        const reason = skipped.length > 0
+          ? `${skipped.length} item${skipped.length !== 1 ? 's' : ''} skipped (in progress or already in library)`
+          : 'No completed downloads found in torrent dir.';
+        flash(reason, skipped.length > 0 ? 'success' : 'error');
+      } else {
+        if (moved.length > 0) {
+          const byType = {};
+          for (const m of moved) { byType[m.type] = (byType[m.type] || 0) + 1; }
+          const summary = Object.entries(byType).map(([t, n]) => `${n} ${t}`).join(', ');
+          flash(`Sorted ${moved.length} item${moved.length !== 1 ? 's' : ''}: ${summary}.`);
+        }
+        for (const e of errors) flash(`Error moving "${e.name}": ${e.error}`, 'error');
+      }
+
+      if (moved.length > 0) {
+        // Re-run library check to refresh the dots, then restore button
+        if (btn) { btn.classList.remove('sorting'); btn.textContent = '📦 Sort Downloads'; }
+        await checkLibrary();
+        if (btn) btn.disabled = false;
+        return;
+      }
+    } catch(e) {
+      flash(`Sort failed: ${e}`, 'error');
+    }
+
+    if (btn) { btn.disabled = false; btn.classList.remove('sorting'); btn.textContent = '📦 Sort Downloads'; }
   }
 
   // ── Item actions ──────────────────────────────────────────────────────────
