@@ -66,6 +66,12 @@ HOLDINGS_AGGREGATE_FILE = Path(
         / "holdings-aggregate.json",
     )
 )
+TRADILITY_ANALYSIS_FILE = Path(
+    os.environ.get(
+        "CLOCKWORK_TRADILITY_FILE",
+        BASE_DIR.parent / "tradility" / "exports" / "tradility-analysis.json",
+    )
+)
 _OLLAMA_BASE = os.environ.get("CREW_CHIEF_URL", "http://localhost:11434")
 _OLLAMA_MODEL = os.environ.get("CLOCKWORK_GROCERY_MODEL", "qwen2.5-coder:7b")
 _SUGGEST_MODEL = os.environ.get("CLOCKWORK_SUGGEST_MODEL", _OLLAMA_MODEL)
@@ -2534,6 +2540,36 @@ def to_do():
 @app.get("/to-invest")
 def to_invest():
     return render_template("to-invest.html", ollama_available=_ollama_available())
+
+
+@app.get("/to-tradility")
+def to_tradility():
+    return render_template("to-tradility.html")
+
+
+@app.get("/api/tradility-analysis")
+def api_tradility_analysis():
+    """Return the latest tradility technical analysis JSON.
+
+    Reads tradility/exports/tradility-analysis.json (or CLOCKWORK_TRADILITY_FILE).
+    """
+    if not TRADILITY_ANALYSIS_FILE.exists():
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "Tradility analysis file not found",
+                    "path": str(TRADILITY_ANALYSIS_FILE),
+                }
+            ),
+            404,
+        )
+    try:
+        data = json.loads(TRADILITY_ANALYSIS_FILE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    data["ok"] = True
+    return jsonify(data)
 
 
 @app.post("/api/watch-check")

@@ -213,6 +213,7 @@
     <a href="/to-read" class="nav-link" title="To Read">📚</a>
     <a href="/to-listen" class="nav-link" title="To Listen">🎧</a>
     <a href="/to-do" class="nav-link" title="To Do">✅</a>
+    <a href="/to-tradility" class="nav-link" title="Tradility">📈</a>
     <a href="/" class="nav-link" title="Clockwork">⏰</a>
     {% set nav_icons = {"Monitoring": "📊", "Pit Box": "💻", "Infrastructure": "🧰", "AI": "🤖"} %}
     {% for cat in nav_categories %}<a href="{{ cat.href }}" class="nav-link nav-link-text" title="{{ cat.label }}" aria-label="{{ cat.label }}"><span class="nav-icon" aria-hidden="true">{{ nav_icons.get(cat.label, "🔗") }}</span><span class="nav-label">{{ cat.label }}</span></a>{% endfor %}
