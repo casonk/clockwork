@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1, user-scalable=yes">
+  <title>To Invest — Clockwork</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f1117;
+      --surface:   #1a1d27;
+      --surface2:  #22263a;
+      --surface3:  #191c2a;
+      --border:    #2e3250;
+      --accent:    #5b7fff;
+      --accent-dim:#2d3f8a;
+      --green:     #3ecf6e;
+      --green-dim: #1a4d30;
+      --red:       #e05252;
+      --red-dim:   #4d1a1a;
+      --yellow:    #e0b832;
+      --orange:    #ff9a40;
+      --orange-dim:#3d2000;
+      --purple:    #a07bff;
+      --purple-dim:#1a0a3d;
+      --cyan:      #1abc9c;
+      --cyan-dim:  #0a3330;
+      --text:      #e2e4f0;
+      --muted:     #8890b0;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      gap: 12px;
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .back-link { font-size: 20px; text-decoration: none; opacity: 0.7; transition: opacity 0.15s; }
+    .back-link:hover { opacity: 1; }
+    header h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; }
+    .subtitle { color: var(--muted); font-size: 12px; }
+
+    .progress-bar { height: 3px; background: var(--border); }
+    .progress-fill { height: 100%; background: var(--green); transition: width 0.3s; }
+
+    #flash-list {
+      max-width: 680px; margin: 14px auto 0;
+      padding: 0 14px; display: flex; flex-direction: column; gap: 5px;
+    }
+    .flash {
+      padding: 8px 12px; border-radius: 7px; font-size: 12px;
+      display: flex; align-items: center; gap: 8px;
+      animation: flash-in 0.2s ease;
+    }
+    @keyframes flash-in { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
+    .flash.success { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+    .flash.error   { background: var(--red-dim);   color: var(--red);   border: 1px solid var(--red); }
+    .flash-close {
+      margin-left: auto; background: none; border: none; color: inherit;
+      cursor: pointer; font-size: 14px; line-height: 1; opacity: 0.7;
+    }
+    .flash-close:hover { opacity: 1; }
+
+    main { max-width: 680px; margin: 0 auto; padding: 18px 14px 100px; }
+
+    .empty-state { text-align: center; color: var(--muted); padding: 48px 24px; font-size: 14px; }
+    .empty-state p { margin-bottom: 6px; }
+
+    .category {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; margin-bottom: 14px; overflow: hidden;
+    }
+    .category-header {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 14px; border-bottom: 1px solid var(--border);
+      background: var(--surface2);
+    }
+    .category-name {
+      font-size: 13px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.7px; color: var(--muted); flex: 1;
+    }
+    .category-count {
+      font-size: 11px; padding: 2px 8px; border-radius: 99px;
+      background: var(--surface); color: var(--muted); border: 1px solid var(--border);
+    }
+    .category-count .holding { color: var(--green); font-weight: 700; }
+    .category-count .watching { color: var(--accent); font-weight: 700; }
+
+    .items { padding: 6px 0; max-height: 452px; overflow-y: auto; }
+    .items::-webkit-scrollbar { width: 4px; }
+    .items::-webkit-scrollbar-track { background: transparent; }
+    .items::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .items::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+    .item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 4px 14px; min-height: 44px;
+    }
+    .item:not(:last-child) { border-bottom: 1px solid rgba(46,50,80,0.4); }
+
+    /* Hold button — green when holding */
+    .hold-btn {
+      width: 26px; height: 26px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 6px; border: 2px solid var(--border);
+      background: transparent; cursor: pointer; font-size: 13px;
+      transition: background 0.15s, border-color 0.15s; flex-shrink: 0;
+    }
+    .hold-btn.holding { background: var(--green-dim); border-color: var(--green); color: var(--green); }
+    .hold-btn.watching { background: transparent; border-color: var(--border); color: transparent; }
+    .hold-btn.watching:hover { border-color: var(--green); }
+
+    .item-body {
+      flex: 1; display: flex; flex-direction: column; justify-content: center; min-width: 0;
+    }
+    .ticker {
+      font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+      font-size: 14px; font-weight: 700; letter-spacing: 0.5px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      user-select: all;
+    }
+    .ticker.holding { color: var(--green); }
+    .ticker.watching { color: var(--text); }
+    .company-name {
+      font-size: 11px; color: var(--muted);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    .status-badge {
+      font-size: 10px; font-weight: 700; letter-spacing: 0.4px;
+      text-transform: uppercase; padding: 1px 6px; border-radius: 4px;
+      flex-shrink: 0; white-space: nowrap;
+    }
+    .status-holding  { background: var(--green-dim); color: var(--green); }
+    .status-watching { background: var(--accent-dim); color: var(--accent); }
+
+    .delete-btn {
+      width: 26px; height: 26px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 6px; border: 1px solid transparent;
+      background: transparent; color: var(--muted);
+      font-size: 15px; cursor: pointer; line-height: 1;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+      opacity: 0.4; flex-shrink: 0;
+    }
+    .item:hover .delete-btn { opacity: 1; }
+    .delete-btn:hover { color: var(--red); border-color: var(--red-dim); background: var(--red-dim); }
+
+    .add-item-row {
+      display: flex; gap: 8px; padding: 10px 14px;
+      border-top: 1px solid var(--border); background: var(--surface3);
+    }
+    .add-item-row input[type="text"] {
+      flex: 1; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 7px 10px; color: var(--text);
+      font-size: 13px; outline: none; min-width: 0;
+    }
+    .add-item-row input[type="text"]:focus { border-color: var(--accent); }
+    .add-item-row input[type="text"]::placeholder { color: var(--muted); }
+    .add-item-btn {
+      padding: 7px 14px; border-radius: 6px; border: none;
+      background: var(--accent-dim); color: var(--accent);
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      white-space: nowrap; transition: filter 0.15s;
+    }
+    .add-item-btn:hover { filter: brightness(1.2); }
+
+    .cat-delete-btn {
+      width: 24px; height: 24px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border-radius: 5px; border: 1px solid transparent;
+      background: transparent; color: var(--muted);
+      font-size: 14px; cursor: pointer; line-height: 1;
+      transition: color 0.15s, border-color 0.15s, background 0.15s; opacity: 0.5;
+    }
+    .cat-delete-btn:hover { opacity: 1; color: var(--red); border-color: var(--red-dim); background: var(--red-dim); }
+
+    .add-category {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 14px; display: flex; gap: 8px;
+    }
+    .add-category input[type="text"] {
+      flex: 1; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 8px 10px; color: var(--text);
+      font-size: 13px; outline: none; min-width: 0;
+    }
+    .add-category input[type="text"]:focus { border-color: var(--accent); }
+    .add-category input[type="text"]::placeholder { color: var(--muted); }
+    .add-category-btn {
+      padding: 8px 16px; border-radius: 6px; border: 1px solid var(--accent-dim);
+      background: transparent; color: var(--accent);
+      font-size: 13px; font-weight: 600; cursor: pointer;
+      white-space: nowrap; transition: background 0.15s;
+    }
+    .add-category-btn:hover { background: var(--accent-dim); }
+
+    .reset-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--surface2); color: var(--muted);
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      transition: color 0.15s, border-color 0.15s; white-space: nowrap;
+    }
+    .reset-btn:hover { color: var(--yellow); border-color: var(--yellow); }
+
+    .backup-wrap { position: relative; }
+    .backup-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--surface2); color: var(--muted);
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      transition: color 0.15s, border-color 0.15s; white-space: nowrap;
+    }
+    .backup-btn:hover { color: var(--text); border-color: var(--muted); }
+    .backup-panel {
+      position: absolute; right: 0; top: calc(100% + 6px);
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 6px; min-width: 210px;
+      display: flex; flex-direction: column; gap: 2px;
+      z-index: 200; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    .backup-panel.hidden { display: none; }
+    .backup-slot {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 6px 8px; border-radius: 5px; gap: 10px;
+    }
+    .backup-slot:hover { background: var(--surface3); }
+    .backup-slot-name { font-size: 12px; font-weight: 600; color: var(--text); }
+    .backup-slot-ts { font-size: 10px; color: var(--muted); margin-top: 1px; }
+    .backup-restore-btn {
+      padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border);
+      background: transparent; color: var(--muted);
+      font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .backup-restore-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+    .backup-restore-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    .suggest-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--surface2); color: var(--muted);
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      transition: color 0.15s, border-color 0.15s; white-space: nowrap;
+    }
+    .suggest-btn:hover { color: var(--yellow); border-color: var(--yellow); }
+    .suggest-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .suggest-btn.suggesting { color: var(--accent); border-color: var(--accent); animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+
+    .suggest-panel { display: none; background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 20px; }
+    .suggest-panel.open { display: block; }
+    .suggest-panel-header { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+    .suggest-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+    .suggest-card {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 7px; padding: 7px 10px; min-width: 180px; max-width: 280px;
+    }
+    .suggest-info { flex: 1; min-width: 0; }
+    .suggest-ticker {
+      font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+      font-size: 13px; font-weight: 700; color: var(--accent);
+    }
+    .suggest-name { font-size: 11px; color: var(--muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .suggest-cat  { font-size: 10px; color: var(--muted); margin-top: 1px; }
+    .suggest-add-btn {
+      padding: 3px 8px; border-radius: 5px; border: 1px solid var(--border);
+      background: transparent; color: var(--accent); font-size: 11px; font-weight: 600;
+      cursor: pointer; white-space: nowrap; transition: background 0.15s;
+    }
+    .suggest-add-btn:hover { background: var(--accent-dim); }
+    .suggest-add-btn.added { color: var(--muted); border-color: var(--border); cursor: default; }
+
+    @media (max-width: 600px) {
+      header { flex-wrap: wrap; padding: 10px 14px; }
+      .item { min-height: 48px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <a href="/home" class="back-link" title="Home">🏠</a>
+    <a href="/" class="back-link" title="Clockwork">⏰</a>
+    <div>
+      <h1>📈 To Invest</h1>
+      <div class="subtitle" id="header-subtitle">Loading…</div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <button class="suggest-btn" id="suggest-btn" onclick="toggleSuggest()"
+            {% if not ollama_available %}disabled title="Ollama not reachable"{% else %}title="Get AI ticker suggestions based on your portfolio"{% endif %}>✨ Suggest</button>
+    <div class="backup-wrap">
+      <button class="backup-btn" onclick="toggleBackupMenu()">↩ Restore</button>
+      <div class="backup-panel hidden" id="backup-panel"></div>
+    </div>
+    <button class="reset-btn" onclick="resetAll()" title="Mark all as watching (not holding)">↺ Reset</button>
+  </div>
+</header>
+
+<div class="suggest-panel" id="suggest-panel">
+  <div class="suggest-panel-header">✨ Suggestions — <span>AI ticker picks based on your portfolio &amp; watchlist</span></div>
+  <div class="suggest-grid" id="suggest-grid"></div>
+</div>
+
+<div class="progress-bar">
+  <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+</div>
+
+<div id="flash-list"></div>
+
+<main id="main"></main>
+
+<script>
+  const STORAGE_KEY = 'to-invest-data';
+
+  const DEFAULT_DATA = {
+    categories: [
+      { name: 'Stocks', items: [] },
+      { name: 'ETFs',   items: [] },
+      { name: 'Crypto', items: [] },
+      { name: 'Bonds',  items: [] },
+      { name: 'REITs',  items: [] },
+    ]
+  };
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch(_) {}
+    return JSON.parse(JSON.stringify(DEFAULT_DATA));
+  }
+
+  function save(data) {
+    const current = localStorage.getItem(STORAGE_KEY);
+    if (current) {
+      try {
+        const snap = JSON.parse(current);
+        snap._backedUpAt = new Date().toISOString();
+        const hot  = localStorage.getItem(STORAGE_KEY + '-hot');
+        const cold = localStorage.getItem(STORAGE_KEY + '-cold');
+        if (cold) localStorage.setItem(STORAGE_KEY + '-archive', cold);
+        if (hot)  localStorage.setItem(STORAGE_KEY + '-cold', hot);
+        localStorage.setItem(STORAGE_KEY + '-hot', JSON.stringify(snap));
+      } catch (_) {}
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  }
+
+  function flash(msg, type = 'success') {
+    const list = document.getElementById('flash-list');
+    const el = document.createElement('div');
+    el.className = `flash ${type}`;
+    el.innerHTML = `<span>${type === 'success' ? '✓' : '✗'}&nbsp;${msg}</span>
+      <button class="flash-close" onclick="this.parentElement.remove()">×</button>`;
+    list.appendChild(el);
+    setTimeout(() => el.remove(), 3500);
+  }
+
+  // Parse "AAPL Apple Inc" → { ticker: "AAPL", name: "Apple Inc" }
+  function parseTicker(raw) {
+    const parts = raw.trim().split(/\s+/);
+    const ticker = parts[0].toUpperCase();
+    const name = parts.slice(1).join(' ') || null;
+    return { ticker, name };
+  }
+
+  function totalStats(data) {
+    let total = 0, holding = 0;
+    for (const cat of data.categories)
+      for (const item of cat.items) { total++; if (item.holding) holding++; }
+    return { total, holding };
+  }
+
+  function esc(str) {
+    return String(str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function updateHeader(data) {
+    const { total, holding } = totalStats(data);
+    const watching = total - holding;
+    document.getElementById('header-subtitle').textContent =
+      total === 0
+        ? 'No tickers yet'
+        : `${holding} holding · ${watching} watching`;
+    document.getElementById('progress-fill').style.width =
+      total === 0 ? '0%' : `${Math.round(holding / total * 100)}%`;
+  }
+
+  function render() {
+    const data = load();
+    updateHeader(data);
+
+    const main = document.getElementById('main');
+    main.innerHTML = '';
+
+    if (data.categories.length === 0) {
+      main.innerHTML = '<div class="empty-state"><p>No categories yet.</p><p>Add a category below to get started.</p></div>';
+    }
+
+    for (let ci = 0; ci < data.categories.length; ci++) {
+      const cat = data.categories[ci];
+      const holdingItems  = cat.items.filter(i => i.holding);
+      const watchingItems = cat.items.filter(i => !i.holding);
+
+      const countParts = [];
+      if (holdingItems.length)  countParts.push(`<span class="holding">${holdingItems.length} holding</span>`);
+      if (watchingItems.length) countParts.push(`<span class="watching">${watchingItems.length} watching</span>`);
+      const countHtml = countParts.length ? countParts.join(' · ') : 'empty';
+
+      const card = document.createElement('div');
+      card.className = 'category';
+      card.id = `cat-${ci}`;
+      card.innerHTML = `
+        <div class="category-header">
+          <span class="category-name">${esc(cat.name)}</span>
+          <span class="category-count">${countHtml}</span>
+          <button class="cat-delete-btn" onclick="deleteCategory(${ci})" title="Delete category">×</button>
+        </div>
+        <div class="items" id="items-${ci}"></div>
+        <div class="add-item-row">
+          <input type="text" id="add-input-${ci}" placeholder="AAPL  or  AAPL Apple Inc" autocomplete="off" spellcheck="false">
+          <button class="add-item-btn" onclick="addItem(${ci})">+ Add</button>
+        </div>
+      `;
+      main.appendChild(card);
+
+      const itemsEl = document.getElementById(`items-${ci}`);
+      document.getElementById(`add-input-${ci}`)
+        .addEventListener('keydown', e => { if (e.key === 'Enter') addItem(ci); });
+
+      // Show watching first, then holding
+      const ordered = [...watchingItems.map((item) => ({ item, ii: cat.items.indexOf(item) })),
+                       ...holdingItems.map((item) => ({ item, ii: cat.items.indexOf(item) }))];
+
+      if (ordered.length === 0) {
+        itemsEl.innerHTML = `<div class="item" style="color:var(--muted);font-size:12px;font-style:italic;">Nothing tracked — add a ticker above.</div>`;
+      } else {
+        for (const { item, ii } of ordered) {
+          const itemDiv = document.createElement('div');
+          itemDiv.className = 'item';
+          itemDiv.id = `item-${ci}-${ii}`;
+          itemDiv.innerHTML = `
+            <button class="hold-btn ${item.holding ? 'holding' : 'watching'}"
+                    onclick="toggleItem(${ci},${ii})"
+                    title="${item.holding ? 'Mark as watching' : 'Mark as holding'}">
+              ${item.holding ? '✓' : ''}
+            </button>
+            <div class="item-body">
+              <span class="ticker ${item.holding ? 'holding' : 'watching'}">${esc(item.ticker)}</span>
+              ${item.name ? `<span class="company-name">${esc(item.name)}</span>` : ''}
+            </div>
+            <span class="status-badge ${item.holding ? 'status-holding' : 'status-watching'}">${item.holding ? 'holding' : 'watching'}</span>
+            <button class="delete-btn" onclick="deleteItem(${ci},${ii})" title="Remove">×</button>
+          `;
+          itemsEl.appendChild(itemDiv);
+        }
+      }
+    }
+
+    const strip = document.createElement('div');
+    strip.className = 'add-category';
+    strip.innerHTML = `
+      <input type="text" id="new-cat-input" placeholder="New category (e.g. Options, Commodities, Funds)…" autocomplete="off">
+      <button class="add-category-btn" onclick="addCategory()">+ Category</button>
+    `;
+    main.appendChild(strip);
+    document.getElementById('new-cat-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') addCategory();
+    });
+  }
+
+  function toggleItem(ci, ii) {
+    const data = load();
+    data.categories[ci].items[ii].holding = !data.categories[ci].items[ii].holding;
+    save(data);
+    render();
+  }
+
+  function addItem(ci) {
+    const input = document.getElementById(`add-input-${ci}`);
+    const raw = input.value.trim();
+    if (!raw) return;
+    const { ticker, name } = parseTicker(raw);
+    if (!ticker) return;
+    const data = load();
+    const cat = data.categories[ci];
+    if (cat.items.some(i => i.ticker.toUpperCase() === ticker)) {
+      flash(`"${ticker}" is already in ${cat.name}.`, 'error');
+      return;
+    }
+    cat.items.push({ ticker, name, holding: false });
+    save(data);
+    input.value = '';
+    flash(`Added ${ticker} to ${cat.name}.`);
+    render();
+    const newInput = document.getElementById(`add-input-${ci}`);
+    if (newInput) newInput.focus();
+  }
+
+  function deleteItem(ci, ii) {
+    const data = load();
+    const ticker = data.categories[ci].items[ii].ticker;
+    data.categories[ci].items.splice(ii, 1);
+    save(data);
+    flash(`Removed ${ticker}.`);
+    render();
+  }
+
+  function addCategory() {
+    const input = document.getElementById('new-cat-input');
+    const name = input.value.trim();
+    if (!name) return;
+    const data = load();
+    if (data.categories.some(c => c.name.toLowerCase() === name.toLowerCase())) {
+      flash(`"${name}" already exists.`, 'error');
+      return;
+    }
+    data.categories.push({ name, items: [] });
+    save(data);
+    input.value = '';
+    flash(`Created category "${name}".`);
+    render();
+  }
+
+  function deleteCategory(ci) {
+    const data = load();
+    const name = data.categories[ci].name;
+    if (!confirm(`Delete the "${name}" category and all its tickers?`)) return;
+    data.categories.splice(ci, 1);
+    save(data);
+    flash(`Deleted "${name}".`);
+    render();
+  }
+
+  function resetAll() {
+    if (!confirm('Mark all tickers as watching (not holding)?')) return;
+    const data = load();
+    for (const cat of data.categories)
+      for (const item of cat.items) item.holding = false;
+    save(data);
+    flash('Reset — all tickers marked as watching.');
+    render();
+  }
+
+  // ── Backup menu ───────────────────────────────────────────────────────────
+
+  let _backupMenuOpen = false;
+
+  function toggleBackupMenu() {
+    _backupMenuOpen = !_backupMenuOpen;
+    const panel = document.getElementById('backup-panel');
+    if (_backupMenuOpen) {
+      renderBackupPanel(panel);
+      panel.classList.remove('hidden');
+      setTimeout(() => document.addEventListener('click', _outsideBackupClick, { once: true }), 0);
+    } else {
+      panel.classList.add('hidden');
+    }
+  }
+
+  function _outsideBackupClick(e) {
+    const wrap = document.getElementById('backup-panel')?.closest('.backup-wrap');
+    if (wrap?.contains(e.target)) {
+      setTimeout(() => document.addEventListener('click', _outsideBackupClick, { once: true }), 0);
+    } else {
+      _backupMenuOpen = false;
+      document.getElementById('backup-panel')?.classList.add('hidden');
+    }
+  }
+
+  function renderBackupPanel(panel) {
+    const slots = [
+      { key: 'hot',     label: 'Hot',     desc: 'previous version' },
+      { key: 'cold',    label: 'Cold',    desc: '2 versions ago' },
+      { key: 'archive', label: 'Archive', desc: '3 versions ago' },
+    ];
+    panel.innerHTML = slots.map(({ key, label, desc }) => {
+      let ts = '', hasData = false;
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY + '-' + key);
+        if (raw) {
+          hasData = true;
+          const d = JSON.parse(raw);
+          if (d._backedUpAt) {
+            ts = new Date(d._backedUpAt).toLocaleString(undefined,
+              { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+          }
+        }
+      } catch(_) {}
+      return `<div class="backup-slot">
+        <div>
+          <div class="backup-slot-name">${label}</div>
+          <div class="backup-slot-ts">${ts || desc}</div>
+        </div>
+        <button class="backup-restore-btn" onclick="restoreFromBackup('${key}')"
+                ${hasData ? '' : 'disabled'}>Restore</button>
+      </div>`;
+    }).join('');
+  }
+
+  function restoreFromBackup(slot) {
+    _backupMenuOpen = false;
+    document.getElementById('backup-panel')?.classList.add('hidden');
+    const raw = localStorage.getItem(STORAGE_KEY + '-' + slot);
+    if (!raw) { flash(`No ${slot} backup found.`, 'error'); return; }
+    let backup;
+    try { backup = JSON.parse(raw); } catch (_) { flash('Corrupt backup.', 'error'); return; }
+    const ts = backup._backedUpAt
+      ? new Date(backup._backedUpAt).toLocaleString(undefined,
+          { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : 'unknown time';
+    if (!confirm(`Restore ${slot} backup from ${ts}?\nYour current list will become the new hot backup.`)) return;
+    delete backup._backedUpAt;
+    const current = localStorage.getItem(STORAGE_KEY);
+    if (current) {
+      try {
+        const snap = JSON.parse(current);
+        snap._backedUpAt = new Date().toISOString();
+        const hot  = localStorage.getItem(STORAGE_KEY + '-hot');
+        const cold = localStorage.getItem(STORAGE_KEY + '-cold');
+        if (cold) localStorage.setItem(STORAGE_KEY + '-archive', cold);
+        if (hot)  localStorage.setItem(STORAGE_KEY + '-cold', hot);
+        localStorage.setItem(STORAGE_KEY + '-hot', JSON.stringify(snap));
+      } catch (_) {}
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(backup));
+    flash(`Restored from ${slot} backup (${ts}).`);
+    render();
+  }
+
+  render();
+
+  // ── Suggestions ───────────────────────────────────────────────────────────
+
+  let _suggestOpen = false;
+
+  async function toggleSuggest() {
+    const btn = document.getElementById('suggest-btn');
+    const panel = document.getElementById('suggest-panel');
+    if (_suggestOpen) {
+      panel.classList.remove('open'); _suggestOpen = false;
+      if (btn) { btn.classList.remove('suggesting'); btn.textContent = '✨ Suggest'; }
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.classList.add('suggesting'); btn.textContent = '⏳ Thinking…'; }
+    try {
+      const data = load();
+      const holdings = data.categories.flatMap(cat =>
+        cat.items.filter(i => i.holding).map(i => ({ ticker: i.ticker, name: i.name || null, category: cat.name }))
+      );
+      const watchlist = data.categories.flatMap(cat =>
+        cat.items.filter(i => !i.holding).map(i => ({ ticker: i.ticker, name: i.name || null, category: cat.name }))
+      );
+      const categories = data.categories.map(c => c.name);
+      const resp = await fetch('/api/suggest-invest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ holdings, watchlist, categories }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const json = await resp.json();
+      if (!json.ok || !json.suggestions || json.suggestions.length === 0) {
+        flash(json.error || 'No suggestions returned.', 'error');
+        if (btn) { btn.disabled = false; btn.classList.remove('suggesting'); btn.textContent = '✨ Suggest'; }
+        return;
+      }
+      const grid = document.getElementById('suggest-grid');
+      grid.innerHTML = '';
+      for (const s of json.suggestions) {
+        const card = document.createElement('div');
+        card.className = 'suggest-card';
+        card.dataset.ticker   = s.ticker;
+        card.dataset.name     = s.name || '';
+        card.dataset.category = s.category || categories[0] || '';
+        card.innerHTML = `
+          <div class="suggest-info">
+            <div class="suggest-ticker">${esc(s.ticker)}</div>
+            ${s.name ? `<div class="suggest-name" title="${esc(s.name)}">${esc(s.name)}</div>` : ''}
+            <div class="suggest-cat">${esc(s.category)}</div>
+          </div>
+          <button class="suggest-add-btn" onclick="addInvestSuggestion(this)">+ Add</button>`;
+        grid.appendChild(card);
+      }
+      panel.classList.add('open'); _suggestOpen = true;
+      if (btn) { btn.disabled = false; btn.classList.remove('suggesting'); btn.textContent = '✨ Suggest'; }
+    } catch(e) {
+      flash(`Suggest failed: ${e}`, 'error');
+      if (btn) { btn.disabled = false; btn.classList.remove('suggesting'); btn.textContent = '✨ Suggest'; }
+    }
+  }
+
+  function addInvestSuggestion(btnEl) {
+    const card = btnEl.closest('.suggest-card');
+    const ticker = card.dataset.ticker;
+    const name = card.dataset.name || null;
+    const categoryName = card.dataset.category;
+    const data = load();
+    const ci = data.categories.findIndex(c => c.name === categoryName);
+    if (ci === -1) { flash(`Category "${categoryName}" not found.`, 'error'); return; }
+    const cat = data.categories[ci];
+    if (cat.items.some(i => i.ticker.toUpperCase() === ticker.toUpperCase())) {
+      flash(`${ticker} is already in ${cat.name}.`, 'error');
+      btnEl.textContent = '✓ Exists'; btnEl.classList.add('added'); btnEl.disabled = true;
+      return;
+    }
+    cat.items.push({ ticker, name: name || null, holding: false });
+    save(data);
+    flash(`Added ${ticker} to ${cat.name}.`);
+    btnEl.textContent = '✓ Added'; btnEl.classList.add('added'); btnEl.disabled = true;
+    render();
+  }
+</script>
+
+</body>
+</html>
