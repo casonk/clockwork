@@ -2513,7 +2513,7 @@ def to_read():
 
 @app.get("/to-listen")
 def to_listen():
-    return render_template("to-listen.html")
+    return render_template("to-listen.html", ollama_available=_ollama_available())
 
 
 @app.get("/to-do")
@@ -2665,6 +2665,213 @@ Respond with ONLY a JSON array, no explanation, no markdown fences. Format:
         )
 
     return jsonify({"ok": True, "suggestions": clean})
+
+
+def _ollama_item_suggest(
+    existing_block: str,
+    categories_block: str,
+    domain: str,
+    prompt_hint: str,
+) -> list[dict]:
+    """Shared Ollama call for item-style suggestions (groceries/shopping/audio).
+
+    Returns a list of {"name": str, "category": str} dicts or raises on failure.
+    """
+    import urllib.request as _ur
+
+    prompt = f"""You are a helpful {domain} assistant.
+
+The user already has the following items — do NOT suggest any of these:
+{existing_block}
+
+Their categories are: {categories_block}
+
+{prompt_hint}
+Rules:
+- Do not suggest any item already listed above.
+- Pick diverse suggestions across the available categories.
+- Assign each suggestion to the most appropriate category from the list above.
+
+Respond with ONLY a JSON array, no explanation, no markdown fences. Format:
+[{{"name": "Example Item", "category": "Category Name"}}, ...]"""
+
+    body = json.dumps({"model": _SUGGEST_MODEL, "prompt": prompt, "stream": False}).encode()
+    req = _ur.Request(
+        f"{_OLLAMA_BASE}/api/generate",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with _ur.urlopen(req, timeout=120) as resp:
+        raw = json.loads(resp.read()).get("response", "")
+
+    parsed = _extract_json(raw)
+    if not isinstance(parsed, list):
+        raise ValueError(f"Unexpected model output: {raw[:200]}")
+    return parsed
+
+
+@app.post("/api/suggest-groceries")
+def suggest_groceries():
+    """Suggest grocery items not already in the list using Ollama."""
+    if not _ollama_available():
+        return jsonify({"ok": False, "error": "Ollama not reachable"}), 503
+
+    data = load_groceries()
+    categories = [c["name"] for c in data["categories"]]
+    all_items: list[str] = [i["name"] for c in data["categories"] for i in c["items"]]
+    existing_block = "\n".join(f"- {n}" for n in all_items[:120]) or "(none yet)"
+    cats_block = ", ".join(categories) or "General"
+
+    try:
+        raw_suggestions = _ollama_item_suggest(
+            existing_block,
+            cats_block,
+            domain="grocery shopping",
+            prompt_hint="Suggest exactly 12 grocery items the user is likely to want based on typical household needs.",
+        )
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    known_lower = {n.lower() for n in all_items}
+    clean = []
+    for s in raw_suggestions:
+        if not isinstance(s, dict):
+            continue
+        name = str(s.get("name") or "").strip()
+        if not name or name.lower() in known_lower:
+            continue
+        clean.append({"name": name, "category": str(s.get("category") or categories[0])})
+
+    return jsonify({"ok": True, "suggestions": clean})
+
+
+@app.post("/api/suggest-shopping")
+def suggest_shopping():
+    """Suggest shopping / wish-list items not already in the list using Ollama."""
+    if not _ollama_available():
+        return jsonify({"ok": False, "error": "Ollama not reachable"}), 503
+
+    data = load_shopping()
+    categories = [c["name"] for c in data["categories"]]
+    all_items: list[str] = [i["name"] for c in data["categories"] for i in c["items"]]
+    existing_block = "\n".join(f"- {n}" for n in all_items[:120]) or "(none yet)"
+    cats_block = ", ".join(categories) or "General"
+
+    try:
+        raw_suggestions = _ollama_item_suggest(
+            existing_block,
+            cats_block,
+            domain="personal shopping and wish-list curation",
+            prompt_hint="Suggest exactly 12 items the user might want to buy or add to their wish list, based on what they are already tracking.",
+        )
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    known_lower = {n.lower() for n in all_items}
+    clean = []
+    for s in raw_suggestions:
+        if not isinstance(s, dict):
+            continue
+        name = str(s.get("name") or "").strip()
+        if not name or name.lower() in known_lower:
+            continue
+        clean.append({"name": name, "category": str(s.get("category") or categories[0])})
+
+    return jsonify({"ok": True, "suggestions": clean})
+
+
+@app.post("/api/suggest-listen")
+def suggest_listen():
+    """Suggest audio content using Ollama.
+
+    Request body:
+        {"items": [{"title": str, "category": str}, ...], "categories": ["Albums", ...]}
+    Response:
+        {"ok": bool, "suggestions": [{"name": str, "category": str}, ...]}
+    """
+    if not _ollama_available():
+        return jsonify({"ok": False, "error": "Ollama not reachable"}), 503
+
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid JSON"}), 400
+
+    items: list[dict] = payload.get("items", [])
+    categories: list[str] = payload.get("categories", ["Albums", "Podcasts", "Audiobooks", "Radio"])
+
+    all_titles = [str(i.get("title") or "").strip() for i in items if i.get("title")]
+    existing_block = "\n".join(f"- {t}" for t in all_titles[:120]) or "(none yet)"
+    cats_block = ", ".join(categories) or "Albums"
+
+    try:
+        raw_suggestions = _ollama_item_suggest(
+            existing_block,
+            cats_block,
+            domain="audio and music recommendation",
+            prompt_hint="Suggest exactly 10 albums, podcasts, audiobooks, or radio shows the user is likely to enjoy, based on what they already listen to.",
+        )
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    known_lower = {t.lower() for t in all_titles}
+    clean = []
+    for s in raw_suggestions:
+        if not isinstance(s, dict):
+            continue
+        name = str(s.get("name") or "").strip()
+        if not name or name.lower() in known_lower:
+            continue
+        clean.append({"name": name, "category": str(s.get("category") or categories[0])})
+
+    return jsonify({"ok": True, "suggestions": clean})
+
+
+@app.post("/api/groceries/add-item")
+def api_groceries_add_item():
+    """JSON endpoint to add a grocery item (for AJAX suggest panel)."""
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid JSON"}), 400
+    category = str(payload.get("category") or "").strip()
+    item_name = str(payload.get("item") or "").strip()
+    if not item_name or not category:
+        return jsonify({"ok": False, "error": "category and item required"}), 400
+    data = load_groceries()
+    cat = _find_category(data, category)
+    if cat is None:
+        return jsonify({"ok": False, "error": f'Category "{category}" not found'}), 404
+    if any(i["name"].lower() == item_name.lower() for i in cat["items"]):
+        return jsonify({"ok": False, "error": f'"{item_name}" already in {category}'}), 409
+    cat["items"].append({"name": item_name, "stocked": False})
+    save_groceries(data)
+    _log_event(GROCERIES_HISTORY_FILE, "add", item=item_name, category=category)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/shopping/add-item")
+def api_shopping_add_item():
+    """JSON endpoint to add a shopping item (for AJAX suggest panel)."""
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid JSON"}), 400
+    category = str(payload.get("category") or "").strip()
+    item_name = str(payload.get("item") or "").strip()
+    if not item_name or not category:
+        return jsonify({"ok": False, "error": "category and item required"}), 400
+    data = load_shopping()
+    cat = _find_shopping_category(data, category)
+    if cat is None:
+        return jsonify({"ok": False, "error": f'Category "{category}" not found'}), 404
+    if any(i["name"].lower() == item_name.lower() for i in cat["items"]):
+        return jsonify({"ok": False, "error": f'"{item_name}" already in {category}'}), 409
+    cat["items"].append({"name": item_name, "owned": False})
+    save_shopping(data)
+    _log_event(SHOPPING_HISTORY_FILE, "add", item=item_name, category=category)
+    return jsonify({"ok": True})
 
 
 @app.get("/api/torrent-search")
