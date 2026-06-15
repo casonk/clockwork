@@ -2521,6 +2521,11 @@ def to_do():
     return render_template("to-do.html")
 
 
+@app.get("/to-invest")
+def to_invest():
+    return render_template("to-invest.html", ollama_available=_ollama_available())
+
+
 @app.post("/api/watch-check")
 def watch_check():
     """Fuzzy-match a list of titles against entries in WATCH_DIR.
@@ -2828,6 +2833,103 @@ def suggest_listen():
     return jsonify({"ok": True, "suggestions": clean})
 
 
+@app.post("/api/suggest-invest")
+def suggest_invest():
+    """Suggest investment tickers using Ollama.
+
+    Request body:
+        {
+          "holdings":  [{"ticker": str, "name": str|null, "category": str}, ...],
+          "watchlist": [{"ticker": str, "name": str|null, "category": str}, ...],
+          "categories": ["Stocks", "ETFs", ...]
+        }
+    Response:
+        {"ok": bool, "suggestions": [{"ticker": str, "name": str|null, "category": str}, ...]}
+    """
+    if not _ollama_available():
+        return jsonify({"ok": False, "error": "Ollama not reachable"}), 503
+
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid JSON"}), 400
+
+    holdings: list[dict] = payload.get("holdings", [])
+    watchlist: list[dict] = payload.get("watchlist", [])
+    categories: list[str] = payload.get(
+        "categories", ["Stocks", "ETFs", "Crypto", "Bonds", "REITs"]
+    )
+
+    all_known = holdings + watchlist
+    known_tickers = {str(i.get("ticker") or "").upper() for i in all_known}
+
+    def _fmt(item: dict) -> str:
+        ticker = str(item.get("ticker") or "").upper()
+        name = str(item.get("name") or "").strip()
+        return f"{ticker} ({name})" if name else ticker
+
+    holding_block = "\n".join(f"- {_fmt(i)}" for i in holdings) or "(none yet)"
+    watching_block = "\n".join(f"- {_fmt(i)}" for i in watchlist) or "(none yet)"
+    cats_block = ", ".join(categories)
+
+    import urllib.request as _ur
+
+    prompt = f"""You are a financial markets assistant helping a retail investor discover new securities to research.
+
+Currently holding:
+{holding_block}
+
+Currently watching (want to buy):
+{watching_block}
+
+Available categories: {cats_block}
+
+Suggest exactly 10 tickers the investor may want to research based on their existing portfolio and watchlist.
+Rules:
+- Do not suggest any ticker already listed above.
+- Choose tickers that complement or diversify the existing holdings/watchlist.
+- Assign each suggestion to the most appropriate category from the list above.
+- Include the full company or fund name where you know it; use null if unsure.
+- Suggestions are for research purposes only — not financial advice.
+
+Respond with ONLY a JSON array, no explanation, no markdown fences. Format:
+[{{"ticker": "NVDA", "name": "NVIDIA Corporation", "category": "Stocks"}}, ...]"""
+
+    try:
+        body = json.dumps({"model": _SUGGEST_MODEL, "prompt": prompt, "stream": False}).encode()
+        req = _ur.Request(
+            f"{_OLLAMA_BASE}/api/generate",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with _ur.urlopen(req, timeout=120) as resp:
+            raw = json.loads(resp.read()).get("response", "")
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    parsed = _extract_json(raw)
+    if not isinstance(parsed, list):
+        return jsonify({"ok": False, "error": "Model returned unexpected format", "raw": raw}), 500
+
+    clean: list[dict] = []
+    for s in parsed:
+        if not isinstance(s, dict):
+            continue
+        ticker = str(s.get("ticker") or "").upper().strip()
+        if not ticker or ticker in known_tickers:
+            continue
+        clean.append(
+            {
+                "ticker": ticker,
+                "name": str(s["name"]).strip() if s.get("name") else None,
+                "category": str(s.get("category") or categories[0]),
+            }
+        )
+
+    return jsonify({"ok": True, "suggestions": clean})
+
+
 @app.post("/api/groceries/add-item")
 def api_groceries_add_item():
     """JSON endpoint to add a grocery item (for AJAX suggest panel)."""
@@ -3061,6 +3163,16 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
             "hostname": "",
             "access_mode": "shared-mtls",
             "icon": "✅",
+        }
+    )
+    groups["Clockwork"].append(
+        {
+            "name": "clockwork-to-invest",
+            "display": "To Invest",
+            "url": "/to-invest",
+            "hostname": "",
+            "access_mode": "shared-mtls",
+            "icon": "📈",
         }
     )
 
