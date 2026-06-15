@@ -56,6 +56,16 @@ SHOPPING_FILE = Path(
 SHOPPING_RULES_FILE = Path(
     os.environ.get("CLOCKWORK_SHOPPING_RULES_FILE", BASE_DIR / "config" / "shopping-rules.json")
 )
+HOLDINGS_AGGREGATE_FILE = Path(
+    os.environ.get(
+        "CLOCKWORK_HOLDINGS_FILE",
+        BASE_DIR.parent.parent
+        / "example-scheduler"
+        / "exports"
+        / "invest"
+        / "holdings-aggregate.json",
+    )
+)
 _OLLAMA_BASE = os.environ.get("CREW_CHIEF_URL", "http://localhost:11434")
 _OLLAMA_MODEL = os.environ.get("CLOCKWORK_GROCERY_MODEL", "qwen2.5-coder:7b")
 _SUGGEST_MODEL = os.environ.get("CLOCKWORK_SUGGEST_MODEL", _OLLAMA_MODEL)
@@ -2928,6 +2938,33 @@ Respond with ONLY a JSON array, no explanation, no markdown fences. Format:
         )
 
     return jsonify({"ok": True, "suggestions": clean})
+
+
+@app.get("/api/invest-holdings")
+def api_invest_holdings():
+    """Return aggregated holdings from the example-scheduler pipeline.
+
+    Reads exports/invest/holdings-aggregate.json (or CLOCKWORK_HOLDINGS_FILE).
+    Response: the raw JSON payload written by aggregate_accounts.py, or
+    {"ok": False, "error": ...} when the file is missing or unreadable.
+    """
+    if not HOLDINGS_AGGREGATE_FILE.exists():
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "Holdings file not found",
+                    "path": str(HOLDINGS_AGGREGATE_FILE),
+                }
+            ),
+            404,
+        )
+    try:
+        data = json.loads(HOLDINGS_AGGREGATE_FILE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    data["ok"] = True
+    return jsonify(data)
 
 
 @app.post("/api/groceries/add-item")
