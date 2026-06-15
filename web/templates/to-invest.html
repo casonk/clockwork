@@ -252,7 +252,7 @@
     .backup-restore-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
     .backup-restore-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
-    .suggest-btn {
+    .suggest-btn, .sync-btn {
       display: inline-flex; align-items: center; gap: 5px;
       padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border);
       background: var(--surface2); color: var(--muted);
@@ -262,6 +262,9 @@
     .suggest-btn:hover { color: var(--yellow); border-color: var(--yellow); }
     .suggest-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .suggest-btn.suggesting { color: var(--accent); border-color: var(--accent); animation: pulse 1s infinite; }
+    .sync-btn:hover { color: var(--cyan); border-color: var(--cyan); }
+    .sync-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .sync-btn.syncing { color: var(--cyan); border-color: var(--cyan); animation: pulse 1s infinite; }
     @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
 
     .suggest-panel { display: none; background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 20px; }
@@ -308,6 +311,7 @@
   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
     <button class="suggest-btn" id="suggest-btn" onclick="toggleSuggest()"
             {% if not ollama_available %}disabled title="Ollama not reachable"{% else %}title="Get AI ticker suggestions based on your portfolio"{% endif %}>✨ Suggest</button>
+    <button class="sync-btn" id="sync-btn" onclick="syncHoldings()" title="Sync current holdings from personal-finance pipeline">↻ Sync Holdings</button>
     <div class="backup-wrap">
       <button class="backup-btn" onclick="toggleBackupMenu()">↩ Restore</button>
       <div class="backup-panel hidden" id="backup-panel"></div>
@@ -708,6 +712,86 @@
     } catch(e) {
       flash(`Suggest failed: ${e}`, 'error');
       if (btn) { btn.disabled = false; btn.classList.remove('suggesting'); btn.textContent = '✨ Suggest'; }
+    }
+  }
+
+  // ── Sync Holdings ─────────────────────────────────────────────────────────
+
+  // Maps personal-finance asset_class → to-invest category name.
+  // "Core Account" (cash sweeps) is intentionally omitted — skip those.
+  const ASSET_CLASS_MAP = {
+    'Stocks':       'Stocks',
+    'Mutual Funds': 'ETFs',
+    'ETFs':         'ETFs',
+    'Bonds':        'Bonds',
+    'Fixed Income': 'Bonds',
+    'REITs':        'REITs',
+    'Crypto':       'Crypto',
+  };
+
+  async function syncHoldings() {
+    const btn = document.getElementById('sync-btn');
+    if (btn) { btn.disabled = true; btn.classList.add('syncing'); btn.textContent = '⏳ Syncing…'; }
+    try {
+      const resp = await fetch('/api/invest-holdings');
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${resp.status}`);
+      }
+      const payload = await resp.json();
+      if (!payload.ok || !Array.isArray(payload.holdings)) {
+        throw new Error(payload.error || 'Unexpected response');
+      }
+
+      const data = load();
+      let marked = 0, added = 0, skipped = 0;
+
+      for (const h of payload.holdings) {
+        const ticker = (h.ticker || '').toUpperCase().trim();
+        if (!ticker) continue;
+
+        // Skip cash/sweep positions
+        const rawClass = h.asset_class || '';
+        if (rawClass === 'Core Account') { skipped++; continue; }
+
+        const targetCatName = ASSET_CLASS_MAP[rawClass] || 'Stocks';
+
+        // Search all categories for existing ticker entry
+        let found = false;
+        for (const cat of data.categories) {
+          const existing = cat.items.find(i => i.ticker.toUpperCase() === ticker);
+          if (existing) {
+            if (!existing.holding) { existing.holding = true; marked++; }
+            // Enrich name if currently null
+            if (!existing.name && h.description) existing.name = h.description;
+            found = true;
+            break;
+          }
+        }
+
+        if (!found) {
+          // Find or create the target category
+          let cat = data.categories.find(c => c.name === targetCatName);
+          if (!cat) {
+            cat = { name: targetCatName, items: [] };
+            data.categories.push(cat);
+          }
+          cat.items.push({ ticker, name: h.description || null, holding: true });
+          added++;
+        }
+      }
+
+      save(data);
+      render();
+      const parts = [];
+      if (marked) parts.push(`${marked} marked as holding`);
+      if (added)  parts.push(`${added} new tickers added`);
+      if (skipped) parts.push(`${skipped} cash positions skipped`);
+      flash(parts.length ? `Synced: ${parts.join(', ')}.` : 'Already up to date.');
+    } catch(e) {
+      flash(`Sync failed: ${e}`, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.classList.remove('syncing'); btn.textContent = '↻ Sync Holdings'; }
     }
   }
 
