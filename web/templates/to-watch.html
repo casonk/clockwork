@@ -342,7 +342,7 @@
     .backup-restore-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
     /* ── Header action buttons ── */
-    .reset-btn, .lib-check-btn, .sort-btn {
+    .reset-btn, .lib-check-btn, .sort-btn, .suggest-btn {
       display: inline-flex; align-items: center; gap: 5px;
       padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border);
       background: var(--surface2); color: var(--muted);
@@ -356,6 +356,41 @@
     .sort-btn:hover { color: var(--cyan); border-color: var(--cyan); }
     .sort-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .sort-btn.sorting { color: var(--accent); border-color: var(--accent); animation: pulse 1s infinite; }
+    .suggest-btn:hover { color: #e0b832; border-color: #e0b832; }
+    .suggest-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .suggest-btn.suggesting { color: var(--accent); border-color: var(--accent); animation: pulse 1s infinite; }
+
+    /* ── Suggestion panel ── */
+    .suggest-panel {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 14px 20px; display: none;
+    }
+    .suggest-panel.open { display: block; }
+    .suggest-panel-header {
+      font-size: 11px; font-weight: 700; letter-spacing: 1px;
+      text-transform: uppercase; color: var(--muted); margin-bottom: 10px;
+    }
+    .suggest-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 8px;
+    }
+    .suggest-card {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 12px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .suggest-info { flex: 1; min-width: 0; }
+    .suggest-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .suggest-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .suggest-add-btn {
+      padding: 4px 10px; border-radius: 5px; border: 1px solid var(--green-dim);
+      background: transparent; color: var(--green);
+      font-size: 11px; font-weight: 600; cursor: pointer;
+      white-space: nowrap; transition: background 0.15s; flex-shrink: 0;
+    }
+    .suggest-add-btn:hover { background: var(--green-dim); }
+    .suggest-add-btn.added { color: var(--muted); border-color: var(--border); cursor: default; }
 
     /* ── Library summary chip ── */
     .lib-chip {
@@ -401,6 +436,8 @@
             title="Check which titles exist in the watch folder">⬛ Check Library</button>
     <button class="sort-btn" id="sort-btn" onclick="sortDownloads()"
             title="Move completed downloads from torrent dir to library">📦 Sort Downloads</button>
+    <button class="suggest-btn" id="suggest-btn" onclick="toggleSuggest()"
+            {% if not ollama_available %}disabled title="Ollama not reachable"{% else %}title="Get AI suggestions based on your library and watch list"{% endif %}>✨ Suggest</button>
     <div class="backup-wrap">
       <button class="backup-btn" onclick="toggleBackupMenu()">↩ Restore</button>
       <div class="backup-panel hidden" id="backup-panel"></div>
@@ -408,6 +445,11 @@
     <button class="reset-btn" onclick="resetAll()" title="Mark everything as unwatched">↺ Reset</button>
   </div>
 </header>
+
+<div class="suggest-panel" id="suggest-panel">
+  <div class="suggest-panel-header">✨ Suggestions — <span id="suggest-source">based on your library &amp; watch list</span></div>
+  <div class="suggest-grid" id="suggest-grid"></div>
+</div>
 
 <div class="progress-bar">
   <div class="progress-fill" id="progress-fill" style="width:0%"></div>
@@ -866,6 +908,99 @@
     }
 
     if (btn) { btn.disabled = false; btn.classList.remove('sorting'); btn.textContent = '📦 Sort Downloads'; }
+  }
+
+  // ── Watch suggestions (Ollama) ────────────────────────────────────────────
+
+  let suggestOpen = false;
+
+  async function toggleSuggest() {
+    const btn = document.getElementById('suggest-btn');
+    const panel = document.getElementById('suggest-panel');
+
+    if (suggestOpen) {
+      panel.classList.remove('open');
+      suggestOpen = false;
+      if (btn) { btn.classList.remove('suggesting'); btn.textContent = '✨ Suggest'; }
+      return;
+    }
+
+    if (btn) { btn.disabled = true; btn.classList.add('suggesting'); btn.textContent = '⏳ Thinking…'; }
+
+    try {
+      const data = load();
+      const watchlist = data.categories.flatMap((cat, ci) =>
+        cat.items.filter(i => !i.watched).map(i => ({ title: i.title, year: i.year || null, category: cat.name }))
+      );
+      const library = libResults ? libResults.filter(r => r.found).map(r => r.title) : [];
+      const categories = data.categories.map(c => c.name);
+
+      const resp = await fetch('/api/suggest-watch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ library, watchlist, categories }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const json = await resp.json();
+
+      if (!json.ok || !json.suggestions || json.suggestions.length === 0) {
+        flash('No new suggestions — try expanding your library or watch list.', 'error');
+        if (btn) { btn.disabled = false; btn.classList.remove('suggesting'); btn.textContent = '✨ Suggest'; }
+        return;
+      }
+
+      const grid = document.getElementById('suggest-grid');
+      grid.innerHTML = '';
+      for (const s of json.suggestions) {
+        const card = document.createElement('div');
+        card.className = 'suggest-card';
+        card.dataset.title = s.title;
+        card.dataset.year = s.year || '';
+        card.dataset.category = s.category || categories[0] || '';
+        card.innerHTML = `
+          <div class="suggest-info">
+            <div class="suggest-title" title="${s.title}">${s.title}</div>
+            <div class="suggest-meta">${s.year || '—'} · ${s.category || ''}</div>
+          </div>
+          <button class="suggest-add-btn" onclick="addSuggestion(this)">+ Add</button>`;
+        grid.appendChild(card);
+      }
+
+      panel.classList.add('open');
+      suggestOpen = true;
+      if (btn) { btn.disabled = false; btn.classList.remove('suggesting'); btn.textContent = '✨ Suggest'; }
+    } catch(e) {
+      flash(`Suggest failed: ${e}`, 'error');
+      if (btn) { btn.disabled = false; btn.classList.remove('suggesting'); btn.textContent = '✨ Suggest'; }
+    }
+  }
+
+  function addSuggestion(btnEl) {
+    const card = btnEl.closest('.suggest-card');
+    const title = card.dataset.title;
+    const year = card.dataset.year || null;
+    const categoryName = card.dataset.category;
+
+    const data = load();
+    const ci = data.categories.findIndex(c => c.name === categoryName);
+    if (ci === -1) { flash(`Category "${categoryName}" not found.`, 'error'); return; }
+    const cat = data.categories[ci];
+
+    if (cat.items.some(i => i.title.toLowerCase() === title.toLowerCase())) {
+      flash(`"${title}" is already in ${cat.name}.`, 'error');
+      btnEl.textContent = '✓ Exists';
+      btnEl.classList.add('added');
+      btnEl.disabled = true;
+      return;
+    }
+
+    cat.items.push({ title, watched: false, ...(year ? { year: parseInt(year, 10) } : {}) });
+    save(data);
+    flash(`Added "${title}" to ${cat.name}.`);
+    btnEl.textContent = '✓ Added';
+    btnEl.classList.add('added');
+    btnEl.disabled = true;
+    render();
   }
 
   // ── Item actions ──────────────────────────────────────────────────────────

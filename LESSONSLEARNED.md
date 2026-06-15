@@ -14,6 +14,15 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
+- For compact card grids in the Clockwork web UI, use shrinkable grid tracks
+  such as `repeat(2, minmax(0, 1fr))` and put `min-width: 0` on cards and
+  nested flex rows. Plain `1fr 1fr` can still overflow on mobile because grid
+  items keep intrinsic min-content widths from long labels, hostnames, badges,
+  or split action buttons.
+- Mobile toolbar links should stay icon-first and single-row. If a top bar has
+  more than a few actions, hide long text labels at mobile widths and preserve
+  them as `title`/`aria-label` text instead of allowing the header to wrap into
+  a tall multi-row toolbar.
 - When one downstream repo schedules multiple unattended agentic maintenance
   jobs, keep them as separate manifests and stagger their boot delays instead of
   hiding unrelated workflows behind one timer.
