@@ -15,12 +15,6 @@
       --border:     #2e3250;
       --accent:     #5b7fff;
       --accent-dim: #2d3f8a;
-      --green:      #3ecf6e;
-      --green-dim:  #1a4d30;
-      --red:        #e05252;
-      --red-dim:    #4d1a1a;
-      --yellow:     #e0b832;
-      --yellow-dim: #3d3000;
       --muted-fg:   #8890b0;
       --muted-dim:  #1e2133;
       --text:       #e2e4f0;
@@ -52,7 +46,7 @@
     .header-title { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; flex: 1; }
     .header-meta { font-size: 11px; color: var(--muted-fg); white-space: nowrap; }
 
-    /* ── Controls bar ── */
+    /* ── Controls ── */
     .controls {
       background: var(--surface);
       border-bottom: 1px solid var(--border);
@@ -62,34 +56,28 @@
       gap: 10px;
       flex-wrap: wrap;
     }
-    .controls-label { font-size: 11px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: 0.7px; color: var(--muted-fg); white-space: nowrap; }
-
-    /* Indicator toggle pills */
+    .controls-label {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.7px; color: var(--muted-fg); white-space: nowrap;
+    }
     .indicator-group { display: flex; gap: 4px; }
     .ind-btn {
       padding: 5px 14px; border-radius: 99px; border: 1px solid var(--border);
       background: var(--surface2); color: var(--muted-fg);
       font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s;
-      white-space: nowrap;
     }
-    .ind-btn.active {
-      background: var(--accent-dim); color: var(--accent); border-color: var(--accent);
-    }
+    .ind-btn.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
     .ind-btn:hover:not(.active) { border-color: var(--muted-fg); color: var(--text); }
 
-    /* Asset class filter */
     .filter-group { display: flex; gap: 4px; flex-wrap: wrap; }
     .filter-btn {
       padding: 4px 10px; border-radius: 99px; border: 1px solid var(--border);
       background: transparent; color: var(--muted-fg);
       font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.15s;
-      white-space: nowrap;
     }
     .filter-btn.active { background: var(--surface2); color: var(--text); border-color: var(--muted-fg); }
     .filter-btn:hover:not(.active) { border-color: var(--muted-fg); }
 
-    /* Sort control */
     .sort-select {
       padding: 5px 10px; border-radius: 7px; border: 1px solid var(--border);
       background: var(--surface2); color: var(--text);
@@ -97,17 +85,14 @@
     }
     .sort-select:focus { border-color: var(--accent); }
 
-    /* Search */
     .search-input {
       padding: 5px 10px; border-radius: 7px; border: 1px solid var(--border);
       background: var(--surface2); color: var(--text);
-      font-size: 12px; outline: none; width: 130px;
+      font-size: 12px; outline: none; width: 130px; transition: width 0.2s;
     }
     .search-input:focus { border-color: var(--accent); width: 200px; }
     .search-input::placeholder { color: var(--muted-fg); }
-    .search-input { transition: width 0.2s; }
 
-    /* Refresh btn */
     .refresh-btn {
       margin-left: auto; display: flex; align-items: center; gap: 5px;
       padding: 5px 12px; border-radius: 7px; border: 1px solid var(--border);
@@ -119,147 +104,123 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     .refresh-icon { display: inline-block; }
 
-    /* ── Legend ── */
+    /* ── Gradient legend ── */
     .legend {
-      display: flex; gap: 14px; padding: 8px 20px;
+      padding: 10px 20px 8px;
+      background: var(--surface3);
       border-bottom: 1px solid var(--border);
-      background: var(--surface3); flex-wrap: wrap;
     }
-    .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted-fg); }
-    .legend-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
-    .legend-dot.buy    { background: var(--green); }
-    .legend-dot.sell   { background: var(--red); }
-    .legend-dot.neutral { background: var(--yellow); }
-    .legend-dot.unknown { background: var(--muted-dim); border: 1px solid var(--border); }
+    .legend-scale { position: relative; }
+    .legend-bar {
+      height: 8px; border-radius: 4px; width: 100%; max-width: 340px;
+    }
+    .legend-ticks {
+      display: flex; justify-content: space-between;
+      max-width: 340px; margin-top: 3px;
+      font-size: 10px; color: var(--muted-fg);
+    }
+    .legend-labels {
+      display: flex; justify-content: space-between;
+      max-width: 340px; margin-top: 1px;
+      font-size: 10px; font-weight: 700;
+    }
+    .legend-lbl-buy  { color: #66c45a; }
+    .legend-lbl-mid  { color: #c8c87f; }
+    .legend-lbl-sell { color: #c45a5a; }
+    .legend-no-data {
+      margin-top: 6px; display: flex; align-items: center; gap: 6px;
+      font-size: 10px; color: var(--muted-fg);
+    }
+    .legend-no-data-swatch {
+      width: 28px; height: 8px; border-radius: 4px;
+      background: var(--surface2); border: 1px solid var(--border);
+    }
 
     /* ── Stats bar ── */
     .stats-bar {
-      display: flex; gap: 16px; padding: 8px 20px;
+      display: flex; gap: 16px; padding: 6px 20px;
       background: var(--surface3); border-bottom: 1px solid var(--border);
-      flex-wrap: wrap;
+      flex-wrap: wrap; align-items: center;
     }
     .stat { font-size: 11px; color: var(--muted-fg); }
     .stat strong { font-weight: 700; }
-    .stat.buy strong   { color: var(--green); }
-    .stat.sell strong  { color: var(--red); }
-    .stat.neutral strong { color: var(--yellow); }
-    .stat.total strong { color: var(--text); }
-    .stat.errors strong { color: var(--muted-fg); }
 
     /* ── Grid ── */
-    main { padding: 16px 20px 80px; }
+    main { padding: 14px 20px 80px; }
 
     .ticker-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
       gap: 8px;
     }
 
+    /* Cards use only inline styles for color; only structural rules here */
     .ticker-card {
       border-radius: 9px;
       border: 1px solid var(--border);
       padding: 10px 12px;
       cursor: default;
-      transition: transform 0.1s, box-shadow 0.1s;
+      transition: transform 0.12s, box-shadow 0.12s;
       position: relative;
       overflow: hidden;
     }
-    .ticker-card:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
-
-    /* Color themes per signal */
-    .ticker-card.sig-buy {
-      background: linear-gradient(135deg, var(--green-dim) 0%, #121e18 100%);
-      border-color: #2a7a4a;
+    .ticker-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.5);
     }
-    .ticker-card.sig-sell {
-      background: linear-gradient(135deg, var(--red-dim) 0%, #1c1010 100%);
-      border-color: #7a2a2a;
-    }
-    .ticker-card.sig-neutral {
-      background: linear-gradient(135deg, var(--yellow-dim) 0%, #18160c 100%);
-      border-color: #5a4a10;
-    }
-    .ticker-card.sig-unknown {
-      background: var(--surface);
-      border-color: var(--border);
-    }
-    .ticker-card.sig-error {
-      background: var(--surface);
-      border-color: var(--border);
-      opacity: 0.5;
-    }
+    .ticker-card.no-data { background: var(--surface); opacity: 0.55; }
 
     .card-ticker {
       font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
       font-size: 15px; font-weight: 700; letter-spacing: 0.5px;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      padding-right: 46px;
     }
-    .sig-buy  .card-ticker { color: var(--green); }
-    .sig-sell .card-ticker { color: var(--red); }
-    .sig-neutral .card-ticker { color: var(--yellow); }
-    .sig-unknown .card-ticker { color: var(--muted-fg); }
-    .sig-error .card-ticker { color: var(--muted-fg); }
-
-    .card-asset { font-size: 10px; color: var(--muted-fg); margin-bottom: 6px;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-    .card-price {
-      font-size: 13px; font-weight: 600; margin-bottom: 4px; color: var(--text);
+    .card-asset {
+      font-size: 10px; color: var(--muted-fg); margin-bottom: 5px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
+    .card-price { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
 
     .card-indicator {
-      font-size: 11px; display: flex; align-items: center; justify-content: space-between;
-      margin-top: 3px;
+      font-size: 11px; display: flex; align-items: center;
+      justify-content: space-between; margin-top: 3px;
     }
     .card-ind-label { color: var(--muted-fg); }
     .card-ind-value { font-weight: 700; font-family: ui-monospace, monospace; font-size: 11px; }
-    .sig-buy  .card-ind-value { color: var(--green); }
-    .sig-sell .card-ind-value { color: var(--red); }
-    .sig-neutral .card-ind-value { color: var(--yellow); }
-    .sig-unknown .card-ind-value { color: var(--muted-fg); }
 
-    /* Signal badge */
+    /* Signal badge — colored inline */
     .signal-badge {
       position: absolute; top: 8px; right: 8px;
-      font-size: 9px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase;
-      padding: 2px 6px; border-radius: 4px;
+      font-size: 9px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase;
+      padding: 2px 6px; border-radius: 4px; border: 1px solid transparent;
     }
-    .sig-buy    .signal-badge { background: var(--green-dim); color: var(--green); border: 1px solid #2a7a4a; }
-    .sig-sell   .signal-badge { background: var(--red-dim);   color: var(--red);   border: 1px solid #7a2a2a; }
-    .sig-neutral .signal-badge { background: var(--yellow-dim); color: var(--yellow); border: 1px solid #5a4a10; }
-    .sig-unknown .signal-badge { background: var(--muted-dim); color: var(--muted-fg); border: 1px solid var(--border); }
-    .sig-error   .signal-badge { background: var(--muted-dim); color: var(--muted-fg); border: 1px solid var(--border); }
 
-    /* RSI mini-bar */
+    /* RSI progress bar */
     .rsi-bar-wrap {
-      margin-top: 6px; height: 4px; background: var(--muted-dim);
-      border-radius: 2px; overflow: hidden;
+      margin-top: 7px; height: 4px; border-radius: 2px; overflow: hidden;
+      background: rgba(255,255,255,0.07);
+      position: relative;
     }
-    .rsi-bar-fill {
-      height: 100%; border-radius: 2px; transition: width 0.4s ease;
+    .rsi-bar-fill { height: 100%; border-radius: 2px; }
+    /* Zone markers at 30% and 70% */
+    .rsi-bar-wrap::before,
+    .rsi-bar-wrap::after {
+      content: ''; position: absolute; top: 0; bottom: 0; width: 1px;
+      background: rgba(255,255,255,0.18);
     }
-    .sig-buy    .rsi-bar-fill { background: var(--green); }
-    .sig-sell   .rsi-bar-fill { background: var(--red); }
-    .sig-neutral .rsi-bar-fill { background: var(--yellow); }
+    .rsi-bar-wrap::before { left: 30%; }
+    .rsi-bar-wrap::after  { left: 70%; }
 
-    /* VWAP delta badge */
-    .vwap-delta {
-      font-size: 10px; font-weight: 600; margin-top: 3px;
-    }
-    .vwap-delta.above { color: var(--red); }
-    .vwap-delta.below { color: var(--green); }
-    .vwap-delta.at    { color: var(--muted-fg); }
+    /* VWAP delta */
+    .vwap-delta { font-size: 10px; font-weight: 600; margin-top: 4px; }
 
-    /* Loading / empty */
-    .state-msg {
-      text-align: center; color: var(--muted-fg); padding: 60px 24px; font-size: 14px;
-    }
-
-    /* Error card */
+    /* State messages */
+    .state-msg { text-align: center; color: var(--muted-fg); padding: 60px 24px; font-size: 14px; }
     .error-card {
       border-radius: 9px; border: 1px solid var(--border);
       background: var(--surface); padding: 16px;
-      color: var(--red); font-size: 13px; margin-bottom: 12px;
+      font-size: 13px; margin-bottom: 12px; color: #e05252;
     }
   </style>
 </head>
@@ -278,16 +239,16 @@
     <button class="ind-btn"        data-ind="vwap" onclick="setIndicator('vwap')">VWAP 20</button>
   </div>
 
-  <span class="controls-label" style="margin-left:8px">Class</span>
+  <span class="controls-label" style="margin-left:6px">Class</span>
   <div class="filter-group" id="class-filters"></div>
 
-  <input class="search-input" id="search-input" type="text" placeholder="Search ticker…" oninput="renderGrid()">
+  <input class="search-input" id="search-input" type="text"
+         placeholder="Search ticker…" oninput="renderGrid()">
 
   <select class="sort-select" id="sort-select" onchange="renderGrid()">
-    <option value="signal">Sort: signal</option>
+    <option value="value-asc">Sort: value ↑ (buy first)</option>
+    <option value="value-desc">Sort: value ↓ (sell first)</option>
     <option value="ticker">Sort: ticker A–Z</option>
-    <option value="rsi-asc">Sort: RSI ↑</option>
-    <option value="rsi-desc">Sort: RSI ↓</option>
     <option value="price-desc">Sort: price ↓</option>
   </select>
 
@@ -297,45 +258,149 @@
 </div>
 
 <div class="legend">
-  <div class="legend-item"><div class="legend-dot buy"></div> Buy / Oversold</div>
-  <div class="legend-item"><div class="legend-dot sell"></div> Sell / Overbought</div>
-  <div class="legend-item"><div class="legend-dot neutral"></div> Neutral / At VWAP</div>
-  <div class="legend-item"><div class="legend-dot unknown"></div> No data</div>
+  <div class="legend-scale">
+    <canvas class="legend-bar" id="legend-bar" height="8"></canvas>
+    <div class="legend-ticks" id="legend-ticks"></div>
+    <div class="legend-labels">
+      <span class="legend-lbl-buy"  id="legend-lbl-buy"></span>
+      <span class="legend-lbl-mid"  id="legend-lbl-mid"></span>
+      <span class="legend-lbl-sell" id="legend-lbl-sell"></span>
+    </div>
+  </div>
+  <div class="legend-no-data">
+    <div class="legend-no-data-swatch"></div>
+    No data / fetch error
+  </div>
 </div>
 
 <div class="stats-bar" id="stats-bar"></div>
 
 <main>
-  <div id="grid-container">
-    <div class="state-msg">Loading…</div>
-  </div>
+  <div id="grid-container"><div class="state-msg">Loading…</div></div>
 </main>
 
 <script>
-  let allTickers = [];
-  let activeIndicator = 'rsi';
-  let activeClasses = new Set(['all']);
-  let allClasses = [];
+  // ── matplotlib RdYlGn colormap (11 stops, t=0 → red, t=1 → green) ─────────
+  const RDYLGN = [
+    [165,   0,  38],
+    [215,  48,  39],
+    [244, 109,  67],
+    [253, 174,  97],
+    [254, 224, 139],
+    [255, 255, 191],
+    [217, 239, 139],
+    [166, 217, 106],
+    [102, 189,  99],
+    [ 26, 152,  80],
+    [  0, 104,  55],
+  ];
 
-  // ── Data load ──────────────────────────────────────────────────────────────
+  function rdylgn(t) {
+    t = Math.max(0, Math.min(1, t));
+    const n   = RDYLGN.length - 1;
+    const pos = t * n;
+    const lo  = Math.floor(pos);
+    const hi  = Math.min(n, lo + 1);
+    const f   = pos - lo;
+    return [
+      Math.round(RDYLGN[lo][0] + (RDYLGN[hi][0] - RDYLGN[lo][0]) * f),
+      Math.round(RDYLGN[lo][1] + (RDYLGN[hi][1] - RDYLGN[lo][1]) * f),
+      Math.round(RDYLGN[lo][2] + (RDYLGN[hi][2] - RDYLGN[lo][2]) * f),
+    ];
+  }
+
+  // t=1 → buy/green, t=0 → sell/red  (inverse of raw colormap for RSI/VWAP)
+  function colormapT(ticker) {
+    if (ticker.fetch_status === 'error') return null;
+    if (activeIndicator === 'rsi') {
+      if (ticker.rsi_14 == null) return null;
+      return 1 - ticker.rsi_14 / 100;          // RSI 0→t=1 (green), RSI 100→t=0 (red)
+    } else {
+      const p = ticker.last_price, v = ticker.vwap_20;
+      if (p == null || v == null || v === 0) return null;
+      const d = (p - v) / v;                   // % above/below VWAP
+      return Math.max(0, Math.min(1, 0.5 - d / 0.6));  // ±30% mapped to [0,1]
+    }
+  }
+
+  // Compute all inline color values for one card
+  function cardPalette(t) {
+    if (t === null) return null;
+    const [r, g, b] = rdylgn(t);
+    // Dark-blended background (15% colormap over #0f1117)
+    const base = [15, 17, 23];
+    const dr = Math.round(r * 0.15 + base[0] * 0.85);
+    const dg = Math.round(g * 0.15 + base[1] * 0.85);
+    const db = Math.round(b * 0.15 + base[2] * 0.85);
+    // Slightly brighter tint for gradient corner
+    const tr = Math.round(r * 0.28 + base[0] * 0.72);
+    const tg = Math.round(g * 0.28 + base[1] * 0.72);
+    const tb = Math.round(b * 0.28 + base[2] * 0.72);
+    return {
+      bg:     `linear-gradient(135deg, rgb(${tr},${tg},${tb}) 0%, rgb(${dr},${dg},${db}) 100%)`,
+      border: `rgba(${r},${g},${b},0.42)`,
+      fg:     `rgb(${r},${g},${b})`,
+      fgDim:  `rgba(${r},${g},${b},0.55)`,
+      fill:   `rgb(${r},${g},${b})`,
+    };
+  }
+
+  // ── Legend gradient bar (canvas, left=green buy, right=red sell) ────────────
+  function paintLegend() {
+    const canvas = document.getElementById('legend-bar');
+    const ctx    = canvas.getContext('2d');
+    const W      = canvas.offsetWidth || 340;
+    canvas.width = W * devicePixelRatio;
+    canvas.height = 8 * devicePixelRatio;
+    ctx.scale(devicePixelRatio, devicePixelRatio);
+    const grad = ctx.createLinearGradient(0, 0, W, 0);
+    // left=green (t=1), right=red (t=0) — reverse the stops
+    for (let i = 0; i <= 10; i++) {
+      const [r, g, b] = RDYLGN[10 - i];
+      grad.addColorStop(i / 10, `rgb(${r},${g},${b})`);
+    }
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(0, 0, W, 8, 4);
+    ctx.fill();
+
+    // Labels and ticks
+    if (activeIndicator === 'rsi') {
+      document.getElementById('legend-ticks').innerHTML =
+        '<span>0</span><span>30</span><span>50</span><span>70</span><span>100</span>';
+      document.getElementById('legend-lbl-buy').textContent  = 'Oversold (buy)';
+      document.getElementById('legend-lbl-mid').textContent  = 'Neutral';
+      document.getElementById('legend-lbl-sell').textContent = 'Overbought (sell)';
+    } else {
+      document.getElementById('legend-ticks').innerHTML =
+        '<span>−30%</span><span>−15%</span><span>0%</span><span>+15%</span><span>+30%</span>';
+      document.getElementById('legend-lbl-buy').textContent  = 'Below VWAP (buy)';
+      document.getElementById('legend-lbl-mid').textContent  = 'At VWAP';
+      document.getElementById('legend-lbl-sell').textContent = 'Above VWAP (sell)';
+    }
+  }
+
+  // ── State ───────────────────────────────────────────────────────────────────
+  let allTickers    = [];
+  let activeIndicator = 'rsi';
+  let activeClasses   = new Set(['all']);
+  let allClasses      = [];
+
+  // ── Data load ────────────────────────────────────────────────────────────────
   async function loadData() {
     const btn = document.getElementById('refresh-btn');
     btn.classList.add('spinning');
     try {
-      const res = await fetch('/api/tradility-analysis');
+      const res  = await fetch('/api/tradility-analysis');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || 'Unknown error');
       allTickers = data.tickers || [];
-
-      // Generated-at meta
       if (data.generated_at) {
         const d = new Date(data.generated_at);
         document.getElementById('meta-generated').textContent =
-          `Updated ${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
+          `Updated ${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
       }
-
-      // Build class list
       const classSet = new Set();
       for (const t of allTickers) if (t.asset_class) classSet.add(t.asset_class);
       allClasses = [...classSet].sort();
@@ -349,34 +414,16 @@
     }
   }
 
-  // ── Indicator toggle ───────────────────────────────────────────────────────
+  // ── Indicator switch ─────────────────────────────────────────────────────────
   function setIndicator(ind) {
     activeIndicator = ind;
-    document.querySelectorAll('.ind-btn').forEach(b => b.classList.toggle('active', b.dataset.ind === ind));
-    updateLegend();
+    document.querySelectorAll('.ind-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.ind === ind));
+    paintLegend();
     renderGrid();
   }
 
-  function updateLegend() {
-    const items = document.querySelectorAll('.legend .legend-item');
-    if (activeIndicator === 'rsi') {
-      items[0].querySelector('.legend-dot').className = 'legend-dot buy';
-      items[0].childNodes[1].textContent = ' Buy / Oversold (≤30)';
-      items[1].querySelector('.legend-dot').className = 'legend-dot sell';
-      items[1].childNodes[1].textContent = ' Sell / Overbought (≥70)';
-      items[2].querySelector('.legend-dot').className = 'legend-dot neutral';
-      items[2].childNodes[1].textContent = ' Neutral (30–70)';
-    } else {
-      items[0].querySelector('.legend-dot').className = 'legend-dot buy';
-      items[0].childNodes[1].textContent = ' Buy / Price Below VWAP';
-      items[1].querySelector('.legend-dot').className = 'legend-dot sell';
-      items[1].childNodes[1].textContent = ' Sell / Price Above VWAP';
-      items[2].querySelector('.legend-dot').className = 'legend-dot neutral';
-      items[2].childNodes[1].textContent = ' Neutral / At VWAP';
-    }
-  }
-
-  // ── Class filter ──────────────────────────────────────────────────────────
+  // ── Class filter ──────────────────────────────────────────────────────────────
   function buildClassFilters() {
     const container = document.getElementById('class-filters');
     container.innerHTML = '';
@@ -400,145 +447,141 @@
       activeClasses = new Set(['all']);
     } else {
       activeClasses.delete('all');
-      if (activeClasses.has(cls)) {
-        activeClasses.delete(cls);
-        if (activeClasses.size === 0) activeClasses.add('all');
-      } else {
-        activeClasses.add(cls);
-      }
+      activeClasses.has(cls) ? activeClasses.delete(cls) : activeClasses.add(cls);
+      if (activeClasses.size === 0) activeClasses.add('all');
     }
     document.querySelectorAll('.filter-btn').forEach(b => {
       const isAll = !b.dataset.cls;
-      const isCls = b.dataset.cls && activeClasses.has(b.dataset.cls);
-      b.classList.toggle('active', (isAll && activeClasses.has('all')) || isCls);
+      b.classList.toggle('active',
+        (isAll && activeClasses.has('all')) || (b.dataset.cls && activeClasses.has(b.dataset.cls)));
     });
     renderGrid();
   }
 
-  // ── Signal resolution ──────────────────────────────────────────────────────
-  function getSignal(ticker) {
-    if (ticker.fetch_status === 'error') return 'error';
-    if (activeIndicator === 'rsi') {
-      return ticker.rsi_14_signal || 'unknown';
-    } else {
-      return ticker.vwap_20_signal || 'unknown';
-    }
-  }
-
-  // oversold/below → buy, overbought/above → sell, neutral/at → neutral
-  function normalizeSignal(raw) {
-    if (raw === 'oversold' || raw === 'below')   return 'buy';
-    if (raw === 'overbought' || raw === 'above')  return 'sell';
-    if (raw === 'neutral' || raw === 'at')        return 'neutral';
-    if (raw === 'error')                          return 'error';
-    return 'unknown';
-  }
-
-  const SIGNAL_ORDER = { buy: 0, sell: 1, neutral: 2, unknown: 3, error: 4 };
-
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // ── Render ───────────────────────────────────────────────────────────────────
   function renderGrid() {
     const query = document.getElementById('search-input').value.trim().toUpperCase();
     const sort  = document.getElementById('sort-select').value;
 
     let tickers = allTickers.filter(t => {
-      if (query && !t.ticker.includes(query) && !(t.name || '').toUpperCase().includes(query)) return false;
-      if (!activeClasses.has('all') && !activeClasses.has(t.asset_class)) return false;
+      if (query && !t.ticker.includes(query) && !(t.name || '').toUpperCase().includes(query))
+        return false;
+      if (!activeClasses.has('all') && !activeClasses.has(t.asset_class))
+        return false;
       return true;
     });
 
-    // Sort
-    tickers = [...tickers].sort((a, b) => {
-      if (sort === 'ticker')     return a.ticker.localeCompare(b.ticker);
-      if (sort === 'rsi-asc')    return (a.rsi_14 ?? 999) - (b.rsi_14 ?? 999);
-      if (sort === 'rsi-desc')   return (b.rsi_14 ?? -1) - (a.rsi_14 ?? -1);
-      if (sort === 'price-desc') return (b.last_price ?? 0) - (a.last_price ?? 0);
-      // signal: buy first, then sell, neutral, unknown, error
-      const sa = SIGNAL_ORDER[normalizeSignal(getSignal(a))] ?? 9;
-      const sb = SIGNAL_ORDER[normalizeSignal(getSignal(b))] ?? 9;
-      return sa !== sb ? sa - sb : a.ticker.localeCompare(b.ticker);
+    // Attach computed t value for sorting/stats
+    tickers = tickers.map(t => ({ ...t, _t: colormapT(t) }));
+
+    tickers.sort((a, b) => {
+      if (sort === 'ticker')      return a.ticker.localeCompare(b.ticker);
+      if (sort === 'price-desc')  return (b.last_price ?? 0) - (a.last_price ?? 0);
+      if (sort === 'value-desc')  return (a._t ?? -1) - (b._t ?? -1); // low t (sell) first
+      // value-asc: high t (buy/green) first; nulls last
+      const at = a._t ?? -1, bt = b._t ?? -1;
+      return bt !== at ? bt - at : a.ticker.localeCompare(b.ticker);
     });
 
-    // Stats
-    const counts = { buy: 0, sell: 0, neutral: 0, unknown: 0, error: 0 };
-    for (const t of tickers) counts[normalizeSignal(getSignal(t))]++;
-    const statsBar = document.getElementById('stats-bar');
-    statsBar.innerHTML = `
-      <div class="stat total"><strong>${tickers.length}</strong> shown</div>
-      <div class="stat buy"><strong>${counts.buy}</strong> buy</div>
-      <div class="stat sell"><strong>${counts.sell}</strong> sell</div>
-      <div class="stat neutral"><strong>${counts.neutral}</strong> neutral</div>
-      ${counts.error ? `<div class="stat errors"><strong>${counts.error}</strong> no data</div>` : ''}
+    // Stats: bucket by approximate signal for count display
+    let buyN = 0, sellN = 0, neutralN = 0, noDataN = 0;
+    for (const t of tickers) {
+      if (t._t === null) { noDataN++; continue; }
+      if (t._t > 0.6)       buyN++;
+      else if (t._t < 0.4)  sellN++;
+      else                   neutralN++;
+    }
+    const [buyR, buyG, buyB]    = rdylgn(0.85);
+    const [sellR, sellG, sellB] = rdylgn(0.10);
+    const [midR, midG, midB]    = rdylgn(0.50);
+    document.getElementById('stats-bar').innerHTML = `
+      <div class="stat"><strong>${tickers.length}</strong> shown</div>
+      <div class="stat"><strong style="color:rgb(${buyR},${buyG},${buyB})">${buyN}</strong> buy</div>
+      <div class="stat"><strong style="color:rgb(${sellR},${sellG},${sellB})">${sellN}</strong> sell</div>
+      <div class="stat"><strong style="color:rgb(${midR},${midG},${midB})">${neutralN}</strong> neutral</div>
+      ${noDataN ? `<div class="stat"><strong style="color:var(--muted-fg)">${noDataN}</strong> no data</div>` : ''}
     `;
 
-    if (tickers.length === 0) {
-      document.getElementById('grid-container').innerHTML = '<div class="state-msg">No tickers match.</div>';
+    if (!tickers.length) {
+      document.getElementById('grid-container').innerHTML =
+        '<div class="state-msg">No tickers match.</div>';
       return;
     }
 
-    const frag = document.createDocumentFragment();
     const grid = document.createElement('div');
     grid.className = 'ticker-grid';
 
     for (const t of tickers) {
-      const rawSig = getSignal(t);
-      const sig    = normalizeSignal(rawSig);
-      const card   = document.createElement('div');
-      card.className = `ticker-card sig-${sig}`;
+      const pal   = cardPalette(t._t);
+      const card  = document.createElement('div');
+      card.className = 'ticker-card' + (pal ? '' : ' no-data');
 
-      // Price formatting
-      const price = t.last_price != null ? formatPrice(t.last_price) : '—';
+      if (pal) {
+        card.style.background   = pal.bg;
+        card.style.borderColor  = pal.border;
+      }
 
-      // Per-indicator values
+      const price = t.last_price != null ? fmtPrice(t.last_price) : '—';
+
       let indLabel = '', indValue = '', extraHtml = '';
       if (activeIndicator === 'rsi') {
-        const rsiVal = t.rsi_14 != null ? t.rsi_14.toFixed(1) : '—';
         indLabel = 'RSI 14';
-        indValue = rsiVal;
-        const pct = t.rsi_14 != null ? Math.min(100, Math.max(0, t.rsi_14)) : null;
-        if (pct !== null) {
-          extraHtml = `<div class="rsi-bar-wrap"><div class="rsi-bar-fill" style="width:${pct}%"></div></div>`;
+        indValue = t.rsi_14 != null ? t.rsi_14.toFixed(1) : '—';
+        if (t.rsi_14 != null) {
+          const pct  = Math.min(100, Math.max(0, t.rsi_14));
+          const fill = pal ? `background:${pal.fill}` : '';
+          extraHtml = `<div class="rsi-bar-wrap">
+            <div class="rsi-bar-fill" style="width:${pct}%;${fill}"></div>
+          </div>`;
         }
       } else {
-        const vwapVal = t.vwap_20 != null ? formatPrice(t.vwap_20) : '—';
         indLabel = 'VWAP 20';
-        indValue = vwapVal;
+        indValue = t.vwap_20 != null ? fmtPrice(t.vwap_20) : '—';
         if (t.last_price != null && t.vwap_20 != null && t.vwap_20 !== 0) {
-          const delta = ((t.last_price - t.vwap_20) / t.vwap_20 * 100);
+          const delta = (t.last_price - t.vwap_20) / t.vwap_20 * 100;
           const sign  = delta >= 0 ? '+' : '';
-          const cls   = rawSig === 'above' ? 'above' : rawSig === 'below' ? 'below' : 'at';
-          extraHtml = `<div class="vwap-delta ${cls}">${sign}${delta.toFixed(2)}% vs VWAP</div>`;
+          const col   = pal ? `color:${pal.fg}` : '';
+          extraHtml = `<div class="vwap-delta" style="${col}">${sign}${delta.toFixed(2)}% vs VWAP</div>`;
         }
       }
 
-      // Signal badge text
-      const badgeText = sig === 'buy' ? (activeIndicator === 'rsi' ? 'Oversold' : 'Below')
-                      : sig === 'sell' ? (activeIndicator === 'rsi' ? 'Overbought' : 'Above')
-                      : sig === 'neutral' ? (activeIndicator === 'rsi' ? 'Neutral' : 'At VWAP')
-                      : sig === 'error' ? 'No data'
-                      : '—';
+      // Badge label
+      let badge = '—';
+      if (t._t !== null) {
+        if (activeIndicator === 'rsi') {
+          badge = t._t > 0.7 ? 'Oversold' : t._t < 0.3 ? 'Overbought' : 'Neutral';
+        } else {
+          badge = t._t > 0.55 ? 'Below' : t._t < 0.45 ? 'Above' : 'At VWAP';
+        }
+      } else {
+        badge = t.fetch_status === 'error' ? 'No data' : '—';
+      }
+
+      const badgeBg  = pal ? `background:${pal.fgDim};border-color:${pal.border}` : '';
+      const badgeFg  = pal ? `color:${pal.fg}` : 'color:var(--muted-fg)';
+      const tickFg   = pal ? `color:${pal.fg}` : 'color:var(--muted-fg)';
+      const indValFg = pal ? `color:${pal.fg}` : 'color:var(--muted-fg)';
 
       card.innerHTML = `
-        <div class="signal-badge">${badgeText}</div>
-        <div class="card-ticker">${esc(t.ticker)}</div>
+        <div class="signal-badge" style="${badgeBg};${badgeFg}">${badge}</div>
+        <div class="card-ticker" style="${tickFg}">${esc(t.ticker)}</div>
         <div class="card-asset">${esc(t.asset_class || '')}${t.name ? ' · ' + esc(t.name) : ''}</div>
         <div class="card-price">${price}</div>
         <div class="card-indicator">
           <span class="card-ind-label">${indLabel}</span>
-          <span class="card-ind-value">${indValue}</span>
+          <span class="card-ind-value" style="${indValFg}">${indValue}</span>
         </div>
         ${extraHtml}
       `;
       grid.appendChild(card);
     }
 
-    frag.appendChild(grid);
     const container = document.getElementById('grid-container');
     container.innerHTML = '';
-    container.appendChild(frag);
+    container.appendChild(grid);
   }
 
-  function formatPrice(v) {
+  function fmtPrice(v) {
     if (v == null) return '—';
     if (v >= 1000) return '$' + v.toLocaleString(undefined, {maximumFractionDigits: 2});
     if (v >= 1)    return '$' + v.toFixed(2);
@@ -547,8 +590,14 @@
   }
 
   function esc(s) {
-    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return String(s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
+
+  // Repaint legend after fonts/layout settle
+  window.addEventListener('load', paintLegend);
+  window.addEventListener('resize', paintLegend);
 
   loadData();
 </script>
