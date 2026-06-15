@@ -58,6 +58,7 @@ SHOPPING_RULES_FILE = Path(
 )
 _OLLAMA_BASE = os.environ.get("CREW_CHIEF_URL", "http://localhost:11434")
 _OLLAMA_MODEL = os.environ.get("CLOCKWORK_GROCERY_MODEL", "qwen2.5-coder:7b")
+_SUGGEST_MODEL = os.environ.get("CLOCKWORK_SUGGEST_MODEL", _OLLAMA_MODEL)
 WATCH_DIR = Path(os.environ.get("CLOCKWORK_WATCH_DIR", "/mnt/16tb-sata/watch"))
 # Additional dirs to scan for library check (e.g. Magneto/Transmission download dir).
 # Colon-separated. Defaults to the Magneto default download location.
@@ -2498,7 +2499,11 @@ def _proxy_to_magneto(magnet: str) -> tuple[bool, str]:
 
 @app.get("/to-watch")
 def to_watch():
-    return render_template("to-watch.html", watch_available=WATCH_DIR.exists())
+    return render_template(
+        "to-watch.html",
+        watch_available=WATCH_DIR.exists(),
+        ollama_available=_ollama_available(),
+    )
 
 
 @app.get("/to-read")
@@ -2568,6 +2573,98 @@ def sort_downloads_api():
     """
     result = _sort_downloads_to_library()
     return jsonify(result)
+
+
+@app.post("/api/suggest-watch")
+def suggest_watch():
+    """Use Ollama to suggest titles based on the user's library and watch list.
+
+    Request body:
+        {
+          "library": ["Title (Year)", ...],          # entries from WATCH_DIR
+          "watchlist": [{"title": str, "year": str|null, "category": str}, ...],
+          "categories": ["Movies", "TV Shows", ...]  # existing list names
+        }
+    Response:
+        {"ok": bool, "suggestions": [{"title": str, "year": str|null, "category": str}, ...]}
+    """
+    if not _ollama_available():
+        return jsonify({"ok": False, "error": "Ollama not reachable"}), 503
+
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid JSON"}), 400
+
+    library: list[str] = payload.get("library", [])
+    watchlist: list[dict] = payload.get("watchlist", [])
+    categories: list[str] = payload.get("categories", ["Movies", "TV Shows", "Anime"])
+
+    # Build a compact known-titles block to tell the model what to skip
+    known: list[str] = list(library)
+    for item in watchlist:
+        year = item.get("year")
+        known.append(f"{item['title']} ({year})" if year else item["title"])
+
+    known_block = "\n".join(f"- {t}" for t in known[:120])  # cap to avoid context overflow
+    cats_block = ", ".join(categories)
+
+    prompt = f"""You are a film and television recommendation assistant.
+
+The user already has the following titles in their library or watch list — do NOT suggest any of these:
+{known_block}
+
+Their watch list categories are: {cats_block}
+
+Suggest exactly 10 titles they are likely to enjoy based on what they already watch.
+Rules:
+- Do not suggest any title already listed above.
+- Pick diverse suggestions across the available categories.
+- Assign each suggestion to the most appropriate category from the list above.
+- Include the release year where you are confident; use null if unsure.
+
+Respond with ONLY a JSON array, no explanation, no markdown fences. Format:
+[{{"title": "Example", "year": "1999", "category": "Movies"}}, ...]"""
+
+    import urllib.request as _ur
+
+    try:
+        body = json.dumps({"model": _SUGGEST_MODEL, "prompt": prompt, "stream": False}).encode()
+        req = _ur.Request(
+            f"{_OLLAMA_BASE}/api/generate",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with _ur.urlopen(req, timeout=120) as resp:
+            raw = json.loads(resp.read()).get("response", "")
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    suggestions = _extract_json(raw)
+    if not isinstance(suggestions, list):
+        return jsonify({"ok": False, "error": "Model returned unexpected format", "raw": raw}), 500
+
+    # Normalise fields and filter out anything already known
+    known_norm = {_normalize_media_title(t) for t in known}
+    clean: list[dict] = []
+    for s in suggestions:
+        if not isinstance(s, dict):
+            continue
+        title = str(s.get("title") or "").strip()
+        if not title:
+            continue
+        if _normalize_media_title(title) in known_norm:
+            continue
+        clean.append(
+            {
+                "title": title,
+                "year": str(s["year"]) if s.get("year") else None,
+                "category": str(s.get("category") or categories[0]),
+            }
+        )
+
+    return jsonify({"ok": True, "suggestions": clean})
 
 
 @app.get("/api/torrent-search")
