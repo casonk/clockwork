@@ -99,6 +99,42 @@ SHOPPING_HISTORY_FILE = Path(
         "CLOCKWORK_SHOPPING_HISTORY_FILE", BASE_DIR / "config" / "shopping-history.jsonl"
     )
 )
+TODO_FILE = Path(os.environ.get("CLOCKWORK_TODO_FILE", BASE_DIR / "config" / "todo.json"))
+TODO_HISTORY_FILE = Path(
+    os.environ.get("CLOCKWORK_TODO_HISTORY_FILE", BASE_DIR / "config" / "todo-history.jsonl")
+)
+WATCH_LIST_FILE = Path(
+    os.environ.get("CLOCKWORK_WATCH_LIST_FILE", BASE_DIR / "config" / "to-watch.json")
+)
+WATCH_LIST_HISTORY_FILE = Path(
+    os.environ.get(
+        "CLOCKWORK_WATCH_LIST_HISTORY_FILE", BASE_DIR / "config" / "to-watch-history.jsonl"
+    )
+)
+READ_LIST_FILE = Path(
+    os.environ.get("CLOCKWORK_READ_LIST_FILE", BASE_DIR / "config" / "to-read.json")
+)
+READ_LIST_HISTORY_FILE = Path(
+    os.environ.get(
+        "CLOCKWORK_READ_LIST_HISTORY_FILE", BASE_DIR / "config" / "to-read-history.jsonl"
+    )
+)
+LISTEN_LIST_FILE = Path(
+    os.environ.get("CLOCKWORK_LISTEN_LIST_FILE", BASE_DIR / "config" / "to-listen.json")
+)
+LISTEN_LIST_HISTORY_FILE = Path(
+    os.environ.get(
+        "CLOCKWORK_LISTEN_LIST_HISTORY_FILE", BASE_DIR / "config" / "to-listen-history.jsonl"
+    )
+)
+INVEST_LIST_FILE = Path(
+    os.environ.get("CLOCKWORK_INVEST_LIST_FILE", BASE_DIR / "config" / "to-invest.json")
+)
+INVEST_LIST_HISTORY_FILE = Path(
+    os.environ.get(
+        "CLOCKWORK_INVEST_LIST_HISTORY_FILE", BASE_DIR / "config" / "to-invest-history.jsonl"
+    )
+)
 
 
 def _resolve_manifest_path(canonical_rel: str) -> Path:
@@ -2513,38 +2549,584 @@ def _proxy_to_magneto(magnet: str) -> tuple[bool, str]:
         return False, str(exc)
 
 
-@app.get("/to-watch")
-def to_watch():
-    return render_template(
-        "to-watch.html",
-        watch_available=WATCH_DIR.exists(),
-        ollama_available=_ollama_available(),
+# ---------------------------------------------------------------------------
+# Routes - server-backed personal lists
+# ---------------------------------------------------------------------------
+
+SIMPLE_LIST_CONFIGS = {
+    "todo": {
+        "page": "to-do",
+        "file_var": "TODO_FILE",
+        "history_var": "TODO_HISTORY_FILE",
+        "title": "To Do",
+        "icon": "✓",
+        "home_icon": "🏠",
+        "primary": "title",
+        "status": "done",
+        "default_category": "Tasks",
+        "default_categories": ["Tasks", "Projects", "Errands", "Goals"],
+        "done_label": "done",
+        "todo_label": "to do",
+        "reset_label": "not done",
+        "item_placeholder": "Add task...",
+        "category_placeholder": "New list...",
+        "name_label": "List",
+    },
+    "watch": {
+        "page": "to-watch",
+        "file_var": "WATCH_LIST_FILE",
+        "history_var": "WATCH_LIST_HISTORY_FILE",
+        "title": "To Watch",
+        "icon": "📺",
+        "primary": "title",
+        "status": "watched",
+        "default_category": "Movies",
+        "default_categories": ["Movies", "TV Shows", "Anime", "Documentaries"],
+        "done_label": "watched",
+        "todo_label": "to watch",
+        "reset_label": "unwatched",
+        "item_placeholder": "Add title or Title (Year)...",
+        "category_placeholder": "New list (e.g. Live Shows)...",
+        "name_label": "List",
+        "extras": ["year"],
+    },
+    "read": {
+        "page": "to-read",
+        "file_var": "READ_LIST_FILE",
+        "history_var": "READ_LIST_HISTORY_FILE",
+        "title": "To Read",
+        "icon": "📚",
+        "primary": "title",
+        "status": "watched",
+        "default_category": "Books",
+        "default_categories": ["Books", "Articles", "Papers", "Comics"],
+        "done_label": "read",
+        "todo_label": "to read",
+        "reset_label": "unread",
+        "item_placeholder": "Add title or Title (Year)...",
+        "category_placeholder": "New list...",
+        "name_label": "List",
+        "extras": ["year"],
+    },
+    "listen": {
+        "page": "to-listen",
+        "file_var": "LISTEN_LIST_FILE",
+        "history_var": "LISTEN_LIST_HISTORY_FILE",
+        "title": "To Listen",
+        "icon": "🎧",
+        "primary": "title",
+        "status": "watched",
+        "default_category": "Albums",
+        "default_categories": ["Albums", "Podcasts", "Audiobooks", "Radio"],
+        "done_label": "listened",
+        "todo_label": "to listen",
+        "reset_label": "unlistened",
+        "item_placeholder": "Add title, artist, or Title (Year)...",
+        "category_placeholder": "New list...",
+        "name_label": "List",
+        "extras": ["year"],
+        "ollama": True,
+    },
+    "invest": {
+        "page": "to-invest",
+        "file_var": "INVEST_LIST_FILE",
+        "history_var": "INVEST_LIST_HISTORY_FILE",
+        "title": "To Invest",
+        "icon": "📈",
+        "primary": "ticker",
+        "status": "holding",
+        "default_category": "Stocks",
+        "default_categories": ["Stocks", "ETFs", "Crypto", "Bonds", "REITs"],
+        "done_label": "holding",
+        "todo_label": "watching",
+        "reset_label": "watching",
+        "item_placeholder": "AAPL or AAPL Apple Inc",
+        "category_placeholder": "New category...",
+        "name_label": "Category",
+        "extras": ["name"],
+        "ollama": True,
+        "holdings_sync": True,
+    },
+}
+
+
+def _simple_list_config(key: str) -> dict:
+    if key not in SIMPLE_LIST_CONFIGS:
+        abort(404)
+    cfg = dict(SIMPLE_LIST_CONFIGS[key])
+    cfg["key"] = key
+    cfg["file"] = globals()[cfg["file_var"]]
+    cfg["history_file"] = globals()[cfg["history_var"]]
+    return cfg
+
+
+def _simple_list_key_from_page(page: str) -> str:
+    for key, cfg in SIMPLE_LIST_CONFIGS.items():
+        if cfg["page"] == page:
+            return key
+    abort(404)
+
+
+def _simple_list_default_data(cfg: dict) -> dict:
+    return {"categories": [{"name": name, "items": []} for name in cfg["default_categories"]]}
+
+
+def _parse_simple_item(raw: str, cfg: dict) -> dict:
+    raw = raw.strip()
+    if cfg["primary"] == "ticker":
+        parts = raw.split()
+        ticker = parts[0].upper() if parts else ""
+        item = {"ticker": ticker, cfg["status"]: False}
+        name = " ".join(parts[1:]).strip()
+        if name:
+            item["name"] = name
+        return item
+    match = re.match(r"^(.+?)\s*\((\d{4})\)\s*$", raw)
+    if match:
+        return {"title": match.group(1).strip(), "year": match.group(2), cfg["status"]: False}
+    return {"title": raw, cfg["status"]: False}
+
+
+def _normalize_simple_list_data(data: dict, cfg: dict) -> dict:
+    categories = data.get("categories") if isinstance(data, dict) else None
+    if not isinstance(categories, list):
+        categories = []
+    normalized = {"categories": []}
+    primary = cfg["primary"]
+    status = cfg["status"]
+    for cat in categories:
+        if not isinstance(cat, dict):
+            continue
+        name = str(cat.get("name") or "").strip()
+        if not name:
+            continue
+        items = []
+        for item in cat.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            raw_primary = item.get(primary) or item.get("title") or item.get("name")
+            value = str(raw_primary or "").strip()
+            if primary == "ticker":
+                value = value.upper()
+            if not value:
+                continue
+            normalized_item = {
+                primary: value,
+                status: bool(item.get(status, item.get("done", item.get("watched", False)))),
+            }
+            for field in cfg.get("extras", []):
+                if item.get(field):
+                    normalized_item[field] = str(item[field]).strip()
+            items.append(normalized_item)
+        normalized["categories"].append({"name": name, "items": items})
+    if not normalized["categories"]:
+        return _simple_list_default_data(cfg)
+    return normalized
+
+
+def load_simple_list(key: str) -> dict:
+    cfg = _simple_list_config(key)
+    path = cfg["file"]
+    if path.exists():
+        with contextlib.suppress(json.JSONDecodeError, OSError):
+            return _normalize_simple_list_data(json.loads(path.read_text()), cfg)
+    return _simple_list_default_data(cfg)
+
+
+def save_simple_list(key: str, data: dict) -> None:
+    cfg = _simple_list_config(key)
+    path = cfg["file"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _rotate_backup(path)
+    path.write_text(json.dumps(_normalize_simple_list_data(data, cfg), indent=2))
+
+
+def _find_simple_category(data: dict, name: str) -> dict | None:
+    return next((c for c in data["categories"] if c["name"].lower() == name.lower()), None)
+
+
+def _simple_item_value(item: dict, cfg: dict) -> str:
+    return str(item.get(cfg["primary"]) or "").strip()
+
+
+def _find_simple_item(cat: dict, value: str, cfg: dict) -> dict | None:
+    wanted = value.strip().upper() if cfg["primary"] == "ticker" else value.strip().lower()
+    for item in cat["items"]:
+        current = _simple_item_value(item, cfg)
+        current = current.upper() if cfg["primary"] == "ticker" else current.lower()
+        if current == wanted:
+            return item
+    return None
+
+
+def load_todo() -> dict:
+    return load_simple_list("todo")
+
+
+def save_todo(data: dict) -> None:
+    save_simple_list("todo", data)
+
+
+def _normalize_todo_data(data: dict) -> dict:
+    return _normalize_simple_list_data(data, _simple_list_config("todo"))
+
+
+def _find_todo_category(data: dict, name: str) -> dict | None:
+    return _find_simple_category(data, name)
+
+
+def _find_todo_item(cat: dict, title: str) -> dict | None:
+    return _find_simple_item(cat, title, _simple_list_config("todo"))
+
+
+def _render_simple_list(key: str):
+    cfg = _simple_list_config(key)
+    data = load_simple_list(key)
+    total = sum(len(c["items"]) for c in data["categories"])
+    done_count = sum(
+        1 for c in data["categories"] for item in c["items"] if item.get(cfg["status"])
     )
-
-
-@app.get("/to-read")
-def to_read():
-    return render_template("to-read.html")
-
-
-@app.get("/to-listen")
-def to_listen():
-    return render_template("to-listen.html", ollama_available=_ollama_available())
+    backup_exists, backup_mtimes = _backup_slot_info(cfg["file"])
+    return render_template(
+        "to-list.html",
+        cfg=cfg,
+        data=data,
+        total=total,
+        done_count=done_count,
+        todo_count=total - done_count,
+        backup_slots_exist=backup_exists,
+        backup_slots_mtime=backup_mtimes,
+        ollama_available=_ollama_available(),
+        watch_available=WATCH_DIR.exists(),
+    )
 
 
 @app.get("/to-do")
 def to_do():
-    return render_template("to-do.html")
+    return _render_simple_list("todo")
+
+
+@app.get("/to-watch")
+def to_watch():
+    return _render_simple_list("watch")
+
+
+@app.get("/to-read")
+def to_read():
+    return _render_simple_list("read")
+
+
+@app.get("/to-listen")
+def to_listen():
+    return _render_simple_list("listen")
 
 
 @app.get("/to-invest")
 def to_invest():
-    return render_template("to-invest.html", ollama_available=_ollama_available())
+    return _render_simple_list("invest")
 
 
 @app.get("/to-tradility")
 def to_tradility():
     return render_template("to-tradility.html")
+
+
+@app.get("/api/<list_key>")
+def api_simple_list(list_key):
+    key = list_key[3:] if list_key.startswith("to-") else list_key
+    if key not in SIMPLE_LIST_CONFIGS:
+        abort(404)
+    return jsonify({"ok": True, "data": load_simple_list(key), "csrf_token": _csrf_token()})
+
+
+@app.post("/<page>/add-category")
+def simple_list_add_category(page):
+    key = _simple_list_key_from_page(page)
+    cfg = _simple_list_config(key)
+    name = request.form.get("category", "").strip()
+    if not name:
+        flash(f"{cfg['name_label']} name cannot be empty.", "error")
+        return redirect(url_for(_simple_list_endpoint(key)))
+    data = load_simple_list(key)
+    if _find_simple_category(data, name):
+        flash(f'{cfg["name_label"]} "{name}" already exists.', "error")
+        return redirect(url_for(_simple_list_endpoint(key)))
+    data["categories"].append({"name": name, "items": []})
+    save_simple_list(key, data)
+    _log_event(cfg["history_file"], "add-category", category=name)
+    return redirect(url_for(_simple_list_endpoint(key)))
+
+
+@app.post("/<page>/delete-category")
+def simple_list_delete_category(page):
+    key = _simple_list_key_from_page(page)
+    cfg = _simple_list_config(key)
+    name = request.form.get("category", "").strip()
+    data = load_simple_list(key)
+    data["categories"] = [c for c in data["categories"] if c["name"] != name]
+    save_simple_list(key, data)
+    _log_event(cfg["history_file"], "delete-category", category=name)
+    return redirect(url_for(_simple_list_endpoint(key)))
+
+
+@app.post("/<page>/add-item")
+def simple_list_add_item(page):
+    key = _simple_list_key_from_page(page)
+    cfg = _simple_list_config(key)
+    category = request.form.get("category", "").strip()
+    raw = request.form.get("item", request.form.get("title", "")).strip()
+    if not raw:
+        return redirect(url_for(_simple_list_endpoint(key)))
+    data = load_simple_list(key)
+    cat = _find_simple_category(data, category)
+    if cat is None:
+        flash(f'{cfg["name_label"]} "{category}" not found.', "error")
+        return redirect(url_for(_simple_list_endpoint(key)))
+    item = _parse_simple_item(raw, cfg)
+    value = _simple_item_value(item, cfg)
+    if _find_simple_item(cat, value, cfg):
+        flash(f'"{value}" is already in {category}.', "error")
+        return redirect(url_for(_simple_list_endpoint(key)))
+    cat["items"].append(item)
+    save_simple_list(key, data)
+    _log_event(cfg["history_file"], "add", item=value, category=category)
+    return redirect(url_for(_simple_list_endpoint(key)) + f"#{_slug(category)}")
+
+
+@app.post("/<page>/toggle-item")
+def simple_list_toggle_item(page):
+    key = _simple_list_key_from_page(page)
+    cfg = _simple_list_config(key)
+    category = request.form.get("category", "").strip()
+    value = request.form.get("item", request.form.get("title", "")).strip()
+    data = load_simple_list(key)
+    cat = _find_simple_category(data, category)
+    new_state = None
+    if cat:
+        item = _find_simple_item(cat, value, cfg)
+        if item:
+            item[cfg["status"]] = not item.get(cfg["status"], False)
+            new_state = item[cfg["status"]]
+    save_simple_list(key, data)
+    if new_state is not None:
+        _log_event(
+            cfg["history_file"],
+            cfg["done_label"] if new_state else cfg["reset_label"],
+            item=value,
+            category=category,
+        )
+    return redirect(url_for(_simple_list_endpoint(key)) + f"#{_slug(category)}")
+
+
+@app.post("/<page>/delete-item")
+def simple_list_delete_item(page):
+    key = _simple_list_key_from_page(page)
+    cfg = _simple_list_config(key)
+    category = request.form.get("category", "").strip()
+    value = request.form.get("item", request.form.get("title", "")).strip()
+    data = load_simple_list(key)
+    cat = _find_simple_category(data, category)
+    if cat:
+        cat["items"] = [
+            item for item in cat["items"] if _simple_item_value(item, cfg).lower() != value.lower()
+        ]
+    save_simple_list(key, data)
+    _log_event(cfg["history_file"], "remove", item=value, category=category)
+    return redirect(url_for(_simple_list_endpoint(key)) + f"#{_slug(category)}")
+
+
+@app.post("/<page>/reset")
+def simple_list_reset(page):
+    key = _simple_list_key_from_page(page)
+    cfg = _simple_list_config(key)
+    data = load_simple_list(key)
+    for cat in data["categories"]:
+        for item in cat["items"]:
+            item[cfg["status"]] = False
+    save_simple_list(key, data)
+    _log_event(cfg["history_file"], "reset")
+    flash(f"All items marked as {cfg['reset_label']}.", "success")
+    return redirect(url_for(_simple_list_endpoint(key)))
+
+
+@app.post("/<page>/restore")
+def simple_list_restore(page):
+    key = _simple_list_key_from_page(page)
+    cfg = _simple_list_config(key)
+    slot = request.form.get("slot", "").strip()
+    if slot not in ("hot", "cold", "archive"):
+        flash("Invalid backup slot.", "error")
+        return redirect(url_for(_simple_list_endpoint(key)))
+    hot, cold, archive = _backup_slots(cfg["file"])
+    slot_file = {"hot": hot, "cold": cold, "archive": archive}[slot]
+    if not slot_file.exists():
+        flash(f"No {slot} backup found.", "error")
+        return redirect(url_for(_simple_list_endpoint(key)))
+    _rotate_backup(cfg["file"])
+    shutil.copy2(slot_file, cfg["file"])
+    _log_event(cfg["history_file"], "restore", detail=f"from {slot}")
+    flash(f"Restored {cfg['title']} from {slot} backup.", "success")
+    return redirect(url_for(_simple_list_endpoint(key)))
+
+
+@app.get("/<page>/history")
+def simple_list_history(page):
+    key = _simple_list_key_from_page(page)
+    cfg = _simple_list_config(key)
+    return jsonify({"entries": _read_history(cfg["history_file"])})
+
+
+def _simple_list_endpoint(key: str) -> str:
+    return {
+        "todo": "to_do",
+        "watch": "to_watch",
+        "read": "to_read",
+        "listen": "to_listen",
+        "invest": "to_invest",
+    }[key]
+
+
+def _todo_payload() -> tuple[dict | None, tuple | None]:
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return None, (jsonify({"ok": False, "error": "Invalid JSON"}), 400)
+    return payload, None
+
+
+def _api_simple_key(list_key: str) -> str:
+    key = list_key[3:] if list_key.startswith("to-") else list_key
+    if key not in SIMPLE_LIST_CONFIGS:
+        abort(404)
+    return key
+
+
+@app.post("/api/<list_key>/add-category")
+def api_simple_add_category(list_key):
+    key = _api_simple_key(list_key)
+    cfg = _simple_list_config(key)
+    payload, error = _todo_payload()
+    if error:
+        return error
+    name = str(payload.get("category") or payload.get("name") or "").strip()
+    if not name:
+        return jsonify({"ok": False, "error": "category required"}), 400
+    data = load_simple_list(key)
+    if _find_simple_category(data, name):
+        return jsonify({"ok": False, "error": f'{cfg["name_label"]} "{name}" already exists'}), 409
+    data["categories"].append({"name": name, "items": []})
+    save_simple_list(key, data)
+    _log_event(cfg["history_file"], "add-category", category=name)
+    return jsonify({"ok": True, "data": data})
+
+
+@app.post("/api/<list_key>/delete-category")
+def api_simple_delete_category(list_key):
+    key = _api_simple_key(list_key)
+    cfg = _simple_list_config(key)
+    payload, error = _todo_payload()
+    if error:
+        return error
+    name = str(payload.get("category") or payload.get("name") or "").strip()
+    data = load_simple_list(key)
+    before = len(data["categories"])
+    data["categories"] = [c for c in data["categories"] if c["name"].lower() != name.lower()]
+    if len(data["categories"]) == before:
+        return jsonify({"ok": False, "error": "category not found"}), 404
+    save_simple_list(key, data)
+    _log_event(cfg["history_file"], "delete-category", category=name)
+    return jsonify({"ok": True, "data": data})
+
+
+@app.post("/api/<list_key>/add-item")
+def api_simple_add_item(list_key):
+    key = _api_simple_key(list_key)
+    cfg = _simple_list_config(key)
+    payload, error = _todo_payload()
+    if error:
+        return error
+    category = str(payload.get("category") or cfg["default_category"]).strip()
+    raw = str(payload.get("item") or payload.get("title") or payload.get("ticker") or "").strip()
+    if not raw:
+        return jsonify({"ok": False, "error": "item/title/ticker required"}), 400
+    data = load_simple_list(key)
+    cat = _find_simple_category(data, category)
+    if cat is None and bool(payload.get("create_category", True)):
+        cat = {"name": category, "items": []}
+        data["categories"].append(cat)
+        _log_event(cfg["history_file"], "add-category", category=category)
+    if cat is None:
+        return jsonify({"ok": False, "error": f'{cfg["name_label"]} "{category}" not found'}), 404
+    item = _parse_simple_item(raw, cfg)
+    if cfg["primary"] == "ticker" and payload.get("name"):
+        item["name"] = str(payload["name"]).strip()
+    if payload.get("year") and "year" in cfg.get("extras", []):
+        item["year"] = str(payload["year"]).strip()
+    if cfg["status"] in payload:
+        item[cfg["status"]] = bool(payload[cfg["status"]])
+    elif "done" in payload:
+        item[cfg["status"]] = bool(payload["done"])
+    value = _simple_item_value(item, cfg)
+    if _find_simple_item(cat, value, cfg):
+        return jsonify({"ok": False, "error": f'"{value}" already in {category}'}), 409
+    cat["items"].append(item)
+    save_simple_list(key, data)
+    _log_event(cfg["history_file"], "add", item=value, category=category)
+    return jsonify({"ok": True, "data": data})
+
+
+@app.post("/api/<list_key>/toggle-item")
+def api_simple_toggle_item(list_key):
+    key = _api_simple_key(list_key)
+    cfg = _simple_list_config(key)
+    payload, error = _todo_payload()
+    if error:
+        return error
+    category = str(payload.get("category") or "").strip()
+    value = str(payload.get("item") or payload.get("title") or payload.get("ticker") or "").strip()
+    data = load_simple_list(key)
+    cat = _find_simple_category(data, category)
+    item = _find_simple_item(cat, value, cfg) if cat else None
+    if item is None:
+        return jsonify({"ok": False, "error": "item not found"}), 404
+    if cfg["status"] in payload:
+        item[cfg["status"]] = bool(payload[cfg["status"]])
+    elif "done" in payload:
+        item[cfg["status"]] = bool(payload["done"])
+    else:
+        item[cfg["status"]] = not item.get(cfg["status"], False)
+    save_simple_list(key, data)
+    _log_event(
+        cfg["history_file"],
+        cfg["done_label"] if item[cfg["status"]] else cfg["reset_label"],
+        item=value,
+        category=category,
+    )
+    return jsonify({"ok": True, "data": data})
+
+
+@app.post("/api/<list_key>/delete-item")
+def api_simple_delete_item(list_key):
+    key = _api_simple_key(list_key)
+    cfg = _simple_list_config(key)
+    payload, error = _todo_payload()
+    if error:
+        return error
+    category = str(payload.get("category") or "").strip()
+    value = str(payload.get("item") or payload.get("title") or payload.get("ticker") or "").strip()
+    data = load_simple_list(key)
+    cat = _find_simple_category(data, category)
+    if cat is None:
+        return jsonify({"ok": False, "error": "category not found"}), 404
+    before = len(cat["items"])
+    cat["items"] = [
+        item for item in cat["items"] if _simple_item_value(item, cfg).lower() != value.lower()
+    ]
+    if len(cat["items"]) == before:
+        return jsonify({"ok": False, "error": "item not found"}), 404
+    save_simple_list(key, data)
+    _log_event(cfg["history_file"], "remove", item=value, category=category)
+    return jsonify({"ok": True, "data": data})
 
 
 @app.get("/api/tradility-analysis")
@@ -3003,6 +3585,51 @@ def api_invest_holdings():
     return jsonify(data)
 
 
+@app.get("/api/groceries")
+def api_groceries():
+    return jsonify({"ok": True, "data": load_groceries(), "csrf_token": _csrf_token()})
+
+
+@app.get("/api/shopping")
+def api_shopping():
+    return jsonify({"ok": True, "data": load_shopping(), "csrf_token": _csrf_token()})
+
+
+@app.post("/api/groceries/add-category")
+def api_groceries_add_category():
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid JSON"}), 400
+    name = str(payload.get("category") or payload.get("name") or "").strip()
+    if not name:
+        return jsonify({"ok": False, "error": "category required"}), 400
+    data = load_groceries()
+    if _find_category(data, name):
+        return jsonify({"ok": False, "error": f'Category "{name}" already exists'}), 409
+    data["categories"].append({"name": name, "items": []})
+    save_groceries(data)
+    _log_event(GROCERIES_HISTORY_FILE, "add-category", category=name)
+    return jsonify({"ok": True, "data": data})
+
+
+@app.post("/api/groceries/delete-category")
+def api_groceries_delete_category():
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid JSON"}), 400
+    name = str(payload.get("category") or payload.get("name") or "").strip()
+    data = load_groceries()
+    before = len(data["categories"])
+    data["categories"] = [c for c in data["categories"] if c["name"].lower() != name.lower()]
+    if len(data["categories"]) == before:
+        return jsonify({"ok": False, "error": "category not found"}), 404
+    save_groceries(data)
+    _log_event(GROCERIES_HISTORY_FILE, "delete-category", category=name)
+    return jsonify({"ok": True, "data": data})
+
+
 @app.post("/api/groceries/add-item")
 def api_groceries_add_item():
     """JSON endpoint to add a grocery item (for AJAX suggest panel)."""
@@ -3010,20 +3637,110 @@ def api_groceries_add_item():
         payload = request.get_json(force=True) or {}
     except Exception:
         return jsonify({"ok": False, "error": "Invalid JSON"}), 400
-    category = str(payload.get("category") or "").strip()
+    category = str(payload.get("category") or "General").strip()
     item_name = str(payload.get("item") or "").strip()
-    if not item_name or not category:
-        return jsonify({"ok": False, "error": "category and item required"}), 400
+    if not item_name:
+        return jsonify({"ok": False, "error": "item required"}), 400
     data = load_groceries()
     cat = _find_category(data, category)
+    if cat is None and bool(payload.get("create_category", True)):
+        cat = {"name": category, "items": []}
+        data["categories"].append(cat)
+        _log_event(GROCERIES_HISTORY_FILE, "add-category", category=category)
     if cat is None:
         return jsonify({"ok": False, "error": f'Category "{category}" not found'}), 404
     if any(i["name"].lower() == item_name.lower() for i in cat["items"]):
         return jsonify({"ok": False, "error": f'"{item_name}" already in {category}'}), 409
-    cat["items"].append({"name": item_name, "stocked": False})
+    cat["items"].append({"name": item_name, "stocked": bool(payload.get("stocked", False))})
     save_groceries(data)
     _log_event(GROCERIES_HISTORY_FILE, "add", item=item_name, category=category)
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "data": data})
+
+
+@app.post("/api/groceries/toggle-item")
+def api_groceries_toggle_item():
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid JSON"}), 400
+    category = str(payload.get("category") or "").strip()
+    item_name = str(payload.get("item") or payload.get("name") or "").strip()
+    data = load_groceries()
+    cat = _find_category(data, category)
+    item = (
+        next((i for i in cat["items"] if i["name"].lower() == item_name.lower()), None)
+        if cat
+        else None
+    )
+    if item is None:
+        return jsonify({"ok": False, "error": "item not found"}), 404
+    item["stocked"] = (
+        bool(payload["stocked"]) if "stocked" in payload else not item.get("stocked", False)
+    )
+    save_groceries(data)
+    _log_event(
+        GROCERIES_HISTORY_FILE,
+        "stocked" if item["stocked"] else "unstocked",
+        item=item_name,
+        category=category,
+    )
+    return jsonify({"ok": True, "data": data})
+
+
+@app.post("/api/groceries/delete-item")
+def api_groceries_delete_item():
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid JSON"}), 400
+    category = str(payload.get("category") or "").strip()
+    item_name = str(payload.get("item") or payload.get("name") or "").strip()
+    data = load_groceries()
+    cat = _find_category(data, category)
+    if cat is None:
+        return jsonify({"ok": False, "error": "category not found"}), 404
+    before = len(cat["items"])
+    cat["items"] = [i for i in cat["items"] if i["name"].lower() != item_name.lower()]
+    if len(cat["items"]) == before:
+        return jsonify({"ok": False, "error": "item not found"}), 404
+    save_groceries(data)
+    _log_event(GROCERIES_HISTORY_FILE, "remove", item=item_name, category=category)
+    return jsonify({"ok": True, "data": data})
+
+
+@app.post("/api/shopping/add-category")
+def api_shopping_add_category():
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid JSON"}), 400
+    name = str(payload.get("category") or payload.get("name") or "").strip()
+    if not name:
+        return jsonify({"ok": False, "error": "category required"}), 400
+    data = load_shopping()
+    if _find_shopping_category(data, name):
+        return jsonify({"ok": False, "error": f'Category "{name}" already exists'}), 409
+    data["categories"].append({"name": name, "items": []})
+    save_shopping(data)
+    _log_event(SHOPPING_HISTORY_FILE, "add-category", category=name)
+    return jsonify({"ok": True, "data": data})
+
+
+@app.post("/api/shopping/delete-category")
+def api_shopping_delete_category():
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid JSON"}), 400
+    name = str(payload.get("category") or payload.get("name") or "").strip()
+    data = load_shopping()
+    before = len(data["categories"])
+    data["categories"] = [c for c in data["categories"] if c["name"].lower() != name.lower()]
+    if len(data["categories"]) == before:
+        return jsonify({"ok": False, "error": "category not found"}), 404
+    save_shopping(data)
+    _log_event(SHOPPING_HISTORY_FILE, "delete-category", category=name)
+    return jsonify({"ok": True, "data": data})
 
 
 @app.post("/api/shopping/add-item")
@@ -3033,20 +3750,73 @@ def api_shopping_add_item():
         payload = request.get_json(force=True) or {}
     except Exception:
         return jsonify({"ok": False, "error": "Invalid JSON"}), 400
-    category = str(payload.get("category") or "").strip()
+    category = str(payload.get("category") or "General").strip()
     item_name = str(payload.get("item") or "").strip()
-    if not item_name or not category:
-        return jsonify({"ok": False, "error": "category and item required"}), 400
+    if not item_name:
+        return jsonify({"ok": False, "error": "item required"}), 400
     data = load_shopping()
     cat = _find_shopping_category(data, category)
+    if cat is None and bool(payload.get("create_category", True)):
+        cat = {"name": category, "items": []}
+        data["categories"].append(cat)
+        _log_event(SHOPPING_HISTORY_FILE, "add-category", category=category)
     if cat is None:
         return jsonify({"ok": False, "error": f'Category "{category}" not found'}), 404
     if any(i["name"].lower() == item_name.lower() for i in cat["items"]):
         return jsonify({"ok": False, "error": f'"{item_name}" already in {category}'}), 409
-    cat["items"].append({"name": item_name, "owned": False})
+    cat["items"].append({"name": item_name, "owned": bool(payload.get("owned", False))})
     save_shopping(data)
     _log_event(SHOPPING_HISTORY_FILE, "add", item=item_name, category=category)
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "data": data})
+
+
+@app.post("/api/shopping/toggle-item")
+def api_shopping_toggle_item():
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid JSON"}), 400
+    category = str(payload.get("category") or "").strip()
+    item_name = str(payload.get("item") or payload.get("name") or "").strip()
+    data = load_shopping()
+    cat = _find_shopping_category(data, category)
+    item = (
+        next((i for i in cat["items"] if i["name"].lower() == item_name.lower()), None)
+        if cat
+        else None
+    )
+    if item is None:
+        return jsonify({"ok": False, "error": "item not found"}), 404
+    item["owned"] = bool(payload["owned"]) if "owned" in payload else not item.get("owned", False)
+    save_shopping(data)
+    _log_event(
+        SHOPPING_HISTORY_FILE,
+        "owned" if item["owned"] else "wanted",
+        item=item_name,
+        category=category,
+    )
+    return jsonify({"ok": True, "data": data})
+
+
+@app.post("/api/shopping/delete-item")
+def api_shopping_delete_item():
+    try:
+        payload = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"ok": False, "error": "Invalid JSON"}), 400
+    category = str(payload.get("category") or "").strip()
+    item_name = str(payload.get("item") or payload.get("name") or "").strip()
+    data = load_shopping()
+    cat = _find_shopping_category(data, category)
+    if cat is None:
+        return jsonify({"ok": False, "error": "category not found"}), 404
+    before = len(cat["items"])
+    cat["items"] = [i for i in cat["items"] if i["name"].lower() != item_name.lower()]
+    if len(cat["items"]) == before:
+        return jsonify({"ok": False, "error": "item not found"}), 404
+    save_shopping(data)
+    _log_event(SHOPPING_HISTORY_FILE, "remove", item=item_name, category=category)
+    return jsonify({"ok": True, "data": data})
 
 
 @app.get("/api/torrent-search")

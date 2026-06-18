@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ cfg.title }} - Clockwork</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:#0f1117; --surface:#1a1d27; --surface2:#22263a; --surface3:#191c2a;
+      --border:#2e3250; --accent:#5b9eff; --accent-dim:#1a2a4d; --green:#3ecf6e;
+      --green-dim:#1a4d30; --red:#e05252; --red-dim:#4d1a1a; --yellow:#e0b832;
+      --text:#e2e4f0; --muted:#8890b0;
+    }
+    body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; font-size:14px; line-height:1.55; min-height:100vh; }
+    header { background:var(--surface); border-bottom:1px solid var(--border); padding:14px 20px; display:flex; align-items:center; justify-content:space-between; gap:12px; position:sticky; top:0; z-index:100; }
+    .header-left { display:flex; align-items:center; gap:12px; }
+    .back-link { font-size:20px; text-decoration:none; opacity:.75; }
+    .back-link:hover { opacity:1; }
+    h1 { font-size:17px; font-weight:700; }
+    .subtitle { color:var(--muted); font-size:12px; }
+    .actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+    button, input { font:inherit; }
+    .action-btn, .restore-btn {
+      display:inline-flex; align-items:center; justify-content:center; gap:5px; padding:6px 11px;
+      border-radius:6px; border:1px solid var(--border); background:var(--surface2);
+      color:var(--muted); font-size:12px; font-weight:600; cursor:pointer; text-decoration:none;
+    }
+    .action-btn:hover, .restore-btn:hover:not(:disabled) { color:var(--text); border-color:var(--muted); }
+    .reset-btn:hover { color:var(--yellow); border-color:var(--yellow); }
+    .restore-btn:disabled { opacity:.35; cursor:not-allowed; }
+    .progress-bar { height:3px; background:var(--border); }
+    .progress-fill { height:100%; background:var(--accent); }
+    #flash-list { max-width:760px; margin:14px auto 0; padding:0 14px; display:flex; flex-direction:column; gap:6px; }
+    .flash { padding:8px 12px; border-radius:7px; font-size:12px; border:1px solid var(--border); }
+    .flash.success { background:var(--green-dim); color:var(--green); border-color:var(--green); }
+    .flash.error { background:var(--red-dim); color:var(--red); border-color:var(--red); }
+    main { max-width:760px; margin:0 auto; padding:18px 14px 100px; }
+    .category { background:var(--surface); border:1px solid var(--border); border-radius:8px; margin-bottom:14px; overflow:hidden; }
+    .category-header { display:flex; align-items:center; gap:10px; padding:12px 14px; border-bottom:1px solid var(--border); background:var(--surface2); }
+    .category-name { font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:.7px; color:var(--muted); flex:1; }
+    .category-count { font-size:11px; padding:2px 8px; border-radius:99px; background:var(--surface); color:var(--muted); border:1px solid var(--border); white-space:nowrap; }
+    .category-count .active { color:var(--accent); font-weight:700; }
+    .items { padding:6px 0; }
+    .item { display:flex; align-items:center; gap:8px; padding:5px 14px; min-height:44px; border-bottom:1px solid rgba(46,50,80,.4); }
+    .item:last-child { border-bottom:none; }
+    .check-btn { width:26px; height:26px; border-radius:6px; border:2px solid var(--border); background:transparent; color:transparent; cursor:pointer; flex-shrink:0; }
+    .check-btn.done { background:var(--accent-dim); border-color:var(--accent); color:var(--accent); }
+    .check-btn:hover { border-color:var(--muted); }
+    .item-body { flex:1; min-width:0; display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+    .item-title { font-weight:600; overflow-wrap:anywhere; }
+    .item-title.done { color:var(--muted); text-decoration:line-through; }
+    .item-meta { color:var(--muted); font-size:11px; }
+    .delete-btn, .cat-delete-btn { border:1px solid transparent; background:transparent; color:var(--muted); cursor:pointer; border-radius:5px; width:24px; height:24px; }
+    .delete-btn:hover, .cat-delete-btn:hover { color:var(--red); border-color:var(--red-dim); background:var(--red-dim); }
+    .empty-item { color:var(--muted); font-size:12px; font-style:italic; }
+    .add-item-row, .add-category { display:flex; gap:8px; padding:10px 14px; background:var(--surface3); border-top:1px solid var(--border); }
+    .add-category { border:1px solid var(--border); border-radius:8px; background:var(--surface); margin-top:16px; }
+    input[type="text"] { flex:1; min-width:0; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px; color:var(--text); outline:none; }
+    input[type="text"]:focus { border-color:var(--accent); }
+    .add-btn { padding:8px 14px; border-radius:6px; border:1px solid var(--accent-dim); background:transparent; color:var(--accent); font-weight:700; cursor:pointer; white-space:nowrap; }
+    .add-btn:hover { background:var(--accent-dim); }
+    .backup-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 14px; border:1px solid var(--border); border-radius:8px; background:var(--surface); margin:0 0 14px; }
+    .backup-label { color:var(--muted); font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
+    @media (max-width: 640px) {
+      header { align-items:flex-start; flex-direction:column; padding:10px 14px; }
+      .actions { justify-content:flex-start; }
+      .add-item-row, .add-category { flex-direction:column; }
+      .add-btn { width:100%; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <div class="header-left">
+    <a href="/home" class="back-link" title="Home">🏠</a>
+    <a href="/" class="back-link" title="Clockwork">⏰</a>
+    <div>
+      <h1>{{ cfg.icon }} {{ cfg.title }}</h1>
+      <div class="subtitle">
+        {% if total == 0 %}No items yet{% else %}{{ done_count }} {{ cfg.done_label }} · {{ todo_count }} {{ cfg.todo_label }}{% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="actions">
+    {% if cfg.key == "watch" %}
+      <a class="action-btn" href="/api/watch-check" title="Tooling endpoint for library checks">⬛ Library API</a>
+    {% endif %}
+    {% if cfg.get("holdings_sync") %}
+      <a class="action-btn" href="/api/invest-holdings" title="Tooling endpoint for holdings sync">↻ Holdings API</a>
+    {% endif %}
+    <a class="action-btn" href="/{{ cfg.page }}/history" title="View JSON history">📋 History</a>
+    <form method="post" action="/{{ cfg.page }}/reset">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="action-btn reset-btn" type="submit">↺ Reset</button>
+    </form>
+  </div>
+</header>
+<div class="progress-bar">
+  <div class="progress-fill" style="width:{% if total %}{{ (done_count / total * 100)|round|int }}{% else %}0{% endif %}%"></div>
+</div>
+
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    <div id="flash-list">
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}
+
+<main>
+  <div class="backup-row">
+    <span class="backup-label">Restore</span>
+    {% for slot in ["hot", "cold", "archive"] %}
+      <form method="post" action="/{{ cfg.page }}/restore">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="slot" value="{{ slot }}">
+        <button class="restore-btn" type="submit" {% if not backup_slots_exist[loop.index0] %}disabled{% endif %}>
+          {{ slot|title }}{% if backup_slots_mtime[loop.index0] %} · {{ backup_slots_mtime[loop.index0] }}{% endif %}
+        </button>
+      </form>
+    {% endfor %}
+  </div>
+
+  {% for cat in data.categories %}
+    {% set active = cat["items"] | rejectattr(cfg.status) | list %}
+    {% set completed = cat["items"] | selectattr(cfg.status) | list %}
+    <section class="category" id="{{ cat.name|lower|replace(' ', '-') }}">
+      <div class="category-header">
+        <span class="category-name">{{ cat.name }}</span>
+        <span class="category-count">
+          {% if active|length %}<span class="active">{{ active|length }} {{ cfg.todo_label }}</span>{% else %}all {{ cfg.done_label }}{% endif %}
+        </span>
+        <form method="post" action="/{{ cfg.page }}/delete-category">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="category" value="{{ cat.name }}">
+          <button class="cat-delete-btn" type="submit" title="Delete {{ cfg.name_label|lower }}">x</button>
+        </form>
+      </div>
+      <div class="items">
+        {% for item in active + completed %}
+          {% set value = item[cfg.primary] %}
+          <div class="item">
+            <form method="post" action="/{{ cfg.page }}/toggle-item">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="category" value="{{ cat.name }}">
+              <input type="hidden" name="item" value="{{ value }}">
+              <button class="check-btn {% if item[cfg.status] %}done{% endif %}" type="submit" title="Toggle">✓</button>
+            </form>
+            <div class="item-body">
+              <span class="item-title {% if item[cfg.status] %}done{% endif %}">{{ value }}</span>
+              {% if item.year %}<span class="item-meta">{{ item.year }}</span>{% endif %}
+              {% if item.name %}<span class="item-meta">{{ item.name }}</span>{% endif %}
+            </div>
+            <form method="post" action="/{{ cfg.page }}/delete-item">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="category" value="{{ cat.name }}">
+              <input type="hidden" name="item" value="{{ value }}">
+              <button class="delete-btn" type="submit" title="Remove">x</button>
+            </form>
+          </div>
+        {% else %}
+          <div class="item empty-item">Nothing here yet.</div>
+        {% endfor %}
+      </div>
+      <form class="add-item-row" method="post" action="/{{ cfg.page }}/add-item">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="category" value="{{ cat.name }}">
+        <input type="text" name="item" placeholder="{{ cfg.item_placeholder }}" autocomplete="off">
+        <button class="add-btn" type="submit">+ Add</button>
+      </form>
+    </section>
+  {% endfor %}
+
+  <form class="add-category" method="post" action="/{{ cfg.page }}/add-category">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="text" name="category" placeholder="{{ cfg.category_placeholder }}" autocomplete="off">
+    <button class="add-btn" type="submit">+ {{ cfg.name_label }}</button>
+  </form>
+</main>
+</body>
+</html>
