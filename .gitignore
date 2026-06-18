@@ -31,3 +31,12 @@ config/web/caddy/*.local
 *.local.toml
 
 /REFS-LOCAL.md
+
+# Runtime list state; keep personal data local.
+config/todo.json
+config/todo.*.json
+config/to-*.json
+config/*-history.jsonl
+config/*.hot.json
+config/*.cold.json
+config/*.archive.json
