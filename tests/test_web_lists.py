@@ -68,7 +68,13 @@ def _csrf(client, path: str) -> str:
         ("to-watch", "/api/watch", "Movies", {"title": "Brazil", "year": 1985}, "watched"),
         ("to-read", "/api/read", "Books", {"title": "The Dispossessed"}, "watched"),
         ("to-listen", "/api/listen", "Albums", {"title": "Kind of Blue"}, "watched"),
-        ("to-invest", "/api/invest", "Stocks", {"ticker": "AMD", "name": "Advanced Micro Devices"}, "holding"),
+        (
+            "to-invest",
+            "/api/invest",
+            "Stocks",
+            {"ticker": "AMD", "name": "Advanced Micro Devices"},
+            "holding",
+        ),
     ],
 )
 def test_to_list_api_add_toggle_delete_item(client, page, api_path, category, payload, status_key):

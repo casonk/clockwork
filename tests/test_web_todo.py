@@ -78,7 +78,9 @@ def test_load_todo_defaults_when_missing(todo_file):
 
 def test_load_todo_migrates_localstorage_watched_key(todo_file):
     todo_file.write_text(
-        json.dumps({"categories": [{"name": "Tasks", "items": [{"title": "Legacy", "watched": True}]}]})
+        json.dumps(
+            {"categories": [{"name": "Tasks", "items": [{"title": "Legacy", "watched": True}]}]}
+        )
     )
     data = web_app.load_todo()
     assert data["categories"][0]["items"][0] == {"title": "Legacy", "done": True}
@@ -129,7 +131,9 @@ def test_api_todo_toggle_item_sets_done(todo_file, client):
     )
     assert resp.status_code == 200
     saved = json.loads(todo_file.read_text())
-    item = next(i for i in saved["categories"][0]["items"] if i["title"] == "Move RTX 3090 to CPU x16 slot")
+    item = next(
+        i for i in saved["categories"][0]["items"] if i["title"] == "Move RTX 3090 to CPU x16 slot"
+    )
     assert item["done"] is True
 
 
