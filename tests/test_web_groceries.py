@@ -6,6 +6,7 @@ import json
 import os
 import sqlite3
 import sys
+from datetime import date, timedelta
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
@@ -100,9 +101,20 @@ def intake_db(tmp_path):
         {"description": "BUD LIGHT 18PK", "amount": 14.99, "quantity": 1, "unit_price": None},
         {"description": "REPAIR TAPE", "amount": 4.99, "quantity": 1, "unit_price": None},
     ]
+    # Dated relative to today so it always falls inside the rolling default
+    # window used by the routes (_ai_generate_rules defaults to today-60d).
+    # A fixed date silently ages out of that window and turns these tests red
+    # on a calendar boundary rather than on a code change.
+    recent = (date.today() - timedelta(days=5)).isoformat()
     conn.execute(
         "INSERT INTO receipts VALUES (?, ?, ?, ?, ?)",
-        ("20260601_1200.jpg", "2026-06-01", "walmart", "grocery/supermarket", json.dumps(items)),
+        (
+            f"{recent.replace('-', '')}_1200.jpg",
+            recent,
+            "walmart",
+            "grocery/supermarket",
+            json.dumps(items),
+        ),
     )
     # An old receipt outside the default 30-day window
     old_items = [{"description": "BREAD LOAF", "amount": 2.49, "quantity": 1, "unit_price": None}]
