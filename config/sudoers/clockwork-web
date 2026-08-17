@@ -9,7 +9,7 @@
 #   sudo visudo -c   # validate
 
 # Write system unit files via clockwork install (wrapper sets PYTHONPATH for root)
-user ALL=(root) NOPASSWD: /usr/local/bin/clockwork-system-install --manifest * --target systemd-system
+user ALL=(root) NOPASSWD: /usr/local/bin/clockwork-system-install --manifest * --target systemd-system --job *
 
 # Reload the system unit file index after writing
 user ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload

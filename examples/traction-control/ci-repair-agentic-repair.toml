@@ -1,0 +1,20 @@
+[[jobs]]
+name = "ci-repair-agentic-repair"
+launchd_label = "io.github.casonk.traction-control.ci-repair-agentic-repair"
+description = "On-demand repair of reviewed CI candidates"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h/git/util-repos/traction-control"
+exec_start = "%h/git/util-repos/traction-control/scripts/ci_repair_agentic_repair.sh --candidate-file %h/.local/share/ci-repair-agentic/latest-candidates.tsv --inventory-file %h/.local/share/ci-repair-agentic/latest-inventory.tsv"
+after = ["network-online.target"]
+wants = ["network-online.target"]
+environment_files = ["-%h/.config/traction-control/ci-repair-agentic.env"]
+standard_output = "journal"
+standard_error = "journal"
+
+[jobs.environment]
+PATH = "%h/.local/npm-global/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+PORTFOLIO_ROOT = "%h/git"
+LOG_DIR = "%h/.local/share/ci-repair-agentic"
+CI_REPAIR_AGENTIC_PROVIDER = "auto"
+CI_REPAIR_AGENTIC_MODEL = ""

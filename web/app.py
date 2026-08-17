@@ -6,15 +6,23 @@ import contextlib
 import datetime
 import json
 import os
+import platform
+import plistlib
 import re
 import secrets
 import shutil
 import ssl
+import stat
 import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 import tomlkit
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for
+
+from clockwork.manifest import load_manifest
+from clockwork.render import _LAUNCHD_ENV_LOADER, render_launchd_plist, resolve_launchd_label
 
 try:
     from web.security import same_origin_host, validate_remote_bind
@@ -457,6 +465,7 @@ def scan_repos() -> dict[str, dict]:
                     "model_value": environment.get(model_env_key, ""),
                     "timer_name": _coerce(job.get("timer_name")),
                     "service_name": _coerce(job.get("service_name")),
+                    "launchd_label": _coerce(job.get("launchd_label")) or None,
                     "poll_interval": _coerce(job.get("poll_interval")),
                     "timer": {k: _coerce(v) for k, v in timer.items()} if timer else None,
                     "cron": {k: _coerce(v) for k, v in cron.items()} if cron else None,
@@ -472,6 +481,8 @@ def scan_repos() -> dict[str, dict]:
 
 
 def primary_unit(job: dict) -> str:
+    if _scheduler_backend() == "launchd" and job.get("scope", "user") == "user":
+        return _launchd_label(job["name"], job.get("launchd_label"))
     if job.get("timer"):
         return job["timer_name"] or f"{job['name']}.timer"
     return job["service_name"] or f"{job['name']}.service"
@@ -493,6 +504,242 @@ def _run(*cmd: str, timeout: int = 30) -> tuple[int, str]:
 
 
 _SYSTEMCTL_WRITE_CMDS = {"enable", "disable", "start", "stop", "restart", "daemon-reload"}
+_LAUNCHD_LABEL_PREFIX = "io.github.casonk.clockwork"
+_LAUNCHD_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_LAUNCHD_LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,248}$", re.ASCII)
+_LAUNCHD_ADAPTER_REQUIRED_ERRORS = (
+    "cannot change identity",
+    "systemd ordering dependencies",
+    "uses start_limit_interval_sec",
+    "unsupported service_install_wanted_by",
+    "unsupported launchd restart policy",
+    "unsupported StandardOutput mapping",
+    "unsupported StandardError mapping",
+    "schedules another unit",
+    "unsupported timer install target",
+    "uses accuracy_sec",
+    "uses randomized_delay_sec",
+    "uses on_boot_sec",
+)
+
+
+def _scheduler_backend() -> str:
+    requested = os.environ.get("CLOCKWORK_SCHEDULER_BACKEND", "auto").strip().lower()
+    if requested == "auto":
+        return "launchd" if platform.system() == "Darwin" else "systemd"
+    if requested not in {"systemd", "launchd"}:
+        return "unsupported"
+    return requested
+
+
+def _launchd_label(job_name: str, explicit_label: str | None = None) -> str:
+    return resolve_launchd_label(job_name, explicit_label)
+
+
+def _launchd_domain() -> str:
+    return f"gui/{os.getuid()}"
+
+
+def _launchctl(*args: str, scope: str = "user") -> tuple[int, str]:
+    if scope != "user":
+        return 78, "launchd system-scope control is unsupported and was refused"
+    return _run("launchctl", *args)
+
+
+def _launchd_service(label: str) -> str:
+    return f"{_launchd_domain()}/{label}"
+
+
+def _launchd_plist_path(label: str) -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / f"{label}.plist"
+
+
+def _traction_runtime_arguments(arguments: list[str]) -> tuple[list[str] | None, str]:
+    """Unwrap only Clockwork's exact environment loader shape for Traction jobs."""
+
+    if arguments[:2] != ["/usr/bin/python3", "-c"]:
+        return arguments, ""
+    if len(arguments) != 4 or arguments[2] != _LAUNCHD_ENV_LOADER:
+        return None, "Traction Control adapter has a malformed Clockwork environment loader"
+    try:
+        config = json.loads(arguments[-1])
+    except (TypeError, json.JSONDecodeError) as exc:
+        return None, f"Traction Control adapter has invalid loader JSON: {exc}"
+    if not isinstance(config, dict) or set(config) != {"argv", "environment_files"}:
+        return None, "Traction Control adapter loader must contain only argv and environment_files"
+    if json.dumps(config, sort_keys=True, separators=(",", ":")) != arguments[-1]:
+        return None, "Traction Control adapter loader JSON is not canonical Clockwork output"
+    runtime_arguments = config.get("argv")
+    environment_files = config.get("environment_files")
+    if (
+        not isinstance(runtime_arguments, list)
+        or not runtime_arguments
+        or not all(isinstance(argument, str) and argument for argument in runtime_arguments)
+    ):
+        return None, "Traction Control adapter loader argv is invalid"
+    if (
+        not isinstance(environment_files, list)
+        or not environment_files
+        or not all(isinstance(entry, str) and entry for entry in environment_files)
+    ):
+        return None, "Traction Control adapter loader environment_files is invalid"
+    for entry in environment_files:
+        path = entry[1:] if entry.startswith("-") else entry
+        if not path or not Path(path).is_absolute():
+            return None, "Traction Control adapter loader environment file must be absolute"
+    return runtime_arguments, ""
+
+
+def _validate_launchd_plist(path: Path, *, label: str, job_name: str) -> tuple[dict | None, str]:
+    """Load one trusted, owner-only LaunchAgent and verify its scheduler identity."""
+
+    try:
+        expected_label = resolve_launchd_label(job_name, label)
+    except ValueError as exc:
+        return None, str(exc)
+    if expected_label != label or path.name != f"{label}.plist":
+        return None, "LaunchAgent path does not match the exact job label"
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return None, f"required LaunchAgent is absent: {path}"
+    except OSError as exc:
+        return None, f"cannot inspect LaunchAgent {path}: {exc}"
+    if not stat.S_ISREG(metadata.st_mode):
+        return None, f"refusing non-regular LaunchAgent: {path}"
+    if metadata.st_uid != os.getuid():
+        return None, f"refusing LaunchAgent not owned by the current user: {path}"
+    if stat.S_IMODE(metadata.st_mode) & 0o077:
+        return None, f"refusing group/world-accessible LaunchAgent: {path}"
+    if metadata.st_size > 1024 * 1024:
+        return None, f"refusing oversized LaunchAgent: {path}"
+    try:
+        payload = plistlib.loads(path.read_bytes())
+    except (OSError, plistlib.InvalidFileException, ValueError) as exc:
+        return None, f"cannot parse LaunchAgent {path}: {exc}"
+    if not isinstance(payload, dict) or payload.get("Label") != label:
+        return None, f"LaunchAgent Label does not match {label}"
+    arguments = payload.get("ProgramArguments")
+    if (
+        not isinstance(arguments, list)
+        or not arguments
+        or not all(isinstance(argument, str) and argument for argument in arguments)
+        or not Path(arguments[0]).is_absolute()
+    ):
+        return None, "LaunchAgent ProgramArguments must begin with an absolute executable"
+    for key, suffix in (
+        ("StandardOutPath", "stdout"),
+        ("StandardErrorPath", "stderr"),
+    ):
+        log_path = payload.get(key)
+        if not isinstance(log_path, str) or not Path(log_path).is_absolute():
+            return None, f"LaunchAgent {key} must be an absolute path"
+        if Path(log_path).name != f"{job_name}.{suffix}.log":
+            return None, f"LaunchAgent {key} does not match job {job_name!r}"
+
+    if label.startswith("io.github.casonk.traction-control."):
+        runtime_arguments, runtime_error = _traction_runtime_arguments(arguments)
+        if runtime_arguments is None:
+            return None, runtime_error
+        if len(runtime_arguments) < 4 or runtime_arguments[0] != "/bin/bash":
+            return None, "Traction Control adapter must invoke its runtime wrapper with /bin/bash"
+        wrapper = Path(runtime_arguments[1])
+        if (
+            not wrapper.is_absolute()
+            or ".." in wrapper.parts
+            or wrapper.name != "run_traction_control_job.sh"
+            or wrapper.parent.name != "scripts"
+            or wrapper.parent.parent.name != "traction-control"
+        ):
+            return None, "Traction Control adapter does not use its exact absolute runtime wrapper"
+        if runtime_arguments.count("--job") != 1:
+            return None, "Traction Control adapter must contain exactly one --job identity"
+        if runtime_arguments[2:4] != ["--job", job_name]:
+            return None, "Traction Control adapter --job identity does not match the manifest"
+    return payload, ""
+
+
+def _launchd_render_plan(manifest_path: Path, job: dict) -> tuple[dict | None, bool, str]:
+    """Return the desired plist, or identify a reviewed-adapter-only manifest."""
+
+    try:
+        manifest = load_manifest(manifest_path)
+    except (OSError, ValueError) as exc:
+        return None, False, f"cannot load manifest {manifest_path}: {exc}"
+    matches = [candidate for candidate in manifest.jobs if candidate.name == job.get("name")]
+    if len(matches) != 1:
+        return (
+            None,
+            False,
+            f"manifest must contain exactly one job named {job.get('name')!r}; found {len(matches)}",
+        )
+    candidate = matches[0]
+    try:
+        expected_label = resolve_launchd_label(candidate.name, candidate.launchd_label)
+        if expected_label != primary_unit(job):
+            return None, False, "manifest and UI launchd labels do not match"
+        return plistlib.loads(render_launchd_plist(candidate).encode("utf-8")), False, ""
+    except ValueError as exc:
+        message = str(exc)
+        adapter_required = bool(candidate.launchd_label) and any(
+            marker in message for marker in _LAUNCHD_ADAPTER_REQUIRED_ERRORS
+        )
+        if adapter_required:
+            return None, True, message
+        return None, False, message
+
+
+def _replace_launchd_plist(path: Path, content: bytes, mode: int = 0o600) -> None:
+    """Atomically restore one plist without following an existing target."""
+
+    if path.parent.is_symlink():
+        raise OSError(f"refusing symlinked LaunchAgents directory: {path.parent}")
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=path.parent, prefix=f".{path.name}.", delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.chmod(mode)
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def _rollback_launchd_plist(path: Path, previous: tuple[bytes, int] | None) -> tuple[str, int, str]:
+    try:
+        if previous is None:
+            path.unlink(missing_ok=True)
+        else:
+            content, mode = previous
+            _replace_launchd_plist(path, content, mode)
+    except OSError as exc:
+        return (f"restore LaunchAgent {path}", 1, str(exc))
+    return (f"restore LaunchAgent {path}", 0, "restored previous inactive plist")
+
+
+def _launchd_plist_changed(path: Path, previous: tuple[bytes, int] | None) -> bool:
+    if previous is None:
+        return path.exists() or path.is_symlink()
+    try:
+        return path.read_bytes() != previous[0]
+    except OSError:
+        return True
+
+
+def _launchd_is_absent(rc: int, output: str) -> bool:
+    if rc in {3, 113}:
+        return True
+    lowered = output.lower()
+    return any(
+        marker in lowered for marker in ("could not find service", "not found", "not loaded")
+    )
 
 
 def _systemctl(*args: str, scope: str = "user") -> tuple[int, str]:
@@ -511,6 +758,9 @@ def _self_unit() -> str | None:
     Reads /proc/self/cgroup (cgroups v2) which contains a path like
     .../clockwork-web.service — the last .service component is our unit name.
     """
+    if _scheduler_backend() == "launchd":
+        label = os.environ.get("CLOCKWORK_LAUNCHD_LABEL", "").strip()
+        return label or None
     try:
         text = Path("/proc/self/cgroup").read_text()
         for line in text.splitlines():
@@ -528,6 +778,33 @@ def _journalctl(*args: str, scope: str = "user") -> tuple[int, str]:
     return _run("journalctl", *flags, *args, timeout=15)
 
 
+def _launchd_log_lines(
+    label: str, *, job_name: str | None, scope: str = "user", limit: int = 500
+) -> tuple[int, str]:
+    if scope != "user":
+        return 78, "launchd system-scope logs are unsupported and were refused"
+    if not _LAUNCHD_LABEL_RE.fullmatch(label) or "." not in label:
+        return 78, "invalid Clockwork launchd label"
+    if not job_name or not _LAUNCHD_NAME_RE.fullmatch(job_name):
+        return 78, "missing or invalid manifest job name for launchd logs"
+    try:
+        if resolve_launchd_label(job_name, label) != label:
+            return 78, "launchd label does not match the manifest job name"
+    except ValueError as exc:
+        return 78, str(exc)
+    log_dir = Path.home() / "Library" / "Logs" / "Clockwork"
+    lines: list[str] = []
+    for suffix in ("stdout", "stderr"):
+        path = log_dir / f"{job_name}.{suffix}.log"
+        try:
+            if path.is_symlink() or not path.is_file():
+                continue
+            lines.extend(path.read_text(encoding="utf-8", errors="replace").splitlines())
+        except OSError as exc:
+            return 1, f"cannot read {path}: {exc}"
+    return 0, "\n".join(lines[-limit:])
+
+
 def _log_units(unit: str) -> list[str]:
     """For a timer unit return both the timer and its service; otherwise just the unit."""
     if unit.endswith(".timer"):
@@ -536,6 +813,37 @@ def _log_units(unit: str) -> list[str]:
 
 
 def unit_status(unit: str, scope: str = "user") -> dict:
+    backend = _scheduler_backend()
+    if backend == "launchd":
+        if scope != "user":
+            return {
+                "active": None,
+                "enabled": None,
+                "active_state": "unsupported-system-scope",
+                "enabled_state": "unsupported-system-scope",
+                "next_run_text": "",
+                "next_run_iso": "",
+            }
+        rc, out = _launchctl("print", _launchd_service(unit), scope=scope)
+        state_match = re.search(r"(?m)^\s*state\s*=\s*([^\s]+)", out)
+        state = state_match.group(1) if state_match else ("not-loaded" if rc else "loaded")
+        return {
+            "active": rc == 0 and state == "running",
+            "enabled": rc == 0,
+            "active_state": state,
+            "enabled_state": "loaded" if rc == 0 else "not-loaded",
+            "next_run_text": "",
+            "next_run_iso": "",
+        }
+    if backend != "systemd":
+        return {
+            "active": None,
+            "enabled": None,
+            "active_state": "unsupported-backend",
+            "enabled_state": "unsupported-backend",
+            "next_run_text": "",
+            "next_run_iso": "",
+        }
     _, out = _systemctl(
         "show",
         unit,
@@ -582,11 +890,141 @@ def _resolve_target(job: dict, pref: str) -> str:
     """Given a preference ('systemd'|'cron'), return the actual install target string."""
     has_timer = bool(job.get("timer"))
     has_cron = bool(job.get("cron"))
+    native_target = f"systemd-{job.get('scope', 'user')}"
+    if _scheduler_backend() == "launchd":
+        native_target = "launchd-user" if job.get("scope", "user") == "user" else "launchd-system"
     if has_timer and has_cron:
-        return "cron" if pref == "cron" else f"systemd-{job.get('scope', 'user')}"
+        return "cron" if pref == "cron" else native_target
     if has_cron:
         return "cron"
-    return f"systemd-{job.get('scope', 'user')}"
+    return native_target
+
+
+def _do_enable_launchd(manifest_full_path: Path, job: dict) -> list[tuple[str, int, str]]:
+    results: list[tuple[str, int, str]] = []
+    label = primary_unit(job)
+    job_name = job["name"]
+    scope = job.get("scope", "user")
+    service = _launchd_service(label)
+    plist_path = _launchd_plist_path(label)
+    desired_payload, adapter_required, plan_message = _launchd_render_plan(manifest_full_path, job)
+    if desired_payload is None and not adapter_required:
+        return [("launchd manifest preflight", 78, plan_message)]
+
+    previous: tuple[bytes, int] | None = None
+    installed_payload: dict | None = None
+    if plist_path.exists() or plist_path.is_symlink():
+        installed_payload, validation_error = _validate_launchd_plist(
+            plist_path, label=label, job_name=job_name
+        )
+        if installed_payload is None:
+            return [("validate installed LaunchAgent", 78, validation_error)]
+        metadata = plist_path.lstat()
+        previous = (plist_path.read_bytes(), stat.S_IMODE(metadata.st_mode))
+
+    if adapter_required:
+        if installed_payload is None:
+            return [
+                (
+                    "reuse downstream LaunchAgent adapter",
+                    78,
+                    f"{plan_message}; install the reviewed adapter before enabling this job",
+                )
+            ]
+        results.append(
+            (
+                "reuse downstream LaunchAgent adapter",
+                0,
+                f"validated existing {label}",
+            )
+        )
+
+    rc_loaded, loaded_output = _launchctl("print", service, scope=scope)
+    if rc_loaded != 0 and not _launchd_is_absent(rc_loaded, loaded_output):
+        results.append((f"launchctl print {service}", rc_loaded, loaded_output))
+        return results
+    loaded = rc_loaded == 0
+    installed_changed = False
+
+    if loaded:
+        results.append(
+            (
+                "refresh loaded LaunchAgent",
+                78,
+                "job is already loaded; disable it before enabling to refresh launchd state",
+            )
+        )
+        return results
+
+    if desired_payload is not None:
+        python_executable = Path(sys.executable)
+        if not python_executable.is_absolute() or not os.access(python_executable, os.X_OK):
+            return [
+                (
+                    "clockwork install",
+                    78,
+                    "current Python interpreter is not an absolute executable; no action taken",
+                )
+            ]
+        install_cmd = [
+            str(python_executable),
+            "-m",
+            "clockwork.cli",
+            "install",
+            "--manifest",
+            str(manifest_full_path),
+            "--target",
+            "launchd-user",
+            "--job",
+            job_name,
+        ]
+        rc, out = _run(*install_cmd, timeout=60)
+        results.append(("clockwork install --target launchd-user", rc, out))
+        if rc != 0:
+            if _launchd_plist_changed(plist_path, previous):
+                results.append(_rollback_launchd_plist(plist_path, previous))
+            return results
+        installed_changed = True
+        installed_payload, validation_error = _validate_launchd_plist(
+            plist_path, label=label, job_name=job_name
+        )
+        if installed_payload is None or installed_payload != desired_payload:
+            detail = validation_error or "installed plist differs from the preflight render"
+            results.append(("validate installed LaunchAgent", 78, detail))
+            results.append(_rollback_launchd_plist(plist_path, previous))
+            return results
+        results.append(("validate installed LaunchAgent", 0, f"validated {label}"))
+
+    rc_enable, enable_output = _launchctl("enable", service, scope=scope)
+    results.append((f"launchctl enable {service}", rc_enable, enable_output))
+    if rc_enable != 0:
+        if installed_changed:
+            results.append(_rollback_launchd_plist(plist_path, previous))
+        return results
+
+    if not loaded:
+        rc_bootstrap, bootstrap_output = _launchctl(
+            "bootstrap", _launchd_domain(), str(plist_path), scope=scope
+        )
+        results.append(
+            (
+                f"launchctl bootstrap {_launchd_domain()} {plist_path}",
+                rc_bootstrap,
+                bootstrap_output,
+            )
+        )
+        if rc_bootstrap != 0:
+            rc_check, _ = _launchctl("print", service, scope=scope)
+            if rc_check == 0:
+                rc_bootout, bootout_output = _launchctl("bootout", service, scope=scope)
+                results.append(
+                    (f"rollback launchctl bootout {service}", rc_bootout, bootout_output)
+                )
+            rc_disable, disable_output = _launchctl("disable", service, scope=scope)
+            results.append((f"rollback launchctl disable {service}", rc_disable, disable_output))
+            if installed_changed:
+                results.append(_rollback_launchd_plist(plist_path, previous))
+    return results
 
 
 def do_enable(
@@ -596,6 +1034,21 @@ def do_enable(
     target = _resolve_target(job, target_pref)
     results: list[tuple[str, int, str]] = []
 
+    if target == "launchd-system" or (
+        _scheduler_backend() == "launchd" and scope != "user" and target != "cron"
+    ):
+        return [
+            (
+                "launchd install",
+                78,
+                "system-scope launchd jobs are unsupported and were refused",
+            )
+        ]
+    if _scheduler_backend() not in {"systemd", "launchd"} and target != "cron":
+        return [("scheduler install", 78, "unsupported scheduler backend; no action taken")]
+
+    if target == "launchd-user":
+        return _do_enable_launchd(manifest_full_path, job)
     if scope == "system":
         install_cmd = [
             "sudo",
@@ -605,6 +1058,8 @@ def do_enable(
             str(manifest_full_path),
             "--target",
             target,
+            "--job",
+            job["name"],
         ]
     else:
         install_cmd = [
@@ -614,6 +1069,8 @@ def do_enable(
             str(manifest_full_path),
             "--target",
             target,
+            "--job",
+            job["name"],
         ]
     rc, out = _run(*install_cmd, timeout=60)
     results.append((f"clockwork install --target {target}", rc, out))
@@ -633,6 +1090,47 @@ def do_disable(job: dict) -> list[tuple[str, int, str]]:
     if job.get("cron") and not job.get("timer"):
         return [("(cron-only — remove from installed .crontab manually)", 0, "")]
     unit = primary_unit(job)
+    if _scheduler_backend() == "launchd":
+        if scope != "user":
+            return [
+                (
+                    "launchctl bootout",
+                    78,
+                    "system-scope launchd jobs are unsupported and were refused",
+                )
+            ]
+        service = _launchd_service(unit)
+        rc_loaded, loaded_output = _launchctl("print", service, scope=scope)
+        if rc_loaded != 0 and not _launchd_is_absent(rc_loaded, loaded_output):
+            return [(f"launchctl print {service}", rc_loaded, loaded_output)]
+        results: list[tuple[str, int, str]] = []
+        loaded = rc_loaded == 0
+        plist_path = _launchd_plist_path(unit)
+        can_restore = False
+        if loaded:
+            payload, _ = _validate_launchd_plist(plist_path, label=unit, job_name=job["name"])
+            can_restore = payload is not None
+            rc, out = _launchctl("bootout", service, scope=scope)
+            results.append((f"launchctl bootout {service}", rc, out))
+            if rc != 0:
+                return results
+        rc2, out2 = _launchctl("disable", service, scope=scope)
+        results.append((f"launchctl disable {service}", rc2, out2))
+        if rc2 != 0 and loaded and can_restore:
+            rc3, out3 = _launchctl("enable", service, scope=scope)
+            results.append((f"rollback launchctl enable {service}", rc3, out3))
+            if rc3 == 0:
+                rc4, out4 = _launchctl("bootstrap", _launchd_domain(), str(plist_path), scope=scope)
+                results.append(
+                    (
+                        f"rollback launchctl bootstrap {_launchd_domain()} {plist_path}",
+                        rc4,
+                        out4,
+                    )
+                )
+        return results
+    if _scheduler_backend() != "systemd":
+        return [("scheduler disable", 78, "unsupported scheduler backend; no action taken")]
     rc, out = _systemctl("disable", "--now", unit, scope=scope)
     return [(f"systemctl disable --now {unit}", rc, out)]
 
@@ -642,6 +1140,10 @@ def _flash_results(results: list[tuple[str, int, str]], prefix: str = "") -> Non
         cat = "success" if rc == 0 else "error"
         msg = (f"{prefix}{cmd}" + (f": {out}" if out else "")).strip()
         flash(msg, cat)
+
+
+def _results_succeeded(results: list[tuple[str, int, str]]) -> bool:
+    return bool(results) and all(rc == 0 for _, rc, _ in results)
 
 
 # ---------------------------------------------------------------------------
@@ -661,6 +1163,7 @@ def index():
             for job in manifest["jobs"]:
                 job["enabled"] = job_enabled(state, manifest["path"], job["name"])
                 job["target"] = job_target(state, manifest["path"], job["name"])
+                job["scheduler_id"] = primary_unit(job)
                 job_lookup[f"{manifest['path']}:{job['name']}"] = job
 
     sys_statuses = fetch_all_statuses(repos)
@@ -685,6 +1188,7 @@ def index():
         job_data_json=json.dumps(job_lookup),
         global_target=global_target(state),
         dual_count=dual_count,
+        native_scheduler_name=("launchd" if _scheduler_backend() == "launchd" else "systemd"),
     )
 
 
@@ -712,8 +1216,9 @@ def toggle_all():
 
     for repo_name, repo in repos.items():
         toggled_any = False
+        repo_succeeded = True
         for manifest in repo["manifests"]:
-            full_path = EXAMPLES_DIR / manifest["path"]
+            full_path = _resolve_manifest_path(manifest["path"])
             for job in manifest["jobs"]:
                 if self_unit and primary_unit(job) == self_unit:
                     continue  # never disable/enable the running web UI via toggle-all
@@ -722,10 +1227,13 @@ def toggle_all():
                 tpref = job_target(state, manifest["path"], job["name"])
                 results = do_enable(full_path, job, tpref) if new_enabled else do_disable(job)
                 _flash_results(results, prefix=f"[{job['name']}] ")
-                state.setdefault("jobs", {}).setdefault(key, {})["enabled"] = new_enabled
+                if _results_succeeded(results):
+                    state.setdefault("jobs", {}).setdefault(key, {})["enabled"] = new_enabled
+                else:
+                    repo_succeeded = False
         # Always mark enabled on enable-all; skip marking disabled if no jobs were toggled
         # (avoids setting a self-unit-only repo to disabled during disable-all)
-        if new_enabled or toggled_any:
+        if repo_succeeded and (new_enabled or toggled_any):
             state.setdefault("repos", {})[repo_name] = {"enabled": new_enabled}
 
     save_state(state)
@@ -759,16 +1267,25 @@ def toggle_repo(repo_name: str):
     repos = scan_repos()
     repo = repos.get(repo_name, {})
 
+    attempted = False
+    repo_succeeded = True
     for manifest in repo.get("manifests", []):
         full_path = _resolve_manifest_path(manifest["path"])
         for job in manifest["jobs"]:
+            attempted = True
             key = f"{manifest['path']}:{job['name']}"
             tpref = job_target(state, manifest["path"], job["name"])
             results = do_disable(job) if currently_on else do_enable(full_path, job, tpref)
             _flash_results(results, prefix=f"[{job['name']}] ")
-            state.setdefault("jobs", {}).setdefault(key, {})["enabled"] = not currently_on
+            if _results_succeeded(results):
+                state.setdefault("jobs", {}).setdefault(key, {})["enabled"] = not currently_on
+            else:
+                repo_succeeded = False
 
-    state.setdefault("repos", {})[repo_name] = {"enabled": not currently_on}
+    if attempted and repo_succeeded:
+        state.setdefault("repos", {})[repo_name] = {"enabled": not currently_on}
+    elif not attempted:
+        flash(f"No jobs found for repository {repo_name!r}; no state changed.", "error")
     save_state(state)
     return redirect(url_for("index"))
 
@@ -797,9 +1314,11 @@ def toggle_job():
         tpref = job_target(state, mpath, jname)
         results = do_disable(job_data) if currently_on else do_enable(full_path, job_data, tpref)
         _flash_results(results)
-
-    key = f"{mpath}:{jname}"
-    state.setdefault("jobs", {}).setdefault(key, {})["enabled"] = not currently_on
+        if _results_succeeded(results):
+            key = f"{mpath}:{jname}"
+            state.setdefault("jobs", {}).setdefault(key, {})["enabled"] = not currently_on
+    else:
+        flash(f"Job {jname!r} was not found; no state changed.", "error")
     save_state(state)
     return redirect(url_for("index"))
 
@@ -823,8 +1342,28 @@ def restart_job():
     if job_data:
         unit = primary_unit(job_data)
         scope = job_data.get("scope", "user")
-        rc, out = _systemctl("restart", unit, scope=scope)
-        _flash_results([(f"systemctl restart {unit}", rc, out)])
+        if _scheduler_backend() == "launchd":
+            if scope != "user":
+                _flash_results(
+                    [
+                        (
+                            "launchctl kickstart",
+                            78,
+                            "system-scope launchd jobs are unsupported and were refused",
+                        )
+                    ]
+                )
+            else:
+                service = _launchd_service(unit)
+                rc, out = _launchctl("kickstart", "-k", service, scope=scope)
+                _flash_results([(f"launchctl kickstart -k {service}", rc, out)])
+        elif _scheduler_backend() == "systemd":
+            rc, out = _systemctl("restart", unit, scope=scope)
+            _flash_results([(f"systemctl restart {unit}", rc, out)])
+        else:
+            _flash_results(
+                [("scheduler restart", 78, "unsupported scheduler backend; no action taken")]
+            )
     return redirect(url_for("index"))
 
 
@@ -867,27 +1406,34 @@ def toggle_target_job():
         )
         return redirect(url_for("index"))
 
-    state.setdefault("jobs", {}).setdefault(key, {})["target"] = new_target
+    if job_data is None:
+        flash(f"Job {jname!r} was not found; target was not changed.", "error")
+        return redirect(url_for("index"))
+    if new_target == current:
+        flash(f"{jname} already uses the {current} target.", "success")
+        return redirect(url_for("index"))
 
-    # If currently enabled, swap the install
+    # If currently enabled, treat the scheduler swap as a small transaction.
     if job_enabled(state, mpath, jname):
-        repos = scan_repos()
-        job_data = next(
-            (
-                j
-                for repo in repos.values()
-                for m in repo["manifests"]
-                if m["path"] == mpath
-                for j in m["jobs"]
-                if j["name"] == jname
-            ),
-            None,
-        )
-        if job_data:
-            _flash_results(do_disable(job_data))
-            full_path = _resolve_manifest_path(mpath)
-            _flash_results(do_enable(full_path, job_data, new_target))
+        disable_results = do_disable(job_data)
+        _flash_results(disable_results)
+        if not _results_succeeded(disable_results):
+            return redirect(url_for("index"))
 
+        full_path = _resolve_manifest_path(mpath)
+        enable_results = do_enable(full_path, job_data, new_target)
+        _flash_results(enable_results)
+        if not _results_succeeded(enable_results):
+            rollback_results = do_enable(full_path, job_data, current)
+            _flash_results(rollback_results, prefix="[rollback] ")
+            if not _results_succeeded(rollback_results):
+                job_state = state.setdefault("jobs", {}).setdefault(key, {})
+                job_state["target"] = current
+                job_state["enabled"] = False
+                save_state(state)
+            return redirect(url_for("index"))
+
+    state.setdefault("jobs", {}).setdefault(key, {})["target"] = new_target
     save_state(state)
     return redirect(url_for("index"))
 
@@ -961,9 +1507,61 @@ def edit_job():
 @app.get("/api/job-details")
 def job_details():
     unit = request.args.get("unit", "").strip()
+    job_name = request.args.get("job_name", "").strip()
     scope = request.args.get("scope", "user")
     if not unit:
         return jsonify({"error": "missing unit"}), 400
+
+    if _scheduler_backend() == "launchd":
+        if scope != "user":
+            return (
+                jsonify({"error": "launchd system scope is unsupported and was refused"}),
+                400,
+            )
+        if not job_name:
+            return jsonify({"error": "missing manifest job_name for launchd job"}), 400
+        try:
+            if resolve_launchd_label(job_name, unit) != unit:
+                return jsonify({"error": "launchd label does not match manifest job_name"}), 400
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        rc, launchd_out = _launchctl("print", _launchd_service(unit), scope=scope)
+        state_match = re.search(r"(?m)^\s*state\s*=\s*([^\s]+)", launchd_out)
+        exit_match = re.search(r"(?m)^\s*last exit code\s*=\s*(-?\d+)", launchd_out)
+        state = state_match.group(1) if state_match else ("not-loaded" if rc else "loaded")
+        _, log_out = _launchd_log_lines(unit, job_name=job_name, scope=scope, limit=500)
+        recent = [line for line in log_out.splitlines() if line.strip()]
+        recent_entries = [
+            {"text": line, "level": _journal_line_level(line)} for line in recent[-40:]
+        ]
+        last_success: str | None = None
+        last_warning: str | None = None
+        last_failure: str | None = None
+        for line in recent:
+            level = _journal_line_level(line)
+            if _journal_line_counts_as_success(line):
+                last_success = _journal_timestamp(line)
+            elif level == "warn":
+                last_warning = _journal_timestamp(line)
+            elif level == "fail":
+                last_failure = _journal_timestamp(line)
+        return jsonify(
+            {
+                "unit": unit,
+                "scope": scope,
+                "result": state,
+                "last_active": "",
+                "last_inactive": "",
+                "last_exit_code": exit_match.group(1) if exit_match else "",
+                "n_restarts": "",
+                "last_success": last_success,
+                "last_warning": last_warning,
+                "last_failure": last_failure,
+                "recent_entries": recent_entries,
+                "recent_lines": recent[-40:],
+                "log_url": url_for("job_logs", unit=unit, scope=scope, job_name=job_name),
+            }
+        )
 
     props = [
         "Result",
@@ -1043,7 +1641,14 @@ def job_details():
 @app.get("/logs/<unit>")
 def job_logs(unit: str):
     scope = request.args.get("scope", "user")
+    job_name = request.args.get("job_name", "").strip()
     n = min(int(request.args.get("n", "500")), 2000)
+    if _scheduler_backend() == "launchd":
+        rc, out = _launchd_log_lines(unit, job_name=job_name, scope=scope, limit=n)
+        lines = out.splitlines() if out else []
+        if rc != 0 and out:
+            lines = [out]
+        return render_template("logs.html", unit=unit, scope=scope, lines=lines, n=n)
     unit_flags: list[str] = []
     for u in _log_units(unit):
         unit_flags.extend(["-u", u])
@@ -4062,7 +4667,19 @@ def _make_ssl_context() -> ssl.SSLContext | None:
 # Startup: auto-generate missing cron sections
 # ---------------------------------------------------------------------------
 
-if os.environ.get("CLOCKWORK_WEB_AUTOGENERATE_CRON", "1").lower() in {"1", "true", "yes", "on"}:
+
+def _autogenerate_cron_enabled() -> bool:
+    """Require an explicit opt-in before mutating example manifests at import."""
+
+    return os.environ.get("CLOCKWORK_WEB_AUTOGENERATE_CRON", "0").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+if _autogenerate_cron_enabled():
     _cron_modified = ensure_cron_sections(EXAMPLES_DIR)
     if _cron_modified:
         print(f"clockwork-web  auto-generated cron sections in: {', '.join(_cron_modified)}")

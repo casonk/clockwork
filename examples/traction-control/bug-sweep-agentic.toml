@@ -1,5 +1,6 @@
 [[jobs]]
 name = "bug-sweep-agentic"
+launchd_label = "io.github.casonk.traction-control.bug-sweep-agentic"
 description = "Daily agentic review of clean code repos for potential bugs and regressions"
 scope = "user"
 service_type = "oneshot"
