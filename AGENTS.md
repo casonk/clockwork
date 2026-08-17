@@ -7,6 +7,7 @@ declarative scheduler abstraction used to render or install:
 
 - user-level `systemd` service + timer units
 - system-level `systemd` service + timer units
+- user-level macOS launchd LaunchAgent plists
 - cron example snippets derived from the same job definitions
 
 Keep the repository focused on scheduler description, rendering, and install
@@ -17,7 +18,7 @@ job.
 
 - `src/clockwork/manifest.py`: TOML manifest loading and validation
 - `src/clockwork/model.py`: scheduler dataclasses and invariants
-- `src/clockwork/render.py`: cron and `systemd` rendering helpers
+- `src/clockwork/render.py`: cron, `systemd`, and launchd rendering helpers
 - `src/clockwork/cli.py`: CLI entry point for render/install flows
 - `web/app.py`: Flask web UI for browsing, enabling, and disabling jobs
 - `web/templates/`: Jinja2 templates for the web UI
@@ -48,6 +49,7 @@ Useful commands:
 ```bash
 clockwork render --manifest examples/archility/archility-weekly.toml --target systemd-user
 clockwork install --manifest examples/example-scheduler/monthly-controller.toml --target cron --output /tmp/example-scheduler.crontab
+clockwork render --manifest examples/clockwork/clockwork-web.local.toml --target launchd-user
 ```
 
 ## Operating Rules
@@ -58,8 +60,8 @@ clockwork install --manifest examples/example-scheduler/monthly-controller.toml 
    workflow logic into `clockwork` unless they are truly shared scheduler
    concerns.
 3. The CLI renders and writes files; the web UI manages live scheduler state via
-   `systemctl` (user scope directly, system scope via `sudo -n` with the
-   sudoers drop-in).
+   `systemctl` on Linux and the current GUI user's `launchctl` domain on macOS.
+   macOS system-scope operations must fail closed.
 4. When a downstream repo's scheduler pattern changes, update its example
    manifest or migration note here in the same change.
 5. Run repo-appropriate validation after schema or renderer changes.

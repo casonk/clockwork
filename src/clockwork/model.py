@@ -74,6 +74,8 @@ class JobSpec:
     timer_name: str | None = None
     timer_description: str | None = None
     poll_interval: str | None = None
+    launchd_label: str | None = None
+    launchd_run_at_load: bool | None = None
     timer: TimerSpec | None = None
     cron: CronSpec | None = None
 

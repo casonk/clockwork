@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from clockwork.cli import main
 
 
@@ -108,3 +110,82 @@ def test_python_module_entrypoint_invokes_main(tmp_path):
     assert proc.returncode == 0
     assert (unit_dir / "fedora-debugg-workflow.service").exists()
     assert (unit_dir / "fedora-debugg-workflow.timer").exists()
+
+
+def test_install_job_filter_writes_only_the_exact_selected_job(tmp_path):
+    manifest_path = tmp_path / "multi-job.toml"
+    manifest_path.write_text(
+        """[[jobs]]
+name = "first-job"
+description = "First test job"
+exec_start = "/bin/echo first"
+
+[[jobs]]
+name = "second-job"
+description = "Second test job"
+exec_start = "/bin/echo second"
+""",
+        encoding="utf-8",
+    )
+    unit_dir = tmp_path / "systemd-user"
+
+    exit_code = main(
+        [
+            "install",
+            "--manifest",
+            str(manifest_path),
+            "--target",
+            "systemd-user",
+            "--unit-dir",
+            str(unit_dir),
+            "--job",
+            "second-job",
+        ]
+    )
+
+    assert exit_code == 0
+    assert not (unit_dir / "first-job.service").exists()
+    assert (unit_dir / "second-job.service").exists()
+
+
+@pytest.mark.parametrize(
+    ("jobs", "selected", "found"),
+    [
+        (("first-job",), "missing-job", 0),
+        (("duplicate-job", "duplicate-job"), "duplicate-job", 2),
+    ],
+)
+def test_install_job_filter_requires_exactly_one_manifest_match(tmp_path, jobs, selected, found):
+    manifest_path = tmp_path / "invalid-selection.toml"
+    job_blocks = []
+    for name in jobs:
+        job_blocks.append(
+            "\n".join(
+                (
+                    "[[jobs]]",
+                    f'name = "{name}"',
+                    'description = "Selection test"',
+                    'exec_start = "/bin/echo ready"',
+                    "",
+                )
+            )
+        )
+    manifest_path.write_text(
+        "\n".join(job_blocks),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=rf"exactly one job named .*; found {found}"):
+        main(
+            [
+                "install",
+                "--manifest",
+                str(manifest_path),
+                "--target",
+                "systemd-user",
+                "--unit-dir",
+                str(tmp_path / "units"),
+                "--job",
+                selected,
+            ]
+        )
