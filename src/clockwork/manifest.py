@@ -39,6 +39,22 @@ def _as_str_dict(value: Any) -> dict[str, str]:
     return result
 
 
+def _as_optional_str(value: Any, *, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"Expected {field} to be a string, got {type(value).__name__}")
+    return value
+
+
+def _as_optional_bool(value: Any, *, field: str) -> bool | None:
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise ValueError(f"Expected {field} to be a boolean, got {type(value).__name__}")
+    return value
+
+
 def _parse_timer(value: Any) -> TimerSpec | None:
     if value is None:
         return None
@@ -96,6 +112,10 @@ def _parse_job(value: Any) -> JobSpec:
         timer_name=value.get("timer_name"),
         timer_description=value.get("timer_description"),
         poll_interval=value.get("poll_interval"),
+        launchd_label=_as_optional_str(value.get("launchd_label"), field="launchd_label"),
+        launchd_run_at_load=_as_optional_bool(
+            value.get("launchd_run_at_load"), field="launchd_run_at_load"
+        ),
         timer=_parse_timer(value.get("timer")),
         cron=_parse_cron(value.get("cron")),
     )

@@ -1,0 +1,21 @@
+[[jobs]]
+name = "portfolio-audit-daily"
+launchd_label = "io.github.casonk.traction-control.portfolio-audit-daily"
+description = "Daily governance audit across the portfolio"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h/git/util-repos/traction-control"
+exec_start = "%h/git/util-repos/traction-control/scripts/portfolio-audit.sh"
+after = ["network.target"]
+standard_output = "journal"
+standard_error = "journal"
+
+[jobs.environment]
+PORTFOLIO_ROOT = "%h/git"
+LOG_DIR = "%h/.local/share/portfolio-audit"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "*-*-* 08:00:00"
+persistent = true
+randomized_delay_sec = "300"

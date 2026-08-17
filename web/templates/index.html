@@ -442,7 +442,7 @@
         <div class="pill">
           <button type="submit" name="_t" value="systemd"
                   class="pill-btn {% if global_target == 'systemd' %}active{% endif %}">
-            systemd
+            {{ native_scheduler_name }}
           </button>
           <button type="submit" name="_t" value="cron"
                   class="pill-btn {% if global_target == 'cron' %}active cron-active{% endif %}">
@@ -555,7 +555,7 @@
                     <button type="submit" name="_t" value="systemd"
                             class="pill-btn {% if job.target == 'systemd' %}active{% endif %}"
                             {% if not job.timer %}disabled title="No [jobs.timer] section in manifest"{% endif %}>
-                      systemd
+                      {{ native_scheduler_name }}
                     </button>
                     {# cron button: active if current target #}
                     <button type="submit" name="_t" value="cron"
@@ -596,7 +596,7 @@
                   id="drill-btn-{{ job.name | replace('.', '-') }}"
                   onclick="toggleDrill(
                     '{{ job.name | replace("'", "\\'") }}',
-                    '{{ (job.timer_name or job.name ~ ".timer") if job.timer else (job.service_name or job.name ~ ".service") }}',
+                    '{{ job.scheduler_id }}',
                     '{{ job.scope }}'
                   )"
                   title="History &amp; logs">
@@ -932,7 +932,7 @@
     if (panel.dataset.loaded === '1') return;
     panel.dataset.loaded = '1';
 
-    fetch(`/api/job-details?unit=${encodeURIComponent(unit)}&scope=${encodeURIComponent(scope)}`)
+    fetch(`/api/job-details?unit=${encodeURIComponent(unit)}&scope=${encodeURIComponent(scope)}&job_name=${encodeURIComponent(jobName)}`)
       .then(r => r.json())
       .then(d => renderDrill(panel, d))
       .catch(e => {

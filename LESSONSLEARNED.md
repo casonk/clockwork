@@ -14,6 +14,44 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
+- Per-job scheduler controls must select exactly one manifest job; invoking a
+  whole-manifest installer can overwrite loaded sibling artifacts and leave
+  their in-memory scheduler definitions stale.
+- Treat web-control state as a commit record: update job and repository toggles
+  only when every required scheduler operation succeeds. Resolve private
+  `*.local.toml` shadows consistently in individual, repository, and bulk paths.
+- Treat an enabled scheduler-target switch as a transaction. If the new target
+  fails, re-enable the old target; if rollback also fails, preserve the old
+  target identity but record the job as disabled instead of claiming it is live.
+- Never overwrite a loaded LaunchAgent and assume launchd noticed. Disk equality
+  cannot prove launchd's in-memory definition, so refuse refresh until the job
+  is unloaded. Reuse a downstream adapter only after validating its exact label,
+  ownership, permissions, executable arguments, and job identity. If Clockwork's
+  environment loader is present, require its exact envelope and validate the
+  nested argv from its final canonical JSON object.
+- A downstream-owned launchd label must be explicit manifest data resolved by
+  the same function in both plist rendering and web controls. Parallel label
+  prefixes let two control surfaces load duplicate schedules for one workload.
+- Keep systemd-only ordering, delayed-login, and randomized-delay fields
+  fail-closed. A downstream launchd adapter must expose its replacement delay,
+  jitter, and readiness gates in reviewable arguments rather than relying on
+  Clockwork to discard unsupported fields.
+
+- Treat launchd as a distinct scheduler rather than transliterating every
+  systemd field. Reject delayed-login timers, randomized/accuracy timing,
+  ordering dependencies, and system scope when no exact safe mapping exists.
+- Never source scheduler environment files as shell code. Load only strict
+  `KEY=VALUE` records from regular, owner-owned, owner-only files; reject
+  symlinks and permissive modes before executing the workload.
+- A tracked macOS service manifest must not assume `/usr/bin/python3` satisfies
+  the project runtime. Use a private host-path manifest plus a checked virtual
+  environment wrapper, and keep persistent Flask secrets in a required local
+  environment file.
+- A web process launched from a private virtual environment must invoke
+  Clockwork installs through its absolute `sys.executable -m clockwork.cli`;
+  launchd's default `PATH` does not include the virtual environment's console
+  scripts.
+
 - For compact card grids in the Clockwork web UI, use shrinkable grid tracks
   such as `repeat(2, minmax(0, 1fr))` and put `min-width: 0` on cards and
   nested flex rows. Plain `1fr 1fr` can still overflow on mobile because grid
@@ -104,3 +142,16 @@ should change how future sessions work in this repo.
 - For Clockwork's grocery, shopping, and web-control forms, render a session
   CSRF token into every POST form and accept that token server-side before
   falling back to same-origin header checks.
+
+### 2026-08-16 — Scheduler translations need native-value and state-commit tests
+
+- launchd `Weekday` uses Sunday as `0` or `7`, Monday as `1`, through Saturday
+  as `6`; never reuse an unchecked one-based lookup table. Cross-repository
+  composition tests should compare the final plist values to the scheduling
+  authority, not only compare labels.
+- A scheduler UI's stored enabled/target state is a commit record. Update it
+  only after every required scheduler action succeeds, and roll back a target
+  swap when the new install fails.
+- Importing a web/control module must not rewrite tracked manifests by default.
+  Keep migration helpers explicit opt-ins so read-only tests and diagnostics
+  remain read-only.

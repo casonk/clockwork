@@ -8,13 +8,17 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .manifest import load_manifest
-from .render import render_target, write_rendered_files
+from .model import Manifest
+from .render import render_target, write_launchd_files, write_rendered_files
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="clockwork",
-        description="Render or install cron and systemd scheduler artifacts from TOML manifests.",
+        description=(
+            "Render or install cron, systemd, and macOS launchd scheduler artifacts "
+            "from TOML manifests."
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -25,8 +29,12 @@ def build_parser() -> argparse.ArgumentParser:
     render_parser.add_argument(
         "--target",
         required=True,
-        choices=["systemd-user", "systemd-system", "cron"],
+        choices=["systemd-user", "systemd-system", "launchd-user", "cron"],
         help="Scheduler target to render.",
+    )
+    render_parser.add_argument(
+        "--job",
+        help="Render only the job whose name exactly matches this value.",
     )
     render_parser.set_defaults(handler=handle_render)
 
@@ -37,12 +45,16 @@ def build_parser() -> argparse.ArgumentParser:
     install_parser.add_argument(
         "--target",
         required=True,
-        choices=["systemd-user", "systemd-system", "cron"],
+        choices=["systemd-user", "systemd-system", "launchd-user", "cron"],
         help="Scheduler target to install.",
     )
     install_parser.add_argument(
+        "--job",
+        help="Install only the job whose name exactly matches this value.",
+    )
+    install_parser.add_argument(
         "--unit-dir",
-        help="Override the systemd unit directory. Required only when not using the default.",
+        help="Override the systemd unit or launchd LaunchAgents directory.",
     )
     install_parser.add_argument(
         "--output",
@@ -52,16 +64,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _select_job(manifest: Manifest, job_name: str | None) -> Manifest:
+    if job_name is None:
+        return manifest
+    matches = tuple(job for job in manifest.jobs if job.name == job_name)
+    if len(matches) != 1:
+        raise ValueError(
+            f"manifest must contain exactly one job named {job_name!r}; found {len(matches)}"
+        )
+    return Manifest(path=manifest.path, jobs=matches)
+
+
 def _default_unit_dir(target: str) -> Path:
     if target == "systemd-user":
         return Path.home() / ".config" / "systemd" / "user"
     if target == "systemd-system":
         return Path("/etc/systemd/system")
-    raise ValueError(f"Unsupported systemd target: {target!r}")
+    if target == "launchd-user":
+        return Path.home() / "Library" / "LaunchAgents"
+    raise ValueError(f"Unsupported scheduler target: {target!r}")
 
 
 def handle_render(args: argparse.Namespace) -> int:
-    manifest = load_manifest(args.manifest)
+    manifest = _select_job(load_manifest(args.manifest), args.job)
     rendered = render_target(manifest, args.target)
     if args.target == "cron":
         print(next(iter(rendered.values())), end="")
@@ -78,7 +103,7 @@ def handle_render(args: argparse.Namespace) -> int:
 
 
 def handle_install(args: argparse.Namespace) -> int:
-    manifest = load_manifest(args.manifest)
+    manifest = _select_job(load_manifest(args.manifest), args.job)
     rendered = render_target(manifest, args.target)
 
     if args.target == "cron":
@@ -90,13 +115,40 @@ def handle_install(args: argparse.Namespace) -> int:
         print(f"Next step: crontab {output_path}")
         return 0
 
+    if not rendered:
+        print(
+            f"error: manifest contains no jobs supported by target {args.target}",
+            file=sys.stderr,
+        )
+        return 1
+
     unit_dir = Path(args.unit_dir) if args.unit_dir else _default_unit_dir(args.target)
+    if args.target == "launchd-user" and unit_dir == _default_unit_dir(args.target):
+        log_dir = Path.home() / "Library" / "Logs" / "Clockwork"
+        if log_dir.is_symlink():
+            print(f"error: refusing symlinked log directory: {log_dir}", file=sys.stderr)
+            return 1
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        except PermissionError:
+            print(f"error: cannot create launchd log directory: {log_dir}", file=sys.stderr)
+            return 1
     try:
-        written = write_rendered_files(unit_dir, rendered)
+        written = (
+            write_launchd_files(unit_dir, rendered)
+            if args.target == "launchd-user"
+            else write_rendered_files(unit_dir, rendered)
+        )
     except PermissionError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    print(f"Wrote {len(written)} unit file(s) -> {unit_dir}")
+    artifact_kind = "LaunchAgent" if args.target == "launchd-user" else "unit"
+    print(f"Wrote {len(written)} {artifact_kind} file(s) -> {unit_dir}")
+    if args.target == "launchd-user":
+        print("Next steps (review before running):")
+        for path in written:
+            print(f"  launchctl bootstrap gui/$(id -u) {path}")
+        return 0
     if args.target == "systemd-user":
         print("Next steps:")
         print("  systemctl --user daemon-reload")

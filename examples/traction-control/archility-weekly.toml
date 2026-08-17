@@ -1,0 +1,23 @@
+[[jobs]]
+name = "archility-weekly"
+launchd_label = "io.github.casonk.traction-control.archility-weekly"
+description = "Twice-weekly architecture audit and render through the traction-control profile"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h/git/util-repos/traction-control"
+exec_start = "%h/git/util-repos/traction-control/scripts/archility-weekly.sh"
+after = ["network.target"]
+standard_output = "journal"
+standard_error = "journal"
+
+[jobs.environment]
+PATH = "%h/.local/npm-global/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+PORTFOLIO_ROOT = "%h/git"
+ARCHILITY_CMD = "%h/.local/share/traction-control/bootstrap/bin/archility"
+LOG_DIR = "%h/.local/share/archility-weekly"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "Wed,Sun *-*-* 03:00:00"
+persistent = true
+randomized_delay_sec = "600"
