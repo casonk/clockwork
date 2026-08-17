@@ -1,0 +1,27 @@
+# Copy to ../../examples/clockwork/clockwork-web.local.toml (gitignored),
+# replace all /absolute/path placeholders, then render/install the local file.
+# Placing it beside the canonical example also lets the web UI discover the
+# native macOS job and protect its own launchd label from bulk toggles. This
+# tracked template is intentionally not directly installable on any host.
+[[jobs]]
+name = "clockwork-web-macos"
+description = "Clockwork configuration web UI on macOS — loopback Flask behind the mesh proxy"
+scope = "user"
+service_type = "simple"
+working_directory = "/absolute/path/to/clockwork"
+exec_start = "/bin/bash /absolute/path/to/clockwork/scripts/run_clockwork_web_macos.sh"
+environment_files = ["/absolute/path/to/home/.config/clockwork/clockwork-web.env"]
+restart = "on-failure"
+restart_sec = "5"
+standard_output = "journal"
+standard_error = "journal"
+service_install_wanted_by = ["default.target"]
+
+[jobs.environment]
+# Port 5000 is occupied by AirPlay Receiver on common macOS installations.
+# Caddy or another mesh-bound reverse proxy should terminate client auth and
+# proxy only to this loopback listener.
+CLOCKWORK_WEB_HOST = "127.0.0.1"
+CLOCKWORK_WEB_PORT = "5001"
+CLOCKWORK_LAUNCHD_LABEL = "io.github.casonk.clockwork.clockwork-web-macos"
+CLOCKWORK_WEB_AUTOGENERATE_CRON = "0"

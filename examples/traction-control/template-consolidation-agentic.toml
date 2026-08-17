@@ -1,5 +1,6 @@
 [[jobs]]
 name = "template-consolidation-agentic"
+launchd_label = "io.github.casonk.traction-control.template-consolidation-agentic"
 description = "Every-other-day agentic review of repo SECURITY.md and LESSONSLEARNED.md files for shared template promotion"
 scope = "user"
 service_type = "oneshot"
