@@ -304,9 +304,7 @@ def test_launchd_overrides_withdraw_systemd_only_fields():
     assert job.after == ("network.target",)
     assert job.timer is not None and job.timer.randomized_delay_sec == "600"
 
-    plist = plistlib.loads(
-        render_launchd_plist(job, home=Path("/Users/tester")).encode("utf-8")
-    )
+    plist = plistlib.loads(render_launchd_plist(job, home=Path("/Users/tester")).encode("utf-8"))
     assert plist["StartCalendarInterval"] == {"Hour": 4, "Minute": 0, "Second": 0, "Weekday": 0}
     # /usr/bin/bash does not exist on macOS; the override supplies /bin/bash.
     assert plist["ProgramArguments"][0] == "/bin/bash"

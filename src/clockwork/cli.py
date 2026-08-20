@@ -11,7 +11,6 @@ from .manifest import load_manifest
 from .model import Manifest
 from .render import render_target, write_launchd_files, write_rendered_files
 
-
 TARGETS = ["systemd-user", "systemd-system", "launchd-user", "cron"]
 
 

@@ -121,9 +121,7 @@ def _parse_launchd_overrides(value: Any) -> LaunchdOverrides | None:
     if timer_value is None:
         timer_value = {}
     elif not isinstance(timer_value, dict):
-        raise ValueError(
-            f"Expected launchd timer override table, got {type(timer_value).__name__}"
-        )
+        raise ValueError(f"Expected launchd timer override table, got {type(timer_value).__name__}")
     unknown_timer = sorted(set(timer_value) - _LAUNCHD_TIMER_OVERRIDE_KEYS)
     if unknown_timer:
         raise ValueError(
