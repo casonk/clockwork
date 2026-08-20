@@ -94,19 +94,44 @@ def test_windows_interval_timer_becomes_a_repetition():
     assert interval.text == "PT15M"
 
 
-def test_windows_absolute_paths_are_judged_by_windows_rules():
+@pytest.mark.parametrize(
+    "exec_start",
+    [
+        "C:\\tools\\run.exe",
+        "c:/tools/run.exe",
+        "%USERPROFILE%\\bin\\run.exe",
+        "\\\\server\\share\\run.exe",
+    ],
+)
+def test_windows_accepts_fully_qualified_paths_from_any_host(exec_start):
     """A POSIX host must not reject a valid Windows path.
 
-    os.path.isabs is the host's flavour, so it calls C:\\... relative when
-    rendering from macOS or Linux. The check has to use ntpath explicitly.
+    os.path is the rendering host's flavour, so it calls C:\\... relative on
+    macOS and Linux.
     """
-    render_windows_task(_job(exec_start="C:\\tools\\run.exe"))
-    render_windows_task(_job(exec_start="%USERPROFILE%\\bin\\run.exe"))
+    render_windows_task(_job(exec_start=exec_start))
 
+
+@pytest.mark.parametrize(
+    "exec_start",
+    [
+        "run.exe",  # relative
+        "/usr/bin/python3 run.py",  # POSIX path in a Windows job
+        "\\foo\\run.exe",  # rooted but not fully qualified
+        "C:run.exe",  # drive-relative
+    ],
+)
+def test_windows_rejects_paths_that_are_not_fully_qualified(exec_start):
+    """Regression: this rule must not move with the Python version.
+
+    ntpath.isabs() changed in 3.13. On 3.10-3.12 it calls "/usr/bin/python3"
+    absolute -- rooted, though not fully qualified -- so an earlier version of
+    this check accepted POSIX paths on exactly the interpreters CI runs while
+    rejecting them locally on 3.14. The rule is now explicit rather than
+    inherited from the standard library.
+    """
     with pytest.raises(ValueError, match="must be absolute"):
-        render_windows_task(_job(exec_start="run.exe"))
-    with pytest.raises(ValueError, match="must be absolute"):
-        render_windows_task(_job(exec_start="/usr/bin/python3 run.py"))
+        render_windows_task(_job(exec_start=exec_start))
 
 
 @pytest.mark.parametrize(

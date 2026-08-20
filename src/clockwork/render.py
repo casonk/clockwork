@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import ntpath
 import os
 import plistlib
 import re
@@ -469,15 +468,20 @@ def _expand_windows_path(value: str) -> str:
     return expanded
 
 
-def _windows_is_absolute(path: str) -> bool:
-    r"""Windows-absolute, judged with Windows rules on any host.
+# Fully-qualified Windows paths only: a drive (C:\\ or C:/), a UNC share
+# (\\\\server\\share), or a path rooted at an environment variable that Task
+# Scheduler expands before use.
+#
+# Deliberately not ntpath.isabs(): its answer changed in Python 3.13. On 3.10-3.12
+# ntpath.isabs("/usr/bin/python3") is True -- "rooted" but not fully qualified --
+# so a POSIX path pasted into a Windows job passed validation on exactly the
+# interpreters CI runs, while failing on newer ones. A scheduler that renders
+# host-independently cannot have a validity rule that moves with the interpreter.
+_WINDOWS_ABSOLUTE_RE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+|%[^%]+%)")
 
-    os.path is the *host's* flavour, so os.path.isabs(r"C:\tools\x.exe") is
-    False when rendering from macOS or Linux -- which would reject correct
-    Windows paths. Use ntpath explicitly. A path rooted at an environment
-    variable counts as absolute because Task Scheduler expands it before use.
-    """
-    return path.startswith("%") or ntpath.isabs(path)
+
+def _windows_is_absolute(path: str) -> bool:
+    return bool(_WINDOWS_ABSOLUTE_RE.match(path))
 
 
 def _iso8601_duration(seconds: int) -> str:
