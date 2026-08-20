@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from clockwork.cli import main
+from clockwork.cli import default_target, main
+from clockwork.manifest import load_manifest
 from clockwork.model import JobSpec, Manifest, TimerSpec
 from clockwork.render import (
     launchd_label,
@@ -284,3 +285,67 @@ def test_launchd_atomic_write_replaces_symlink_without_touching_its_target(tmp_p
     assert not target.is_symlink()
     assert target.read_text(encoding="utf-8") == "safe plist\n"
     assert victim.read_text(encoding="utf-8") == "leave me alone"
+
+
+def _portable_manifest_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "examples" / "portable" / "weekly-drift.toml"
+
+
+def test_launchd_overrides_withdraw_systemd_only_fields():
+    """A job with `after` and jitter is renderable for launchd via overrides.
+
+    Both of these previously made a manifest unrenderable for launchd-user, so
+    a job wanting either could not be installed on macOS at all.
+    """
+    manifest = load_manifest(_portable_manifest_path())
+    job = manifest.jobs[0]
+
+    # The job still declares them: the overrides withdraw, they do not delete.
+    assert job.after == ("network.target",)
+    assert job.timer is not None and job.timer.randomized_delay_sec == "600"
+
+    plist = plistlib.loads(
+        render_launchd_plist(job, home=Path("/Users/tester")).encode("utf-8")
+    )
+    assert plist["StartCalendarInterval"] == {"Hour": 4, "Minute": 0, "Second": 0, "Weekday": 0}
+    # /usr/bin/bash does not exist on macOS; the override supplies /bin/bash.
+    assert plist["ProgramArguments"][0] == "/bin/bash"
+
+
+def test_launchd_overrides_do_not_leak_into_systemd_or_cron():
+    manifest = load_manifest(_portable_manifest_path())
+
+    units = render_target(manifest, "systemd-user")
+    service = units["portable-drift.service"]
+    timer = units["portable-drift.timer"]
+
+    assert "After=network.target" in service
+    # Match the whole line: "/bin/bash ..." is a substring of "/usr/bin/bash ...",
+    # so a naive containment check passes even when the override has leaked.
+    assert "ExecStart=/usr/bin/bash scripts/report_drift.sh" in service.splitlines()
+    assert "ExecStart=/bin/bash scripts/report_drift.sh" not in service.splitlines()
+    assert "RandomizedDelaySec=600" in timer
+
+
+def test_launchd_override_rejects_unknown_keys(tmp_path):
+    manifest = tmp_path / "bad.toml"
+    manifest.write_text(
+        """
+[[jobs]]
+name = "x"
+description = "x"
+scope = "user"
+exec_start = "/bin/echo hi"
+
+[jobs.launchd]
+exec_startt = "/bin/echo typo"
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="unsupported launchd override keys: exec_startt"):
+        load_manifest(manifest)
+
+
+def test_default_target_follows_the_platform():
+    assert default_target("darwin") == "launchd-user"
+    assert default_target("linux") == "systemd-user"

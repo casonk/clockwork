@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 VALID_SCOPES = {"user", "system"}
 VALID_SERVICE_TYPES = {"oneshot", "simple"}
@@ -49,6 +49,45 @@ class CronSpec:
 
 
 @dataclass(frozen=True)
+class LaunchdOverrides:
+    """Field replacements applied only when a job is rendered for launchd.
+
+    systemd and launchd are different schedulers, not two spellings of one.
+    Ordering dependencies, timer jitter, and timer accuracy have no launchd
+    equivalent, and clockwork refuses to render a job that declares them rather
+    than dropping them silently and quietly changing what the schedule means.
+    That refusal is right, but it left a portable manifest with no way to say
+    "this setting is for systemd" -- so a manifest carrying ``after`` could not
+    be installed on macOS at all, however Linux-specific that one line was.
+
+    A ``[jobs.launchd]`` table says it explicitly. Keys present there replace
+    the job's values when, and only when, the launchd target is rendered; the
+    systemd and cron renderings never see them. Empty values clear a field:
+    ``after = []`` drops the ordering dependency and
+    ``randomized_delay_sec = ""`` drops the jitter, leaving the systemd
+    rendering untouched.
+
+    ``exec_start`` is overridable for the same reason in reverse: interpreter
+    and shell paths differ between the platforms, and ``/usr/bin/bash`` does
+    not exist on macOS at all.
+    """
+
+    exec_start: str | None = None
+    working_directory: str | None = None
+    after: tuple[str, ...] | None = None
+    wants: tuple[str, ...] | None = None
+    environment: dict[str, str] | None = None
+    randomized_delay_sec: str | None = None
+    accuracy_sec: str | None = None
+
+    def validate(self, *, job_name: str) -> None:
+        if self.exec_start is not None and not self.exec_start.strip():
+            raise ValueError(f"job {job_name!r} has an empty launchd exec_start override")
+        if self.working_directory is not None and not self.working_directory.strip():
+            raise ValueError(f"job {job_name!r} has an empty launchd working_directory override")
+
+
+@dataclass(frozen=True)
 class JobSpec:
     """A scheduled job with optional timer and cron render targets."""
 
@@ -76,8 +115,45 @@ class JobSpec:
     poll_interval: str | None = None
     launchd_label: str | None = None
     launchd_run_at_load: bool | None = None
+    launchd_overrides: LaunchdOverrides | None = None
     timer: TimerSpec | None = None
     cron: CronSpec | None = None
+
+    def for_launchd(self) -> JobSpec:
+        """Return this job as launchd should see it.
+
+        Applied before validation, so a field that launchd cannot express is
+        gone by the time the launchd validator looks for it. Returns the job
+        unchanged when no overrides are declared, so every existing manifest
+        renders exactly as it did before.
+        """
+        overrides = self.launchd_overrides
+        if overrides is None:
+            return self
+
+        timer = self.timer
+        if timer is not None:
+            timer_changes: dict[str, str | None] = {}
+            # An empty string clears the field; absent leaves it inherited.
+            if overrides.randomized_delay_sec is not None:
+                timer_changes["randomized_delay_sec"] = overrides.randomized_delay_sec or None
+            if overrides.accuracy_sec is not None:
+                timer_changes["accuracy_sec"] = overrides.accuracy_sec or None
+            if timer_changes:
+                timer = replace(timer, **timer_changes)
+
+        changes: dict[str, object] = {"timer": timer, "launchd_overrides": None}
+        if overrides.exec_start is not None:
+            changes["exec_start"] = overrides.exec_start
+        if overrides.working_directory is not None:
+            changes["working_directory"] = overrides.working_directory
+        if overrides.after is not None:
+            changes["after"] = overrides.after
+        if overrides.wants is not None:
+            changes["wants"] = overrides.wants
+        if overrides.environment is not None:
+            changes["environment"] = dict(overrides.environment)
+        return replace(self, **changes)
 
     def service_unit_name(self) -> str:
         return self.service_name or f"{self.name}.service"
@@ -102,6 +178,8 @@ class JobSpec:
             self.timer.validate()
         if self.cron is not None:
             self.cron.validate()
+        if self.launchd_overrides is not None:
+            self.launchd_overrides.validate(job_name=self.name)
 
 
 @dataclass(frozen=True)

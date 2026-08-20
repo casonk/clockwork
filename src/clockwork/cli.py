@@ -12,6 +12,22 @@ from .model import Manifest
 from .render import render_target, write_launchd_files, write_rendered_files
 
 
+TARGETS = ["systemd-user", "systemd-system", "launchd-user", "cron"]
+
+
+def default_target(platform: str | None = None) -> str:
+    """Pick the scheduler this machine actually runs.
+
+    Requiring --target meant every caller hard-coded one, and a command copied
+    from a Linux README installed nothing on macOS -- or worse, was reworded to
+    launchd-user against a manifest that could not render for it. Detecting the
+    platform makes the common case correct by default; --target still overrides
+    it, and cron stays opt-in because no platform runs it by default.
+    """
+    name = sys.platform if platform is None else platform
+    return "launchd-user" if name == "darwin" else "systemd-user"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="clockwork",
@@ -28,9 +44,9 @@ def build_parser() -> argparse.ArgumentParser:
     render_parser.add_argument("--manifest", required=True, help="Path to the manifest TOML file.")
     render_parser.add_argument(
         "--target",
-        required=True,
-        choices=["systemd-user", "systemd-system", "launchd-user", "cron"],
-        help="Scheduler target to render.",
+        default=default_target(),
+        choices=TARGETS,
+        help="Scheduler target to render (default: detected from this platform).",
     )
     render_parser.add_argument(
         "--job",
@@ -44,9 +60,9 @@ def build_parser() -> argparse.ArgumentParser:
     install_parser.add_argument("--manifest", required=True, help="Path to the manifest TOML file.")
     install_parser.add_argument(
         "--target",
-        required=True,
-        choices=["systemd-user", "systemd-system", "launchd-user", "cron"],
-        help="Scheduler target to install.",
+        default=default_target(),
+        choices=TARGETS,
+        help="Scheduler target to install (default: detected from this platform).",
     )
     install_parser.add_argument(
         "--job",
