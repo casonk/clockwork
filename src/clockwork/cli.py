@@ -9,9 +9,14 @@ from pathlib import Path
 
 from .manifest import load_manifest
 from .model import Manifest
-from .render import render_target, write_launchd_files, write_rendered_files
+from .render import (
+    render_target,
+    write_launchd_files,
+    write_rendered_files,
+    write_windows_files,
+)
 
-TARGETS = ["systemd-user", "systemd-system", "launchd-user", "cron"]
+TARGETS = ["systemd-user", "systemd-system", "launchd-user", "windows-user", "cron"]
 
 
 def default_target(platform: str | None = None) -> str | None:
@@ -23,17 +28,18 @@ def default_target(platform: str | None = None) -> str | None:
     platform makes the common case correct by default; --target still overrides
     it, and cron stays opt-in because no platform runs it by default.
 
-    Anything that is not macOS or Linux returns None rather than falling back to
-    systemd. clockwork has no Windows target, and guessing systemd there would
-    write units into ~/.config/systemd/user on a machine with no systemd to read
-    them: files that look installed, never run, and report no error. An
-    unsupported platform has to say so.
+    A platform with no native scheduler returns None rather than falling back to
+    systemd. Guessing systemd on such a host would write units into
+    ~/.config/systemd/user with no systemd to read them: files that look
+    installed, never run, and report no error.
     """
     name = sys.platform if platform is None else platform
     if name == "darwin":
         return "launchd-user"
     if name.startswith("linux"):
         return "systemd-user"
+    if name in {"win32", "cygwin", "msys"}:
+        return "windows-user"
     return None
 
 
@@ -45,9 +51,8 @@ def resolve_target(explicit: str | None) -> str:
     if detected is None:
         raise ValueError(
             f"no scheduler target is known for platform {sys.platform!r}; "
-            "pass --target explicitly. clockwork renders systemd, launchd and "
-            "cron; on Windows, render 'cron' or 'systemd-user' for the Linux "
-            "container or VM that will actually run the job."
+            "pass --target explicitly. clockwork renders systemd, launchd, "
+            "Windows Task Scheduler and cron."
         )
     return detected
 
@@ -122,6 +127,11 @@ def _default_unit_dir(target: str) -> Path:
         return Path("/etc/systemd/system")
     if target == "launchd-user":
         return Path.home() / "Library" / "LaunchAgents"
+    if target == "windows-user":
+        # Task Scheduler has no drop-in directory: a task exists once schtasks
+        # has registered it. This is a staging directory for the XML, and the
+        # install output prints the registration command for each file.
+        return Path.home() / "AppData" / "Local" / "Clockwork" / "tasks"
     raise ValueError(f"Unsupported scheduler target: {target!r}")
 
 
@@ -176,20 +186,30 @@ def handle_install(args: argparse.Namespace) -> int:
             print(f"error: cannot create launchd log directory: {log_dir}", file=sys.stderr)
             return 1
     try:
-        written = (
-            write_launchd_files(unit_dir, rendered)
-            if args.target == "launchd-user"
-            else write_rendered_files(unit_dir, rendered)
-        )
+        if args.target == "launchd-user":
+            written = write_launchd_files(unit_dir, rendered)
+        elif args.target == "windows-user":
+            written = write_windows_files(unit_dir, rendered)
+        else:
+            written = write_rendered_files(unit_dir, rendered)
     except PermissionError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    artifact_kind = "LaunchAgent" if args.target == "launchd-user" else "unit"
+    artifact_kind = {
+        "launchd-user": "LaunchAgent",
+        "windows-user": "task XML",
+    }.get(args.target, "unit")
     print(f"Wrote {len(written)} {artifact_kind} file(s) -> {unit_dir}")
     if args.target == "launchd-user":
         print("Next steps (review before running):")
         for path in written:
             print(f"  launchctl bootstrap gui/$(id -u) {path}")
+        return 0
+    if args.target == "windows-user":
+        print("Next steps (review before running):")
+        for path in written:
+            job_name = path.stem
+            print(f'  schtasks /Create /TN "\\Clockwork\\{job_name}" /XML "{path}"')
         return 0
     if args.target == "systemd-user":
         print("Next steps:")

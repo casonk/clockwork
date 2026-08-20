@@ -49,8 +49,8 @@ class CronSpec:
 
 
 @dataclass(frozen=True)
-class LaunchdOverrides:
-    """Field replacements applied only when a job is rendered for launchd.
+class TargetOverrides:
+    """Field replacements applied only when a job is rendered for one target.
 
     systemd and launchd are different schedulers, not two spellings of one.
     Ordering dependencies, timer jitter, and timer accuracy have no launchd
@@ -69,7 +69,9 @@ class LaunchdOverrides:
 
     ``exec_start`` is overridable for the same reason in reverse: interpreter
     and shell paths differ between the platforms, and ``/usr/bin/bash`` does
-    not exist on macOS at all.
+    not exist on macOS at all. Windows differs the most -- its paths are not
+    even POSIX -- so ``[jobs.windows]`` works identically and is usually
+    required rather than optional.
     """
 
     exec_start: str | None = None
@@ -80,11 +82,11 @@ class LaunchdOverrides:
     randomized_delay_sec: str | None = None
     accuracy_sec: str | None = None
 
-    def validate(self, *, job_name: str) -> None:
+    def validate(self, *, job_name: str, target: str = "launchd") -> None:
         if self.exec_start is not None and not self.exec_start.strip():
-            raise ValueError(f"job {job_name!r} has an empty launchd exec_start override")
+            raise ValueError(f"job {job_name!r} has an empty {target} exec_start override")
         if self.working_directory is not None and not self.working_directory.strip():
-            raise ValueError(f"job {job_name!r} has an empty launchd working_directory override")
+            raise ValueError(f"job {job_name!r} has an empty {target} working_directory override")
 
 
 @dataclass(frozen=True)
@@ -115,19 +117,23 @@ class JobSpec:
     poll_interval: str | None = None
     launchd_label: str | None = None
     launchd_run_at_load: bool | None = None
-    launchd_overrides: LaunchdOverrides | None = None
+    launchd_overrides: TargetOverrides | None = None
+    windows_overrides: TargetOverrides | None = None
     timer: TimerSpec | None = None
     cron: CronSpec | None = None
 
-    def for_launchd(self) -> JobSpec:
-        """Return this job as launchd should see it.
+    def for_target(self, target: str) -> JobSpec:
+        """Return this job as one target should see it.
 
-        Applied before validation, so a field that launchd cannot express is
-        gone by the time the launchd validator looks for it. Returns the job
-        unchanged when no overrides are declared, so every existing manifest
-        renders exactly as it did before.
+        Applied before validation, so a field that the target cannot express is
+        gone by the time its validator looks for it. Returns the job unchanged
+        when no overrides are declared for that target, so every existing
+        manifest renders exactly as it did before.
         """
-        overrides = self.launchd_overrides
+        overrides = {
+            "launchd": self.launchd_overrides,
+            "windows": self.windows_overrides,
+        }.get(target)
         if overrides is None:
             return self
 
@@ -142,7 +148,11 @@ class JobSpec:
             if timer_changes:
                 timer = replace(timer, **timer_changes)
 
-        changes: dict[str, object] = {"timer": timer, "launchd_overrides": None}
+        changes: dict[str, object] = {
+            "timer": timer,
+            "launchd_overrides": None,
+            "windows_overrides": None,
+        }
         if overrides.exec_start is not None:
             changes["exec_start"] = overrides.exec_start
         if overrides.working_directory is not None:
@@ -154,6 +164,12 @@ class JobSpec:
         if overrides.environment is not None:
             changes["environment"] = dict(overrides.environment)
         return replace(self, **changes)
+
+    def for_launchd(self) -> JobSpec:
+        return self.for_target("launchd")
+
+    def for_windows(self) -> JobSpec:
+        return self.for_target("windows")
 
     def service_unit_name(self) -> str:
         return self.service_name or f"{self.name}.service"
@@ -179,7 +195,9 @@ class JobSpec:
         if self.cron is not None:
             self.cron.validate()
         if self.launchd_overrides is not None:
-            self.launchd_overrides.validate(job_name=self.name)
+            self.launchd_overrides.validate(job_name=self.name, target="launchd")
+        if self.windows_overrides is not None:
+            self.windows_overrides.validate(job_name=self.name, target="windows")
 
 
 @dataclass(frozen=True)
