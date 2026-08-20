@@ -373,6 +373,10 @@ def _launchd_program_arguments(job: JobSpec, *, home: Path) -> list[str]:
 def render_launchd_plist(job: JobSpec, *, home: Path | None = None) -> str:
     """Render one user-scope job as a deterministic XML LaunchAgent plist."""
 
+    # Apply the job's launchd overrides before validating, so a systemd-only
+    # field the manifest has already withdrawn for this target is gone before
+    # the validator objects to it.
+    job = job.for_launchd()
     _validate_launchd_job(job)
     resolved_home = Path.home() if home is None else Path(home)
     label = launchd_label(job)

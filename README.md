@@ -213,7 +213,44 @@ Supported manifest sections:
 - `[jobs.timer]`: optional scheduler metadata; launchd accepts only the strict
   portable subset described above. Ordering dependencies, delayed login, and
   accuracy/randomized delay are never silently dropped.
+- `[jobs.launchd]`: optional per-target overrides, applied only when rendering
+  for `launchd-user` and invisible to the systemd and cron renderings
 - `[jobs.cron]`: optional cron rendering metadata
+
+### Writing one manifest for Linux and macOS
+
+Ordering dependencies and timer jitter have no launchd equivalent, and
+clockwork refuses to render a job declaring them rather than dropping them and
+quietly changing what the schedule means. That refusal is right, but on its own
+it makes any manifest using `after` un-installable on macOS — however
+Linux-specific that one line is.
+
+`[jobs.launchd]` withdraws a setting for that target instead of deleting it for
+everyone. Keys there replace the job's values; an empty value clears a field.
+
+```toml
+after = ["network.target"]
+exec_start = "/usr/bin/bash scripts/report.sh"   # no such path on macOS
+
+[jobs.timer]
+randomized_delay_sec = "600"
+
+[jobs.launchd]
+after = []                                       # launchd has no ordering deps
+exec_start = "/bin/bash scripts/report.sh"       # the macOS system shell
+
+[jobs.launchd.timer]
+randomized_delay_sec = ""                        # launchd cannot express jitter
+```
+
+Unknown keys in these tables are rejected rather than ignored, because a typo
+would otherwise fail open — silently doing nothing and leaving the job
+un-installable on macOS again. See `examples/portable/weekly-drift.toml`.
+
+`--target` now defaults to the scheduler this platform actually runs
+(`launchd-user` on macOS, `systemd-user` elsewhere), so one documented command
+works on both. Pass `--target` explicitly to override it; `cron` is always
+opt-in.
 
 See `examples/` for mappings from current portfolio repos.
 

@@ -1,0 +1,51 @@
+# A single manifest that installs on both Linux and macOS.
+#
+# The job wants two things systemd provides and launchd does not: an ordering
+# dependency on the network, and jitter so a fleet of machines does not all
+# report at the same second. clockwork refuses to render either for
+# launchd-user, because launchd has no honest equivalent and silently dropping
+# them would change what the schedule means.
+#
+# Without a way to say "these are for systemd", the only options were to keep
+# the manifest Linux-only or to delete the settings for everyone. The
+# [jobs.launchd] table is the third option: keys there replace the job's values
+# when the launchd target is rendered, and are invisible to systemd and cron.
+#
+#   python3 -m clockwork install --manifest examples/portable/weekly-drift.toml
+#
+# picks the target from the platform, so that one line is correct on both.
+
+[[jobs]]
+name = "portable-drift"
+description = "Weekly drift report that installs on Linux and macOS alike"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h/dev/util-repos/example"
+exec_start = "/usr/bin/bash scripts/report_drift.sh"
+after = ["network.target"]
+standard_output = "journal"
+standard_error = "journal"
+timer_description = "Report configuration drift once a week"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "Sun *-*-* 04:00:00"
+persistent = true
+randomized_delay_sec = "600"
+
+# Applied only when rendering for launchd-user.
+[jobs.launchd]
+# launchd has no ordering dependencies. An empty list withdraws the systemd one
+# rather than deleting it from the systemd rendering.
+after = []
+# /usr/bin/bash does not exist on macOS; the system shell is /bin/bash.
+exec_start = "/bin/bash scripts/report_drift.sh"
+
+[jobs.launchd.timer]
+# launchd cannot express jitter. An empty string clears it for this target only.
+randomized_delay_sec = ""
+
+[jobs.cron]
+expression = "0 4 * * 0"
+command = "cd $HOME/dev/util-repos/example && bash scripts/report_drift.sh"
+comments = ["Auto-generated from systemd timer: Sun *-*-* 04:00:00"]
