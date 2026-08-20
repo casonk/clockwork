@@ -7,4 +7,8 @@ jobs:
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     uses: casonk/.github/.github/workflows/python-ci.yml@main
     with:
-      python-versions: '["3.10", "3.11", "3.12"]'
+      # 3.13 and 3.14 are not decoration: ntpath.isabs() changed its answer for
+      # rooted-but-unqualified paths in 3.13, and a Windows path-validation bug
+      # slipped through a 3.10-3.12 matrix because every tested interpreter
+      # agreed with each other and disagreed with the developer's.
+      python-versions: '["3.10", "3.11", "3.12", "3.13", "3.14"]'
