@@ -14,17 +14,42 @@ from .render import render_target, write_launchd_files, write_rendered_files
 TARGETS = ["systemd-user", "systemd-system", "launchd-user", "cron"]
 
 
-def default_target(platform: str | None = None) -> str:
-    """Pick the scheduler this machine actually runs.
+def default_target(platform: str | None = None) -> str | None:
+    """Pick the scheduler this machine actually runs, or None if there is none.
 
     Requiring --target meant every caller hard-coded one, and a command copied
     from a Linux README installed nothing on macOS -- or worse, was reworded to
     launchd-user against a manifest that could not render for it. Detecting the
     platform makes the common case correct by default; --target still overrides
     it, and cron stays opt-in because no platform runs it by default.
+
+    Anything that is not macOS or Linux returns None rather than falling back to
+    systemd. clockwork has no Windows target, and guessing systemd there would
+    write units into ~/.config/systemd/user on a machine with no systemd to read
+    them: files that look installed, never run, and report no error. An
+    unsupported platform has to say so.
     """
     name = sys.platform if platform is None else platform
-    return "launchd-user" if name == "darwin" else "systemd-user"
+    if name == "darwin":
+        return "launchd-user"
+    if name.startswith("linux"):
+        return "systemd-user"
+    return None
+
+
+def resolve_target(explicit: str | None) -> str:
+    """Return the target to use, or explain why the platform cannot supply one."""
+    if explicit is not None:
+        return explicit
+    detected = default_target()
+    if detected is None:
+        raise ValueError(
+            f"no scheduler target is known for platform {sys.platform!r}; "
+            "pass --target explicitly. clockwork renders systemd, launchd and "
+            "cron; on Windows, render 'cron' or 'systemd-user' for the Linux "
+            "container or VM that will actually run the job."
+        )
+    return detected
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -43,7 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
     render_parser.add_argument("--manifest", required=True, help="Path to the manifest TOML file.")
     render_parser.add_argument(
         "--target",
-        default=default_target(),
+        default=None,
         choices=TARGETS,
         help="Scheduler target to render (default: detected from this platform).",
     )
@@ -59,7 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
     install_parser.add_argument("--manifest", required=True, help="Path to the manifest TOML file.")
     install_parser.add_argument(
         "--target",
-        default=default_target(),
+        default=None,
         choices=TARGETS,
         help="Scheduler target to install (default: detected from this platform).",
     )
@@ -101,6 +126,7 @@ def _default_unit_dir(target: str) -> Path:
 
 
 def handle_render(args: argparse.Namespace) -> int:
+    args.target = resolve_target(args.target)
     manifest = _select_job(load_manifest(args.manifest), args.job)
     rendered = render_target(manifest, args.target)
     if args.target == "cron":
@@ -118,6 +144,7 @@ def handle_render(args: argparse.Namespace) -> int:
 
 
 def handle_install(args: argparse.Namespace) -> int:
+    args.target = resolve_target(args.target)
     manifest = _select_job(load_manifest(args.manifest), args.job)
     rendered = render_target(manifest, args.target)
 

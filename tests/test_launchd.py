@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from clockwork.cli import default_target, main
+from clockwork.cli import default_target, main, resolve_target
 from clockwork.manifest import load_manifest
 from clockwork.model import JobSpec, Manifest, TimerSpec
 from clockwork.render import (
@@ -347,3 +347,23 @@ exec_startt = "/bin/echo typo"
 def test_default_target_follows_the_platform():
     assert default_target("darwin") == "launchd-user"
     assert default_target("linux") == "systemd-user"
+
+
+def test_default_target_refuses_to_guess_on_unsupported_platforms():
+    """Windows must not fall back to systemd.
+
+    Guessing systemd-user there would write units into ~/.config/systemd/user
+    on a machine with no systemd to read them -- files that look installed,
+    never run, and report no error.
+    """
+    assert default_target("win32") is None
+    assert default_target("cygwin") is None
+
+
+def test_resolve_target_explains_an_unsupported_platform(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    with pytest.raises(ValueError, match="no scheduler target is known"):
+        resolve_target(None)
+    # An explicit target still works, so a Windows host can render cron or
+    # systemd units for the container that will actually run them.
+    assert resolve_target("cron") == "cron"

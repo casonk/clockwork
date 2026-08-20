@@ -248,9 +248,27 @@ would otherwise fail open — silently doing nothing and leaving the job
 un-installable on macOS again. See `examples/portable/weekly-drift.toml`.
 
 `--target` now defaults to the scheduler this platform actually runs
-(`launchd-user` on macOS, `systemd-user` elsewhere), so one documented command
+(`launchd-user` on macOS, `systemd-user` on Linux), so one documented command
 works on both. Pass `--target` explicitly to override it; `cron` is always
 opt-in.
+
+### Platform support
+
+| platform | native target |
+| --- | --- |
+| Linux | `systemd-user`, `systemd-system`, `cron` |
+| macOS | `launchd-user`, `cron` |
+| Windows | **none** |
+
+There is no Windows target: clockwork does not render Task Scheduler XML, and
+nothing in the portfolio runs on Windows. Rather than guess, an unsupported
+platform refuses to pick a default and says so -- falling back to systemd there
+would write units into `~/.config/systemd/user` on a machine with no systemd to
+read them, which look installed, never run, and report no error.
+
+`--target` still works explicitly on any platform, which is the supported path
+for containers: render `cron` or `systemd-user` for the Linux image that will
+actually run the job, rather than scheduling from the host.
 
 See `examples/` for mappings from current portfolio repos.
 
