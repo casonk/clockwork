@@ -213,11 +213,11 @@ Supported manifest sections:
 - `[jobs.timer]`: optional scheduler metadata; launchd accepts only the strict
   portable subset described above. Ordering dependencies, delayed login, and
   accuracy/randomized delay are never silently dropped.
-- `[jobs.launchd]`: optional per-target overrides, applied only when rendering
-  for `launchd-user` and invisible to the systemd and cron renderings
+- `[jobs.launchd]` / `[jobs.windows]`: optional per-target overrides, applied
+  only when rendering that target and invisible to every other rendering
 - `[jobs.cron]`: optional cron rendering metadata
 
-### Writing one manifest for Linux and macOS
+### Writing one manifest for Linux, macOS and Windows
 
 Ordering dependencies and timer jitter have no launchd equivalent, and
 clockwork refuses to render a job declaring them rather than dropping them and
@@ -241,7 +241,15 @@ exec_start = "/bin/bash scripts/report.sh"       # the macOS system shell
 
 [jobs.launchd.timer]
 randomized_delay_sec = ""                        # launchd cannot express jitter
+
+[jobs.windows]
+after = []                                       # nor does Task Scheduler
+exec_start = "C:\\Windows\\System32\\cmd.exe /c %h\\bin\\report.cmd"
 ```
+
+Note there is no `[jobs.windows.timer]` above: Task Scheduler *can* express
+jitter, as `RandomDelay`, so `randomized_delay_sec` carries over untouched. Only
+withdraw a setting from the targets that genuinely cannot express it.
 
 Unknown keys in these tables are rejected rather than ignored, because a typo
 would otherwise fail open — silently doing nothing and leaving the job
@@ -258,17 +266,44 @@ opt-in.
 | --- | --- |
 | Linux | `systemd-user`, `systemd-system`, `cron` |
 | macOS | `launchd-user`, `cron` |
-| Windows | **none** |
+| Windows | `windows-user` (Task Scheduler XML) |
 
-There is no Windows target: clockwork does not render Task Scheduler XML, and
-nothing in the portfolio runs on Windows. Rather than guess, an unsupported
-platform refuses to pick a default and says so -- falling back to systemd there
-would write units into `~/.config/systemd/user` on a machine with no systemd to
-read them, which look installed, never run, and report no error.
+All three are rendered natively. Windows is not an emulation layer: clockwork is
+a renderer, so supporting Windows means emitting Task Scheduler XML the same way
+it emits plists and units. Requiring a container runtime merely to schedule a
+job would be a far heavier dependency than the scheduler itself.
 
-`--target` still works explicitly on any platform, which is the supported path
-for containers: render `cron` or `systemd-user` for the Linux image that will
-actually run the job, rather than scheduling from the host.
+A platform with no native scheduler refuses to pick a default and says so,
+rather than falling back to systemd and writing units into
+`~/.config/systemd/user` on a machine with no systemd to read them -- files that
+look installed, never run, and report no error. `--target` still works
+explicitly everywhere, which is also how you render `cron` or `systemd-user` for
+a container rather than for the host.
+
+### Windows notes
+
+`clockwork install --target windows-user` writes one UTF-16 `.xml` per job and
+prints its registration command. Task Scheduler has no drop-in directory, so a
+task exists only once `schtasks` has registered it:
+
+```
+schtasks /Create /TN "\Clockwork\portable-drift" /XML "%LOCALAPPDATA%\Clockwork\tasks\portable-drift.xml"
+```
+
+The files are UTF-16 because `schtasks /Create /XML` rejects UTF-8 task files as
+malformed XML.
+
+What Windows can and cannot express, relative to the other targets:
+
+- **jitter works.** Task Scheduler has `RandomDelay`, so `randomized_delay_sec`
+  carries over unchanged -- unlike launchd, which cannot express it at all
+- **ordering dependencies do not exist**; withdraw `after`/`wants` with
+  `[jobs.windows]`
+- **environment variables are not supported** by an `Exec` action; set them
+  inside the script the task runs
+- **paths must be Windows paths.** `%h` becomes `%USERPROFILE%`, which Task
+  Scheduler expands at run time, so rendering never needs to know the target
+  user's home and produces identical output on any host
 
 See `examples/` for mappings from current portfolio repos.
 

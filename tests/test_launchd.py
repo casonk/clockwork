@@ -350,18 +350,19 @@ def test_default_target_follows_the_platform():
 
 
 def test_default_target_refuses_to_guess_on_unsupported_platforms():
-    """Windows must not fall back to systemd.
+    """A platform with no native scheduler must not fall back to systemd.
 
     Guessing systemd-user there would write units into ~/.config/systemd/user
     on a machine with no systemd to read them -- files that look installed,
-    never run, and report no error.
+    never run, and report no error. Windows has a native target of its own now;
+    these do not.
     """
-    assert default_target("win32") is None
-    assert default_target("cygwin") is None
+    assert default_target("freebsd12") is None
+    assert default_target("sunos5") is None
 
 
 def test_resolve_target_explains_an_unsupported_platform(monkeypatch):
-    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "freebsd12")
     with pytest.raises(ValueError, match="no scheduler target is known"):
         resolve_target(None)
     # An explicit target still works, so a Windows host can render cron or
