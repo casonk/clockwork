@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .model import CronSpec, JobSpec, LaunchdOverrides, Manifest, TimerSpec
+from .model import CronSpec, JobSpec, Manifest, TargetOverrides, TimerSpec
 
 try:
     import tomllib
@@ -102,18 +102,18 @@ _LAUNCHD_OVERRIDE_KEYS = frozenset(
 _LAUNCHD_TIMER_OVERRIDE_KEYS = frozenset({"randomized_delay_sec", "accuracy_sec"})
 
 
-def _parse_launchd_overrides(value: Any) -> LaunchdOverrides | None:
+def _parse_target_overrides(value: Any, *, target: str) -> TargetOverrides | None:
     if value is None:
         return None
     if not isinstance(value, dict):
-        raise ValueError(f"Expected launchd override table, got {type(value).__name__}")
+        raise ValueError(f"Expected {target} override table, got {type(value).__name__}")
     # Reject unknown keys rather than ignoring them. A typo here fails open in
     # the worst way: the override silently does nothing and the job goes back
     # to being unrenderable on macOS, which is the bug this table exists to fix.
     unknown = sorted(set(value) - _LAUNCHD_OVERRIDE_KEYS)
     if unknown:
         raise ValueError(
-            "unsupported launchd override keys: "
+            f"unsupported {target} override keys: "
             + ", ".join(unknown)
             + f" (supported: {', '.join(sorted(_LAUNCHD_OVERRIDE_KEYS))})"
         )
@@ -121,28 +121,30 @@ def _parse_launchd_overrides(value: Any) -> LaunchdOverrides | None:
     if timer_value is None:
         timer_value = {}
     elif not isinstance(timer_value, dict):
-        raise ValueError(f"Expected launchd timer override table, got {type(timer_value).__name__}")
+        raise ValueError(
+            f"Expected {target} timer override table, got {type(timer_value).__name__}"
+        )
     unknown_timer = sorted(set(timer_value) - _LAUNCHD_TIMER_OVERRIDE_KEYS)
     if unknown_timer:
         raise ValueError(
-            "unsupported launchd timer override keys: "
+            f"unsupported {target} timer override keys: "
             + ", ".join(unknown_timer)
             + f" (supported: {', '.join(sorted(_LAUNCHD_TIMER_OVERRIDE_KEYS))})"
         )
 
-    return LaunchdOverrides(
-        exec_start=_as_optional_str(value.get("exec_start"), field="launchd.exec_start"),
+    return TargetOverrides(
+        exec_start=_as_optional_str(value.get("exec_start"), field=f"{target}.exec_start"),
         working_directory=_as_optional_str(
-            value.get("working_directory"), field="launchd.working_directory"
+            value.get("working_directory"), field=f"{target}.working_directory"
         ),
         after=_as_str_tuple(value["after"]) if "after" in value else None,
         wants=_as_str_tuple(value["wants"]) if "wants" in value else None,
         environment=_as_str_dict(value["environment"]) if "environment" in value else None,
         randomized_delay_sec=_as_optional_str(
-            timer_value.get("randomized_delay_sec"), field="launchd.timer.randomized_delay_sec"
+            timer_value.get("randomized_delay_sec"), field=f"{target}.timer.randomized_delay_sec"
         ),
         accuracy_sec=_as_optional_str(
-            timer_value.get("accuracy_sec"), field="launchd.timer.accuracy_sec"
+            timer_value.get("accuracy_sec"), field=f"{target}.timer.accuracy_sec"
         ),
     )
 
@@ -177,7 +179,8 @@ def _parse_job(value: Any) -> JobSpec:
         launchd_run_at_load=_as_optional_bool(
             value.get("launchd_run_at_load"), field="launchd_run_at_load"
         ),
-        launchd_overrides=_parse_launchd_overrides(value.get("launchd")),
+        launchd_overrides=_parse_target_overrides(value.get("launchd"), target="launchd"),
+        windows_overrides=_parse_target_overrides(value.get("windows"), target="windows"),
         timer=_parse_timer(value.get("timer")),
         cron=_parse_cron(value.get("cron")),
     )

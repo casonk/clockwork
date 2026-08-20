@@ -1,4 +1,4 @@
-# A single manifest that installs on both Linux and macOS.
+# A single manifest that installs on Linux, macOS and Windows.
 #
 # The job wants two things systemd provides and launchd does not: an ordering
 # dependency on the network, and jitter so a fleet of machines does not all
@@ -17,7 +17,7 @@
 
 [[jobs]]
 name = "portable-drift"
-description = "Weekly drift report that installs on Linux and macOS alike"
+description = "Weekly drift report that installs on Linux, macOS and Windows"
 scope = "user"
 service_type = "oneshot"
 working_directory = "%h/dev/util-repos/example"
@@ -44,6 +44,20 @@ exec_start = "/bin/bash scripts/report_drift.sh"
 [jobs.launchd.timer]
 # launchd cannot express jitter. An empty string clears it for this target only.
 randomized_delay_sec = ""
+
+# Applied only when rendering for windows-user. Windows needs the most of
+# these, because its paths are not POSIX at all.
+[jobs.windows]
+# Task Scheduler has no ordering dependencies either.
+after = []
+# A Windows path to a Windows interpreter. %h becomes %USERPROFILE%, which
+# Task Scheduler expands at run time.
+exec_start = "C:\\Windows\\System32\\cmd.exe /c %h\\dev\\util-repos\\example\\scripts\\report_drift.cmd"
+working_directory = "%h\\dev\\util-repos\\example"
+
+# Note there is no [jobs.windows.timer]: Task Scheduler *can* express jitter,
+# as RandomDelay, so the systemd randomized_delay_sec carries over unchanged.
+# Only settings a target genuinely cannot express need withdrawing.
 
 [jobs.cron]
 expression = "0 4 * * 0"
