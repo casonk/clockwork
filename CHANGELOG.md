@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add the shared `install-check` workflow to CI, so the package is installed
+  from a clean runner on Linux, macOS and Windows and the `clockwork` console
+  script is actually executed. `python-ci` imports the source tree on ubuntu
+  only, which cannot catch an entry point that fails to resolve once installed.
+  Pinned to Python 3.10 and 3.14 — the floor pulls the `tomli` dependency
+  marker and the ceiling must not.
 - Add a native `windows-user` target rendering Windows Task Scheduler XML, so
   the three desktop platforms are all first-class. Paths are judged with
   `ntpath` rather than the rendering host's rules, `%h` becomes `%USERPROFILE%`
