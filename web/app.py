@@ -65,11 +65,15 @@ SHOPPING_FILE = Path(
 SHOPPING_RULES_FILE = Path(
     os.environ.get("CLOCKWORK_SHOPPING_RULES_FILE", BASE_DIR / "config" / "shopping-rules.json")
 )
+# The real holdings pipeline lives in a private repository, so its path is set
+# per-machine via CLOCKWORK_HOLDINGS_FILE rather than named here (this repo is
+# public). The tracked default is a neutral placeholder; when the env var is
+# unset the endpoint simply reports the file missing.
 HOLDINGS_AGGREGATE_FILE = Path(
     os.environ.get(
         "CLOCKWORK_HOLDINGS_FILE",
         BASE_DIR.parent.parent
-        / "example-scheduler"
+        / "holdings-source"
         / "exports"
         / "invest"
         / "holdings-aggregate.json",
@@ -4228,7 +4232,7 @@ Respond with ONLY a JSON array, no explanation, no markdown fences. Format:
 
 @app.get("/api/invest-holdings")
 def api_invest_holdings():
-    """Return aggregated holdings from the example-scheduler pipeline.
+    """Return aggregated holdings from the external investment pipeline.
 
     Reads exports/invest/holdings-aggregate.json (or CLOCKWORK_HOLDINGS_FILE).
     Response: the raw JSON payload written by aggregate_accounts.py, or

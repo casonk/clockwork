@@ -311,7 +311,7 @@ See `examples/` for mappings from current portfolio repos.
 
 The first migration targets are the repos where scheduling is already explicit:
 
-- `example-scheduler`: cron examples and systemd-backed refresh flows
+- a private scheduling consumer: cron examples and systemd-backed refresh flows
   - `examples/example-scheduler/intraday-snapshots.toml` covers the daily intraday snapshot timers plus matching cron snippets
   - `examples/example-scheduler/monthly-controller.toml` keeps the monthly all-accounts cron example
 - `intake`: generated user-level daemon and report timer units
@@ -319,7 +319,8 @@ The first migration targets are the repos where scheduling is already explicit:
 - `shock-relay`: shared Gmail notification digest timer
 - `snowbridge`: installed system service + interval timer
 - `traction-control`: daily governance audit plus daily bug sweep and every-other-day agentic template consolidation and CI repair
-- `example-orchestrator`: repo-local service/orchestrator conventions
+- a private orchestrator daemon: repo-local service/orchestrator conventions
+  (see `examples/example-orchestrator/orchestration.toml`)
 
 ## Development
 
