@@ -48,7 +48,7 @@ Useful commands:
 
 ```bash
 clockwork render --manifest examples/archility/archility-weekly.toml --target systemd-user
-clockwork install --manifest examples/personal-finance/monthly-controller.toml --target cron --output /tmp/personal-finance.crontab
+clockwork install --manifest examples/example-scheduler/monthly-controller.toml --target cron --output /tmp/example-scheduler.crontab
 clockwork render --manifest examples/clockwork/clockwork-web.local.toml --target launchd-user
 ```
 

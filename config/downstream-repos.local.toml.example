@@ -1,0 +1,8 @@
+# Copy to downstream-repos.local.toml (gitignored) to record private downstream
+# consumers without naming them in the tracked, public downstream-repos.toml.
+
+[downstream_repos]
+tracking_basis = "repo-local scheduler patterns targeted for clockwork migration (private consumers)"
+paths = [
+  "./example-private-consumer",    # scheduled refresh wrappers
+]
