@@ -107,8 +107,8 @@ Render planned scheduler artifacts to stdout:
 ```bash
 clockwork render --manifest examples/archility/archility-weekly.toml --target systemd-user
 clockwork render --manifest examples/fedora-debugg/crash-snapshot.toml --target systemd-user
-clockwork render --manifest examples/personal-finance/intraday-snapshots.toml --target systemd-user
-clockwork render --manifest examples/personal-finance/monthly-controller.toml --target cron
+clockwork render --manifest examples/example-scheduler/intraday-snapshots.toml --target systemd-user
+clockwork render --manifest examples/example-scheduler/monthly-controller.toml --target cron
 clockwork render --manifest examples/shock-relay/gmail-digest.toml --target systemd-user
 clockwork render --manifest examples/traction-control/bug-sweep-agentic.toml --target systemd-user
 clockwork render --manifest examples/traction-control/template-consolidation-agentic.toml --target systemd-user
@@ -123,7 +123,7 @@ clockwork install --manifest examples/archility/archility-weekly.toml --target s
 clockwork install --manifest examples/fedora-debugg/crash-snapshot.toml --target systemd-user
 clockwork install --manifest examples/snowbridge/wireguard-endpoint-monitor.toml --target systemd-system
 clockwork install --manifest examples/shock-relay/gmail-digest.toml --target systemd-user
-clockwork install --manifest examples/personal-finance/monthly-controller.toml --target cron --output /tmp/personal-finance.crontab
+clockwork install --manifest examples/example-scheduler/monthly-controller.toml --target cron --output /tmp/example-scheduler.crontab
 clockwork install --manifest examples/traction-control/bug-sweep-agentic.toml --target systemd-user
 clockwork install --manifest examples/traction-control/template-consolidation-agentic.toml --target systemd-user
 clockwork install --manifest examples/traction-control/ci-repair-agentic.toml --target systemd-user
@@ -311,15 +311,16 @@ See `examples/` for mappings from current portfolio repos.
 
 The first migration targets are the repos where scheduling is already explicit:
 
-- `personal-finance`: cron examples and systemd-backed refresh flows
-  - `examples/personal-finance/intraday-snapshots.toml` covers the daily intraday snapshot timers plus matching cron snippets
-  - `examples/personal-finance/monthly-controller.toml` keeps the monthly all-accounts cron example
+- a private scheduling consumer: cron examples and systemd-backed refresh flows
+  - `examples/example-scheduler/intraday-snapshots.toml` covers the daily intraday snapshot timers plus matching cron snippets
+  - `examples/example-scheduler/monthly-controller.toml` keeps the monthly all-accounts cron example
 - `intake`: generated user-level daemon and report timer units
 - `fedora-debugg`: recurring snapshot workflow that refreshes the tachometer sidecar
 - `shock-relay`: shared Gmail notification digest timer
 - `snowbridge`: installed system service + interval timer
 - `traction-control`: daily governance audit plus daily bug sweep and every-other-day agentic template consolidation and CI repair
-- `doseido`: repo-local service/orchestrator conventions
+- a private orchestrator daemon: repo-local service/orchestrator conventions
+  (see `examples/example-orchestrator/orchestration.toml`)
 
 ## Development
 

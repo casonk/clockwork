@@ -62,7 +62,7 @@ workload logic.
 - `examples/traction-control/archility-weekly.toml`
 - `examples/intake/report-and-daemon.toml`
 - `examples/snowbridge/wireguard-endpoint-monitor.toml`
-- `examples/personal-finance/monthly-controller.toml`
+- `examples/example-scheduler/monthly-controller.toml`
 
 ## Validation
 

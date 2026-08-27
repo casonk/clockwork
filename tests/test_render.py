@@ -90,11 +90,11 @@ def test_render_shock_relay_gmail_digest_interval_timer_and_cron_example():
     assert "services/gmail-imap/send_digest.py" in cron_output
 
 
-def test_render_crontab_for_personal_finance_example():
+def test_render_crontab_for_example_scheduler_example():
     manifest = load_manifest(
         Path(__file__).resolve().parent.parent
         / "examples"
-        / "personal-finance"
+        / "example-scheduler"
         / "monthly-controller.toml"
     )
 
@@ -106,11 +106,11 @@ def test_render_crontab_for_personal_finance_example():
     assert "scripts/all/monthly_controller.py" in output
 
 
-def test_render_personal_finance_intraday_systemd_and_cron_examples():
+def test_render_example_scheduler_intraday_systemd_and_cron_examples():
     manifest = load_manifest(
         Path(__file__).resolve().parent.parent
         / "examples"
-        / "personal-finance"
+        / "example-scheduler"
         / "intraday-snapshots.toml"
     )
 
@@ -121,7 +121,7 @@ def test_render_personal_finance_intraday_systemd_and_cron_examples():
     assert "pf-intraday-snapshot@market-open.service" in systemd_rendered
     assert "pf-intraday-snapshot-market-close.timer" in systemd_rendered
     assert (
-        "ExecStart=/usr/bin/env bash %h/git/personal-finance/scripts/all/"
+        "ExecStart=/usr/bin/env bash %h/git/example-scheduler/scripts/all/"
         "scheduled_intraday_snapshot.sh market-open"
     ) in systemd_rendered["pf-intraday-snapshot@market-open.service"]
     assert "10 16 * * *" in cron_output

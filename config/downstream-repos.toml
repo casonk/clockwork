@@ -1,7 +1,11 @@
 # Known downstream repositories for clockwork.
-# Paths are relative to the portfolio root (/mnt/4tb-m2/git).
+# Paths are relative to the portfolio root.
 # Track repos whose current scheduler behavior is a migration target for the
 # shared scheduler abstraction.
+#
+# This file is public and lists only public consumers. Private downstream
+# consumers are kept in the gitignored config/downstream-repos.local.toml so
+# their names never appear in a tracked file.
 
 [utility_repo]
 path = "./util-repos/clockwork"
@@ -20,7 +24,5 @@ paths = [
   "./util-repos/tachometer",       # weekly portfolio-wide performance snapshot
   "./util-repos/traction-control", # daily governance audit + daily bug sweep + every-other-day template consolidation and CI repair
   "./util-repos/terminility",      # daily tmux session alias rebuild
-  "./personal-finance",            # cron examples + scheduled refresh wrappers
-  "./health-repos/doseido",        # supplement-source orchestrator daemon
   "./research-repos/zillow-public-data",  # weekly data report pull and analysis
 ]

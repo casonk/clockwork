@@ -35,10 +35,10 @@ def test_install_writes_cron_output(tmp_path):
     manifest_path = (
         Path(__file__).resolve().parent.parent
         / "examples"
-        / "personal-finance"
+        / "example-scheduler"
         / "monthly-controller.toml"
     )
-    output_path = tmp_path / "personal-finance.crontab"
+    output_path = tmp_path / "example-scheduler.crontab"
 
     exit_code = main(
         [
