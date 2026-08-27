@@ -67,6 +67,10 @@ should change how future sessions work in this repo.
 - Admin UIs that rely on Caddy, mTLS, or WireGuard as the real trust boundary
   must still default to loopback in the app itself so a missing proxy layer does
   not silently widen exposure.
+- When a Clockwork action delegates to a service on another mesh host, accept a
+  named target only from a rendered allow-list and require an explicit mTLS
+  client identity for remote URLs. Keep the current-host backend on loopback;
+  never infer a target from browser input or silently downgrade remote HTTPS.
 - When a Flask UI uses plain HTML forms for state-changing routes, add
   same-origin request checks in the app even if the primary deployment is
   loopback-only.

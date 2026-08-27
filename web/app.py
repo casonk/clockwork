@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import tomlkit
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for
@@ -97,6 +98,10 @@ _MOVIE_DIR = Path(os.environ.get("CLOCKWORK_MOVIE_DIR", str(WATCH_DIR)))
 _TV_DIR = Path(os.environ.get("CLOCKWORK_TV_DIR", str(WATCH_DIR)))
 _ANIME_DIR = Path(os.environ.get("CLOCKWORK_ANIME_DIR", str(WATCH_DIR)))
 MAGNETO_URL = os.environ.get("CLOCKWORK_MAGNETO_URL", "http://127.0.0.1:5400")
+MAGNETO_HOSTS_FILE = os.environ.get("CLOCKWORK_MAGNETO_HOSTS_FILE", "").strip()
+MAGNETO_MTLS_CA_FILE = os.environ.get("CLOCKWORK_MAGNETO_MTLS_CA_FILE", "").strip()
+MAGNETO_MTLS_CLIENT_CERT = os.environ.get("CLOCKWORK_MAGNETO_MTLS_CLIENT_CERT", "").strip()
+MAGNETO_MTLS_CLIENT_KEY = os.environ.get("CLOCKWORK_MAGNETO_MTLS_CLIENT_KEY", "").strip()
 GROCERIES_HISTORY_FILE = Path(
     os.environ.get(
         "CLOCKWORK_GROCERIES_HISTORY_FILE", BASE_DIR / "config" / "groceries-history.jsonl"
@@ -3128,25 +3133,83 @@ def _search_nyaa(query: str, limit: int = 20) -> list[dict]:
     return sorted(results, key=lambda r: r["seeders"], reverse=True)
 
 
-def _proxy_to_magneto(magnet: str) -> tuple[bool, str]:
-    """Submit a magnet link to the local Magneto instance via its web UI."""
+def _magneto_target_url(host_id: str | None) -> tuple[str | None, str]:
+    """Resolve an explicit approved remote Magneto host, if one was selected."""
+    if not host_id:
+        return MAGNETO_URL.rstrip("/"), ""
+    if not MAGNETO_HOSTS_FILE:
+        return None, "Torrent host selection is not configured on this Clockwork instance."
+    try:
+        raw = json.loads(Path(MAGNETO_HOSTS_FILE).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, f"Cannot read configured Magneto hosts: {exc}"
+    hosts = raw.get("hosts") if isinstance(raw, dict) else None
+    if not isinstance(hosts, list):
+        return None, "Configured Magneto hosts must contain a hosts array."
+    for host in hosts:
+        if not isinstance(host, dict) or host.get("id") != host_id:
+            continue
+        url = host.get("url")
+        if not isinstance(url, str):
+            return None, "Configured Magneto host URL is invalid."
+        parsed = urlsplit(url)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            return None, "Configured Magneto host URL is invalid."
+        # This process talks to its own Magneto over loopback. Other targets
+        # stay on their protected mesh URL and require the client identity below.
+        if host.get("current") is True:
+            return MAGNETO_URL.rstrip("/"), ""
+        if parsed.scheme != "https":
+            return None, "A remote Magneto host must use an HTTPS mTLS URL."
+        return url.rstrip("/"), ""
+    return None, f"Unknown torrent host: {host_id}"
+
+
+def _magneto_opener(url: str, cookie_jar):
+    """Create the narrowly-configured client used only for a Magneto target."""
+    import urllib.request as _ur
+
+    parsed = urlsplit(url)
+    if parsed.scheme == "http":
+        return _ur.build_opener(_ur.HTTPCookieProcessor(cookie_jar))
+    if not (MAGNETO_MTLS_CA_FILE and MAGNETO_MTLS_CLIENT_CERT and MAGNETO_MTLS_CLIENT_KEY):
+        raise RuntimeError(
+            "mTLS certificate, key, and CA files are required for a remote Magneto host."
+        )
+    context = ssl.create_default_context(cafile=MAGNETO_MTLS_CA_FILE)
+    context.load_cert_chain(MAGNETO_MTLS_CLIENT_CERT, MAGNETO_MTLS_CLIENT_KEY)
+    return _ur.build_opener(_ur.HTTPCookieProcessor(cookie_jar), _ur.HTTPSHandler(context=context))
+
+
+def _proxy_to_magneto(magnet: str, host_id: str | None = None) -> tuple[bool, str]:
+    """Submit a magnet link to one explicit Magneto host via its web UI."""
     import http.cookiejar as _cj
     import urllib.parse as _up
     import urllib.request as _ur
 
+    magneto_url, target_error = _magneto_target_url(host_id)
+    if magneto_url is None:
+        return False, target_error
     try:
         jar = _cj.CookieJar()
-        opener = _ur.build_opener(_ur.HTTPCookieProcessor(jar))
-        resp = opener.open(f"{MAGNETO_URL}/", timeout=8)
+        opener = _magneto_opener(magneto_url, jar)
+        resp = opener.open(f"{magneto_url}/", timeout=8)
         html = resp.read().decode("utf-8", errors="replace")
         m = re.search(r'name="csrf_token"\s+value="([^"]+)"', html)
         if not m:
             return False, "No CSRF token found in Magneto response."
         data = _up.urlencode({"magnet": magnet, "csrf_token": m.group(1)}).encode()
         req = _ur.Request(
-            f"{MAGNETO_URL}/torrents",
+            f"{magneto_url}/torrents",
             data=data,
-            headers={"Referer": f"{MAGNETO_URL}/"},
+            headers={"Referer": f"{magneto_url}/"},
         )
         opener.open(req, timeout=10)
         return True, ""
@@ -4444,19 +4507,22 @@ def torrent_search():
 
 @app.post("/api/torrent-add")
 def torrent_add():
-    """Proxy a magnet link to the local Magneto instance.
+    """Proxy a magnet link to an explicit approved Magneto instance.
 
-    Request body: {"magnet": "magnet:?..."}
+    Request body: {"magnet": "magnet:?....", "host": "air"}
+    Omit host for the legacy local Magneto target. A non-local host must be
+    present in CLOCKWORK_MAGNETO_HOSTS_FILE and uses mTLS.
     Response: {"ok": bool, "error": str}
     """
     try:
         payload = request.get_json(force=True) or {}
         magnet = str(payload.get("magnet") or "").strip()
+        host = str(payload.get("host") or "").strip() or None
     except Exception:
         return jsonify({"ok": False, "error": "Invalid request body."}), 400
     if not magnet.startswith("magnet:"):
         return jsonify({"ok": False, "error": "Not a valid magnet link."}), 400
-    ok, err = _proxy_to_magneto(magnet)
+    ok, err = _proxy_to_magneto(magnet, host)
     if ok:
         return jsonify({"ok": True})
     return jsonify({"ok": False, "error": err}), 502
@@ -4496,7 +4562,31 @@ _REPO_GROUP: dict[str, str] = {
 _GROUP_ORDER = ["Clockwork", "Monitoring", "Pit Box", "Infrastructure", "AI"]
 
 
-def _svc_url(svc: dict) -> str:
+def _request_uses_loopback() -> bool:
+    """Whether this portal response is being viewed directly on its host."""
+    hostname = (urlsplit("//" + request.host).hostname or "").lower()
+    return hostname in {"127.0.0.1", "::1", "localhost"}
+
+
+def _svc_url(
+    svc: dict,
+    *,
+    air_wireguard_ip: str = "",
+    local_air: bool = False,
+) -> str:
+    """Return the user-facing endpoint, including the reviewed Air edge path."""
+    air_role = str(svc.get("macos_edge_role", ""))
+    air_port = svc.get("macos_edge_listen_port")
+    if air_role and isinstance(air_port, int) and 1 <= air_port <= 65535:
+        if local_air:
+            # Caddy provides Webterm Home on 7680; ttyd's 7681 is intentionally
+            # not linked directly because it bypasses the terminal manager.
+            local_port = 7680 if air_role == "webterm" else svc.get("port")
+            if isinstance(local_port, int) and 1 <= local_port <= 65535:
+                return f"http://127.0.0.1:{local_port}/"
+        if air_wireguard_ip:
+            return f"https://{air_wireguard_ip}:{air_port}/"
+
     scheme = str(svc.get("url_scheme", "https"))
     host = str(svc.get("hostname", ""))
     port = svc.get("port") or svc.get("port_default")
@@ -4530,10 +4620,20 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
     local = WIRING_HARNESS_DIR / "services.local.toml"
     base = WIRING_HARNESS_DIR / "services.toml"
     path = local if local.exists() else base
-    raw: list = list(tomlkit.loads(path.read_text()).get("services", [])) if path.exists() else []
+    registry = tomlkit.loads(path.read_text()) if path.exists() else {}
+    raw: list = list(registry.get("services", []))
+    air_wireguard_ip = str(registry.get("wg_ip", ""))
+    local_air = _request_uses_loopback()
 
     # Pre-extract the native RDP URL so it can be merged into the Guacamole card.
-    rdp_url = next((_svc_url(s) for s in raw if str(s.get("name", "")) == "pit-box-rdp"), "")
+    rdp_url = next(
+        (
+            _svc_url(s, air_wireguard_ip=air_wireguard_ip, local_air=local_air)
+            for s in raw
+            if str(s.get("name", "")) == "pit-box-rdp"
+        ),
+        "",
+    )
 
     groups: dict[str, list[dict]] = {g: [] for g in _GROUP_ORDER}
     for svc in raw:
@@ -4544,7 +4644,7 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
         card: dict = {
             "name": name,
             "display": str(svc.get("description", name)),
-            "url": _svc_url(svc),
+            "url": _svc_url(svc, air_wireguard_ip=air_wireguard_ip, local_air=local_air),
             "hostname": str(svc.get("hostname", "")),
             "access_mode": str(svc.get("access_mode", "")),
             "icon": _SERVICE_ICONS.get(name, "🔗"),
