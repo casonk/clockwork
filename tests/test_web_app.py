@@ -24,6 +24,54 @@ web_app = module_from_spec(_SPEC)
 _SPEC.loader.exec_module(web_app)
 
 
+def test_air_webterm_portal_url_uses_home_not_raw_ttyd():
+    service = {
+        "name": "pit-box-webterm",
+        "port": 7681,
+        "macos_edge_role": "webterm",
+        "macos_edge_listen_port": 8445,
+    }
+
+    assert web_app._svc_url(service, air_wireguard_ip="10.99.0.254") == "https://10.99.0.254:8445/"
+    assert (
+        web_app._svc_url(service, air_wireguard_ip="10.99.0.254", local_air=True)
+        == "http://127.0.0.1:7680/"
+    )
+
+
+def test_magneto_target_selection_uses_local_for_current_and_mtls_for_remote(tmp_path, monkeypatch):
+    hosts_file = tmp_path / "torrent-hosts.json"
+    hosts_file.write_text(
+        '{"hosts":[{"id":"air","label":"MacBook Air","url":"https://10.99.0.254:8446/","current":true},{"id":"home","label":"Home server","url":"https://torrents.home.internal/","current":false}]}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(web_app, "MAGNETO_HOSTS_FILE", str(hosts_file))
+    monkeypatch.setattr(web_app, "MAGNETO_URL", "http://127.0.0.1:5400")
+
+    assert web_app._magneto_target_url("air") == ("http://127.0.0.1:5400", "")
+    assert web_app._magneto_target_url("home") == ("https://torrents.home.internal", "")
+
+
+def test_torrent_add_passes_explicit_host_to_magneto(monkeypatch):
+    captured = {}
+
+    def fake_proxy(magnet, host):
+        captured["magnet"] = magnet
+        captured["host"] = host
+        return True, ""
+
+    monkeypatch.setattr(web_app, "_proxy_to_magneto", fake_proxy)
+
+    response = web_app.app.test_client().post(
+        "/api/torrent-add",
+        json={"magnet": "magnet:?xt=urn:btih:abcd", "host": "home"},
+        headers={"Origin": "http://localhost"},
+    )
+
+    assert response.status_code == 200
+    assert captured == {"magnet": "magnet:?xt=urn:btih:abcd", "host": "home"}
+
+
 def _write_bug_sweep_manifest(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
