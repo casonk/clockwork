@@ -16,7 +16,7 @@ def test_load_intake_manifest_parses_daemon_and_timer_examples():
     assert manifest.jobs[1].timer.on_calendar == "*-*-* 12:00:00"
 
 
-def test_load_personal_finance_manifest_parses_cron_example():
+def test_load_example_scheduler_manifest_parses_cron_example():
     manifest = load_manifest(
         Path(__file__).resolve().parent.parent
         / "examples"
@@ -29,9 +29,12 @@ def test_load_personal_finance_manifest_parses_cron_example():
     assert manifest.jobs[0].cron.timezone == "America/New_York"
 
 
-def test_load_example-orchestrator_manifest_parses_poll_interval():
+def test_load_example_orchestrator_manifest_parses_poll_interval():
     manifest = load_manifest(
-        Path(__file__).resolve().parent.parent / "examples" / "example-orchestrator" / "orchestration.toml"
+        Path(__file__).resolve().parent.parent
+        / "examples"
+        / "example-orchestrator"
+        / "orchestration.toml"
     )
 
     assert len(manifest.jobs) == 1
@@ -69,7 +72,7 @@ def test_load_shock_relay_gmail_digest_manifest_parses_interval_timer():
     assert manifest.jobs[0].cron.expression == "0 * * * *"
 
 
-def test_load_personal_finance_intraday_manifest_parses_three_jobs():
+def test_load_example_scheduler_intraday_manifest_parses_three_jobs():
     manifest = load_manifest(
         Path(__file__).resolve().parent.parent
         / "examples"
