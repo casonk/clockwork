@@ -53,6 +53,19 @@ paths = [
   '''.*SECURITY.*''',
   '''.*LESSONSLEARNED.*''',
   '''.*REFS-PUBLIC.*''',
+  # Example manifests are illustrative templates, like the docs above: an
+  # absolute path in a sample is not the operator's real workspace leaking.
+  # Current examples use `%h/…`; this also covers historical samples that once
+  # showed a `/mnt/…/git/` path, so those never needed baseline entries.
+  '''^examples/''',
+  # Test fixtures assert on sample rendered paths, not real config.
+  '''^tests/''',
+  # One historical finding: an early install script hardcoded a `/mnt/…/git/`
+  # path (commit 054837b, since superseded). Its former baseline entry carried a
+  # private repository name in the commit-message metadata gitleaks compares, so
+  # it is allowlisted by path here instead. The rule still flags every other
+  # config/data/script path.
+  '''^config/scripts/clockwork-system-install$''',
 ]
 
 [[rules]]
