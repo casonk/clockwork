@@ -110,6 +110,10 @@ should change how future sessions work in this repo.
   Repo-level state must be updated asymmetrically: always mark repos enabled
   during enable-all (even if all jobs were skipped), but only mark disabled
   during disable-all if at least one job was actually toggled.
+- Treat a storage-backend switch as an explicit operator configuration, not an
+  import-time default. A compatibility UI may preserve its JSON shape, but it
+  must require an installed authority dependency and a named trusted origin
+  before routing writes away from the local file store.
 
 ### 2026-06-07 — User-configurable timing needs interval fields in the web editor
 
