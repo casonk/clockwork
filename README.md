@@ -159,25 +159,30 @@ default so importing or launching the web process cannot mutate tracked
 manifests; set `CLOCKWORK_WEB_AUTOGENERATE_CRON=1` only for an explicit,
 reviewed migration.
 
-### Optional Differential personal-list authority
+### Optional external personal-list authority
 
 Clockwork keeps JSON-file list storage by default. To move the To Do, Watch,
-Read, Listen, and Invest compatibility routes onto Differential's local SQLite
-authority, install the reviewed `casonk-differential` package in Clockwork's
-web environment and set these owner-only environment values:
+Read, Listen, and Invest compatibility routes onto an external SQLite storage
+authority, install a reviewed adapter package that exposes
+`ClockworkPersonalListAdapter`, `PersonalListSpec`, and `SQLiteResourceStore`,
+then set these owner-only environment values:
 
 ```text
-CLOCKWORK_DIFFERENTIAL_DB=/absolute/path/to/clockwork-personal-lists.sqlite3
-CLOCKWORK_DIFFERENTIAL_ORIGIN=air
+CLOCKWORK_LIST_STORE_MODULE=<import path of the adapter package>
+CLOCKWORK_LIST_STORE_DB=/absolute/path/to/clockwork-personal-lists.sqlite3
+CLOCKWORK_LIST_STORE_ORIGIN=air
 ```
 
-The origin is an explicit trusted writer identity, not browser input. With both
-variables set, existing form routes read and reconcile the same JSON shape via
-revision-guarded Differential resources. Leave both unset to retain the legacy
-file store. Do not point the database at a network share; use a local path or
-configure a reviewed rqlite-backed deployment separately. Perform the
-Differential adapter's validated import of existing JSON before enabling the
-setting; route-level cutover remains an operator-reviewed deployment step.
+The adapter package is named only in local configuration, never in this
+repository, so a private storage backend stays a local deployment choice rather
+than a hard-coded public dependency. The origin is an explicit trusted writer
+identity, not browser input. With the variables set, existing form routes read
+and reconcile the same JSON shape via the adapter's revision-guarded resources.
+Leave `CLOCKWORK_LIST_STORE_DB` unset to retain the legacy file store. Do not
+point the database at a network share; use a local path or configure a reviewed
+rqlite-backed deployment separately. Perform the adapter's validated import of
+existing JSON before enabling the setting; route-level cutover remains an
+operator-reviewed deployment step.
 
 `install` writes an owner-only plist to `~/Library/LaunchAgents` and prints the
 exact `launchctl bootstrap` command for review. It does not activate the job.
