@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import importlib
 import json
 import os
 import platform
@@ -3398,7 +3399,14 @@ def _normalize_simple_list_data(data: dict, cfg: dict) -> dict:
 
 
 def _simple_list_adapter(key: str):
-    """Return the opt-in List Store authority adapter for one list, if configured."""
+    """Return the opt-in external list-store authority adapter, if configured.
+
+    The adapter is supplied by a separate package, named only in local
+    configuration via ``CLOCKWORK_LIST_STORE_MODULE`` so this public repository
+    does not hard-code a private dependency. The module must expose
+    ``ClockworkPersonalListAdapter``, ``PersonalListSpec``, and
+    ``SQLiteResourceStore``.
+    """
 
     database = os.environ.get("CLOCKWORK_LIST_STORE_DB", "").strip()
     if not database:
@@ -3408,16 +3416,26 @@ def _simple_list_adapter(key: str):
         raise RuntimeError(
             "CLOCKWORK_LIST_STORE_ORIGIN is required when CLOCKWORK_LIST_STORE_DB is set"
         )
-    try:
-        from list_store import ClockworkPersonalListAdapter, PersonalListSpec, SQLiteResourceStore
-    except ImportError as exc:
+    module_name = os.environ.get("CLOCKWORK_LIST_STORE_MODULE", "").strip()
+    if not module_name:
         raise RuntimeError(
-            "Clockwork List Store list storage requires the casonk-list-store package"
+            "CLOCKWORK_LIST_STORE_MODULE is required when CLOCKWORK_LIST_STORE_DB is set; "
+            "set it to the import path of the list-store adapter package"
+        )
+    try:
+        adapter_module = importlib.import_module(module_name)
+        adapter_cls = adapter_module.ClockworkPersonalListAdapter
+        spec_cls = adapter_module.PersonalListSpec
+        store_cls = adapter_module.SQLiteResourceStore
+    except (ImportError, AttributeError) as exc:
+        raise RuntimeError(
+            f"list-store adapter module {module_name!r} is not importable or is missing "
+            "ClockworkPersonalListAdapter / PersonalListSpec / SQLiteResourceStore"
         ) from exc
     cfg = _simple_list_config(key)
-    return ClockworkPersonalListAdapter(
-        SQLiteResourceStore(database),
-        PersonalListSpec(
+    return adapter_cls(
+        store_cls(database),
+        spec_cls(
             key,
             cfg["primary"],
             cfg["status"],
