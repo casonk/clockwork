@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -3396,8 +3397,50 @@ def _normalize_simple_list_data(data: dict, cfg: dict) -> dict:
     return normalized
 
 
+def _simple_list_adapter(key: str):
+    """Return the opt-in Differential authority adapter for one list, if configured."""
+
+    database = os.environ.get("CLOCKWORK_DIFFERENTIAL_DB", "").strip()
+    if not database:
+        return None
+    origin = os.environ.get("CLOCKWORK_DIFFERENTIAL_ORIGIN", "").strip()
+    if not origin:
+        raise RuntimeError(
+            "CLOCKWORK_DIFFERENTIAL_ORIGIN is required when CLOCKWORK_DIFFERENTIAL_DB is set"
+        )
+    try:
+        from differential import ClockworkPersonalListAdapter, PersonalListSpec, SQLiteResourceStore
+    except ImportError as exc:
+        raise RuntimeError(
+            "Clockwork Differential list storage requires the casonk-differential package"
+        ) from exc
+    cfg = _simple_list_config(key)
+    return ClockworkPersonalListAdapter(
+        SQLiteResourceStore(database),
+        PersonalListSpec(
+            key,
+            cfg["primary"],
+            cfg["status"],
+            tuple(cfg.get("extras", ())),
+        ),
+    )
+
+
+def _simple_list_origin() -> str:
+    origin = os.environ.get("CLOCKWORK_DIFFERENTIAL_ORIGIN", "").strip()
+    if not origin:
+        raise RuntimeError(
+            "CLOCKWORK_DIFFERENTIAL_ORIGIN is required when CLOCKWORK_DIFFERENTIAL_DB is set"
+        )
+    return origin
+
+
 def load_simple_list(key: str) -> dict:
     cfg = _simple_list_config(key)
+    adapter = _simple_list_adapter(key)
+    if adapter is not None:
+        data = adapter.export_legacy_json()
+        return data if data["categories"] else _simple_list_default_data(cfg)
     path = cfg["file"]
     if path.exists():
         with contextlib.suppress(json.JSONDecodeError, OSError):
@@ -3405,8 +3448,17 @@ def load_simple_list(key: str) -> dict:
     return _simple_list_default_data(cfg)
 
 
-def save_simple_list(key: str, data: dict) -> None:
+def save_simple_list(key: str, data: dict, *, operation_id: str | None = None) -> None:
     cfg = _simple_list_config(key)
+    adapter = _simple_list_adapter(key)
+    if adapter is not None:
+        adapter.reconcile_legacy_json(
+            data,
+            origin_node=_simple_list_origin(),
+            operation_id=operation_id or str(uuid.uuid4()),
+            actor="clockwork-web",
+        )
+        return
     path = cfg["file"]
     path.parent.mkdir(parents=True, exist_ok=True)
     _rotate_backup(path)
