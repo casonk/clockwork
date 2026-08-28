@@ -111,6 +111,36 @@ def test_to_list_api_add_toggle_delete_item(client, page, api_path, category, pa
     assert "localStorage" not in page_resp.get_data(as_text=True)
 
 
+def test_list_store_storage_is_an_explicit_opt_in_bridge(list_files, monkeypatch):
+    calls = []
+
+    class FakeAdapter:
+        def export_legacy_json(self):
+            return {"categories": [{"name": "Movies", "items": []}]}
+
+        def reconcile_legacy_json(self, data, **kwargs):
+            calls.append((data, kwargs))
+            return None
+
+    monkeypatch.setenv(
+        "CLOCKWORK_LIST_STORE_DB", str(list_files["TODO_FILE"].with_suffix(".sqlite3"))
+    )
+    monkeypatch.setenv("CLOCKWORK_LIST_STORE_ORIGIN", "air")
+    monkeypatch.setattr(web_app, "_simple_list_adapter", lambda key: FakeAdapter())
+
+    assert web_app.load_simple_list("watch") == {"categories": [{"name": "Movies", "items": []}]}
+    web_app.save_simple_list(
+        "watch", {"categories": [{"name": "Movies", "items": []}]}, operation_id="op"
+    )
+
+    assert calls == [
+        (
+            {"categories": [{"name": "Movies", "items": []}]},
+            {"origin_node": "air", "operation_id": "op", "actor": "clockwork-web"},
+        )
+    ]
+
+
 @pytest.mark.parametrize(
     ("api_path", "category", "item", "status_key"),
     [
