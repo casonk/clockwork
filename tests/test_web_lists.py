@@ -111,7 +111,7 @@ def test_to_list_api_add_toggle_delete_item(client, page, api_path, category, pa
     assert "localStorage" not in page_resp.get_data(as_text=True)
 
 
-def test_differential_storage_is_an_explicit_opt_in_bridge(list_files, monkeypatch):
+def test_list_store_is_an_explicit_opt_in_bridge(list_files, monkeypatch):
     calls = []
 
     class FakeAdapter:
@@ -123,9 +123,9 @@ def test_differential_storage_is_an_explicit_opt_in_bridge(list_files, monkeypat
             return None
 
     monkeypatch.setenv(
-        "CLOCKWORK_DIFFERENTIAL_DB", str(list_files["TODO_FILE"].with_suffix(".sqlite3"))
+        "CLOCKWORK_LIST_STORE_DB", str(list_files["TODO_FILE"].with_suffix(".sqlite3"))
     )
-    monkeypatch.setenv("CLOCKWORK_DIFFERENTIAL_ORIGIN", "air")
+    monkeypatch.setenv("CLOCKWORK_LIST_STORE_ORIGIN", "air")
     monkeypatch.setattr(web_app, "_simple_list_adapter", lambda key: FakeAdapter())
 
     assert web_app.load_simple_list("watch") == {"categories": [{"name": "Movies", "items": []}]}
@@ -139,6 +139,52 @@ def test_differential_storage_is_an_explicit_opt_in_bridge(list_files, monkeypat
             {"origin_node": "air", "operation_id": "op", "actor": "clockwork-web"},
         )
     ]
+
+
+def test_list_store_module_is_resolved_from_config_not_hardcoded(list_files, monkeypatch):
+    """The adapter package is named only via CLOCKWORK_LIST_STORE_MODULE.
+
+    No private package name is hard-coded in this repository; the store module is
+    imported dynamically from configuration. A stub module stands in here.
+    """
+
+    import types
+
+    stub = types.ModuleType("stub_list_store_adapter")
+    built = {}
+
+    class SQLiteResourceStore:
+        def __init__(self, database):
+            built["database"] = database
+
+    class PersonalListSpec:
+        def __init__(self, key, primary, status, extras):
+            built["spec"] = (key, primary, status, extras)
+
+    class ClockworkPersonalListAdapter:
+        def __init__(self, store, spec):
+            built["store"] = store
+            built["spec_obj"] = spec
+
+    stub.SQLiteResourceStore = SQLiteResourceStore
+    stub.PersonalListSpec = PersonalListSpec
+    stub.ClockworkPersonalListAdapter = ClockworkPersonalListAdapter
+    monkeypatch.setitem(sys.modules, "stub_list_store_adapter", stub)
+
+    db = str(list_files["TODO_FILE"].with_suffix(".sqlite3"))
+    monkeypatch.setenv("CLOCKWORK_LIST_STORE_DB", db)
+    monkeypatch.setenv("CLOCKWORK_LIST_STORE_ORIGIN", "air")
+
+    # Module unset -> explicit error, not a hard-coded fallback.
+    monkeypatch.delenv("CLOCKWORK_LIST_STORE_MODULE", raising=False)
+    with pytest.raises(RuntimeError, match="CLOCKWORK_LIST_STORE_MODULE is required"):
+        web_app._simple_list_adapter("watch")
+
+    # Module configured -> adapter built from the stub, no name in this repo.
+    monkeypatch.setenv("CLOCKWORK_LIST_STORE_MODULE", "stub_list_store_adapter")
+    adapter = web_app._simple_list_adapter("watch")
+    assert isinstance(adapter, ClockworkPersonalListAdapter)
+    assert built["database"] == db
 
 
 @pytest.mark.parametrize(
