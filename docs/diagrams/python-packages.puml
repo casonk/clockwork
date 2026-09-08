@@ -14,6 +14,7 @@ rectangle "web.security\n1 python file" as web.security
 rectangle "web.status_helpers\n1 python file" as web.status_helpers
 src.clockwork.__main__ --> src.clockwork.cli
 src.clockwork.cli --> src.clockwork.manifest
+src.clockwork.cli --> src.clockwork.model
 src.clockwork.cli --> src.clockwork.render
 src.clockwork.manifest --> src.clockwork.model
 src.clockwork.render --> src.clockwork.model
