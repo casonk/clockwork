@@ -5,45 +5,44 @@ skinparam shadowing false
 skinparam defaultFontName Monospace
 skinparam componentStyle rectangle
 skinparam linetype ortho
-rectangle ".github/workflows/ci.yml\n6 detected tools" as source_github_workflows_ci_yml #E0F2FE
-rectangle ".github/workflows/python-publish.yml\n7 detected tools" as source_github_workflows_python_publish_yml #E0F2FE
-rectangle ".github/workflows/secret-scan.yml\n2 detected tools" as source_github_workflows_secret_scan_yml #E0F2FE
+rectangle ".github/workflows/ci.yml\n2 detected tools" as source_github_workflows_ci_yml #E0F2FE
+rectangle ".github/workflows/python-publish.yml\n1 detected tool" as source_github_workflows_python_publish_yml #E0F2FE
+rectangle ".github/workflows/secret-scan.yml\n1 detected tool" as source_github_workflows_secret_scan_yml #E0F2FE
 rectangle "config/scripts/clockwork-system-install\n0 detected tools" as source_config_scripts_clockwork_system_install #E0F2FE
+rectangle "scripts/activate.sh\n3 detected tools" as source_scripts_activate_sh #E0F2FE
+rectangle "scripts/bootstrap_clockwork_web_macos.sh\n4 detected tools" as source_scripts_bootstrap_clockwork_web_macos_sh #E0F2FE
+rectangle "scripts/run_clockwork_web_macos.sh\n0 detected tools" as source_scripts_run_clockwork_web_macos_sh #E0F2FE
 rectangle "scripts/run_tachometer_profile.sh\n3 detected tools" as source_scripts_run_tachometer_profile_sh #E0F2FE
-cloud "actions/checkout" as tool_actions_checkout #FEF3C7
-cloud "actions/download-artifact" as tool_actions_download_artifact #FEF3C7
-cloud "actions/setup-python" as tool_actions_setup_python #FEF3C7
-cloud "actions/upload-artifact" as tool_actions_upload_artifact #FEF3C7
-cloud "black" as tool_black #FEF3C7
-cloud "build" as tool_build #FEF3C7
-cloud "gitleaks/gitleaks-action" as tool_gitleaks_gitleaks_action #FEF3C7
+cloud "casonk/.github/.github/workflows/install-check.yml" as tool_casonk_github_github_workflows_install_check_yml #FEF3C7
+cloud "casonk/.github/.github/workflows/python-ci.yml" as tool_casonk_github_github_workflows_python_ci_yml #FEF3C7
+cloud "casonk/.github/.github/workflows/python-publish.yml" as tool_casonk_github_github_workflows_python_publish_yml #FEF3C7
+cloud "casonk/.github/.github/workflows/secret-scan.yml" as tool_casonk_github_github_workflows_secret_scan_yml #FEF3C7
+cloud "chmod" as tool_chmod #FEF3C7
+cloud "install" as tool_install #FEF3C7
+cloud "mkdir" as tool_mkdir #FEF3C7
 cloud "pip" as tool_pip #FEF3C7
-cloud "pypa/gh-action-pypi-publish" as tool_pypa_gh_action_pypi_publish #FEF3C7
-cloud "pytest" as tool_pytest #FEF3C7
-cloud "ruff" as tool_ruff #FEF3C7
+cloud "python" as tool_python #FEF3C7
 cloud "run" as tool_run #FEF3C7
 cloud "summarize" as tool_summarize #FEF3C7
+cloud "systemctl" as tool_systemctl #FEF3C7
 cloud "tachometer" as tool_tachometer #FEF3C7
-source_github_workflows_ci_yml --> tool_actions_checkout
-source_github_workflows_ci_yml --> tool_actions_setup_python
-source_github_workflows_ci_yml --> tool_black
-source_github_workflows_ci_yml --> tool_pip
-source_github_workflows_ci_yml --> tool_pytest
-source_github_workflows_ci_yml --> tool_ruff
-source_github_workflows_python_publish_yml --> tool_actions_checkout
-source_github_workflows_python_publish_yml --> tool_actions_download_artifact
-source_github_workflows_python_publish_yml --> tool_actions_setup_python
-source_github_workflows_python_publish_yml --> tool_actions_upload_artifact
-source_github_workflows_python_publish_yml --> tool_build
-source_github_workflows_python_publish_yml --> tool_pip
-source_github_workflows_python_publish_yml --> tool_pypa_gh_action_pypi_publish
-source_github_workflows_secret_scan_yml --> tool_actions_checkout
-source_github_workflows_secret_scan_yml --> tool_gitleaks_gitleaks_action
+cloud "visudo" as tool_visudo #FEF3C7
+source_github_workflows_ci_yml --> tool_casonk_github_github_workflows_install_check_yml
+source_github_workflows_ci_yml --> tool_casonk_github_github_workflows_python_ci_yml
+source_github_workflows_python_publish_yml --> tool_casonk_github_github_workflows_python_publish_yml
+source_github_workflows_secret_scan_yml --> tool_casonk_github_github_workflows_secret_scan_yml
+source_scripts_activate_sh --> tool_install
+source_scripts_activate_sh --> tool_systemctl
+source_scripts_activate_sh --> tool_visudo
+source_scripts_bootstrap_clockwork_web_macos_sh --> tool_chmod
+source_scripts_bootstrap_clockwork_web_macos_sh --> tool_mkdir
+source_scripts_bootstrap_clockwork_web_macos_sh --> tool_pip
+source_scripts_bootstrap_clockwork_web_macos_sh --> tool_python
 source_scripts_run_tachometer_profile_sh --> tool_run
 source_scripts_run_tachometer_profile_sh --> tool_summarize
 source_scripts_run_tachometer_profile_sh --> tool_tachometer
 note as toolingGraphSummary
-Scanned 5 tooling entrypoints.
+Scanned 8 tooling entrypoints.
 Detected 14 third-party tools.
 end note
 @enduml
