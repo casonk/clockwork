@@ -6,16 +6,33 @@ skinparam defaultFontName Monospace
 skinparam componentStyle rectangle
 skinparam linetype ortho
 rectangle "config/scripts/clockwork-system-install\n0 local shell edges\n0 external tools" as shell_config_scripts_clockwork_system_install #DBEAFE
+rectangle "scripts/activate.sh\n0 local shell edges\n3 external tools" as shell_scripts_activate_sh #DBEAFE
+rectangle "scripts/bootstrap_clockwork_web_macos.sh\n0 local shell edges\n4 external tools" as shell_scripts_bootstrap_clockwork_web_macos_sh #DBEAFE
+rectangle "scripts/run_clockwork_web_macos.sh\n0 local shell edges\n0 external tools" as shell_scripts_run_clockwork_web_macos_sh #DBEAFE
 rectangle "scripts/run_tachometer_profile.sh\n0 local shell edges\n3 external tools" as shell_scripts_run_tachometer_profile_sh #DBEAFE
+cloud "chmod" as tool_chmod #FEF3C7
+cloud "install" as tool_install #FEF3C7
+cloud "mkdir" as tool_mkdir #FEF3C7
+cloud "pip" as tool_pip #FEF3C7
+cloud "python" as tool_python #FEF3C7
 cloud "run" as tool_run #FEF3C7
 cloud "summarize" as tool_summarize #FEF3C7
+cloud "systemctl" as tool_systemctl #FEF3C7
 cloud "tachometer" as tool_tachometer #FEF3C7
+cloud "visudo" as tool_visudo #FEF3C7
+shell_scripts_activate_sh --> tool_install
+shell_scripts_activate_sh --> tool_systemctl
+shell_scripts_activate_sh --> tool_visudo
+shell_scripts_bootstrap_clockwork_web_macos_sh --> tool_chmod
+shell_scripts_bootstrap_clockwork_web_macos_sh --> tool_mkdir
+shell_scripts_bootstrap_clockwork_web_macos_sh --> tool_pip
+shell_scripts_bootstrap_clockwork_web_macos_sh --> tool_python
 shell_scripts_run_tachometer_profile_sh --> tool_run
 shell_scripts_run_tachometer_profile_sh --> tool_summarize
 shell_scripts_run_tachometer_profile_sh --> tool_tachometer
 note as shellGraphSummary
-Scanned 2 shell scripts.
+Scanned 5 shell scripts.
 Detected 0 local shell edges.
-Detected 3 external tools.
+Detected 10 external tools.
 end note
 @enduml

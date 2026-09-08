@@ -15,6 +15,9 @@ class "JobSpec" as src.clockwork.model.JobSpec {
   environment_files : tuple[str, ...]
   exec_start : str
   group : str | None
+  launchd_label : str | None
+  launchd_overrides : TargetOverrides | None
+  launchd_run_at_load : bool | None
   name : str
   poll_interval : str | None
   restart : str | None
@@ -31,7 +34,11 @@ class "JobSpec" as src.clockwork.model.JobSpec {
   timer_name : str | None
   user : str | None
   wants : tuple[str, ...]
+  windows_overrides : TargetOverrides | None
   working_directory : str | None
+  for_launchd() -> JobSpec
+  for_target(target: str) -> JobSpec
+  for_windows() -> JobSpec
   service_unit_name() -> str
   timer_unit_name() -> str
   validate() -> None
@@ -39,6 +46,16 @@ class "JobSpec" as src.clockwork.model.JobSpec {
 class "Manifest" as src.clockwork.model.Manifest {
   jobs : tuple[JobSpec, ...]
   path : str
+  validate() -> None
+}
+class "TargetOverrides" as src.clockwork.model.TargetOverrides {
+  accuracy_sec : str | None
+  after : tuple[str, ...] | None
+  environment : dict[str, str] | None
+  exec_start : str | None
+  randomized_delay_sec : str | None
+  wants : tuple[str, ...] | None
+  working_directory : str | None
   validate() -> None
 }
 class "TimerSpec" as src.clockwork.model.TimerSpec {
