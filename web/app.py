@@ -248,6 +248,13 @@ def _inject_nav_categories() -> dict[str, object]:
     return {"nav_categories": _load_nav_categories()}
 
 
+def _return_path(default: str = "/home") -> str:
+    value = request.form.get("next", "").strip()
+    if value.startswith("/") and not value.startswith("//"):
+        return value
+    return default
+
+
 @app.before_request
 def _protect_state_changing_requests() -> None:
     """Reject cross-origin state-changing requests."""
@@ -4805,6 +4812,43 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
 @app.get("/home")
 def home():
     return render_template("home.html", groups=_load_portal_groups())
+
+
+def _schedule_clockwork_web_refresh() -> tuple[bool, str]:
+    if _scheduler_backend() != "systemd":
+        return False, "Site refresh is only wired for the systemd user service on this host."
+    service = os.environ.get("CLOCKWORK_WEB_SERVICE", "clockwork-web.service").strip()
+    if not re.fullmatch(r"[A-Za-z0-9@_.:-]+\.service", service):
+        return False, f"Refusing invalid Clockwork web service name: {service!r}"
+    code = (
+        "import os, subprocess, sys, time; "
+        "time.sleep(1); "
+        "runtime = os.environ.get('XDG_RUNTIME_DIR') or f'/run/user/{os.getuid()}'; "
+        "env = dict(os.environ); "
+        "env.setdefault('XDG_RUNTIME_DIR', runtime); "
+        "env.setdefault('DBUS_SESSION_BUS_ADDRESS', f'unix:path={runtime}/bus'); "
+        "subprocess.run(['systemctl', '--user', 'daemon-reload'], env=env, check=False); "
+        "subprocess.run(['systemctl', '--user', 'restart', sys.argv[1]], env=env, check=False)"
+    )
+    try:
+        subprocess.Popen(
+            [sys.executable, "-c", code, service],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            close_fds=True,
+        )
+    except OSError as exc:
+        return False, f"Could not schedule Clockwork web refresh: {exc}"
+    return True, "Refreshing Clockwork web now. Reload this page in a few seconds."
+
+
+@app.post("/refresh/site")
+def refresh_site():
+    ok, message = _schedule_clockwork_web_refresh()
+    flash(message, "success" if ok else "error")
+    return redirect(_return_path())
 
 
 @app.post("/rebuild/guacamole")

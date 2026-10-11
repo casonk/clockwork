@@ -359,6 +359,37 @@ def test_state_changing_post_allows_valid_csrf_token_without_origin(tmp_path, mo
     assert response.status_code == 302
 
 
+def test_refresh_site_schedules_delayed_user_service_restart(monkeypatch):
+    calls = []
+
+    class FakePopen:
+        def __init__(self, argv, **kwargs):
+            calls.append((argv, kwargs))
+
+    monkeypatch.setenv("CLOCKWORK_SCHEDULER_BACKEND", "systemd")
+    monkeypatch.setattr(web_app.subprocess, "Popen", FakePopen)
+
+    client = web_app.app.test_client()
+    with client.session_transaction() as session:
+        session["_csrf_token"] = "test-csrf-token"
+
+    response = client.post(
+        "/refresh/site",
+        data={"csrf_token": "test-csrf-token", "next": "/groceries"},
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/groceries"
+    assert calls
+    argv, kwargs = calls[0]
+    assert argv[:2] == [sys.executable, "-c"]
+    assert "DBUS_SESSION_BUS_ADDRESS" in argv[2]
+    assert "daemon-reload" in argv[2]
+    assert argv[-1] == "clockwork-web.service"
+    assert kwargs["start_new_session"] is True
+    assert kwargs["stdin"] is web_app.subprocess.DEVNULL
+
+
 def test_state_changing_post_rejects_missing_csrf_and_origin(tmp_path, monkeypatch):
     manifest_path = tmp_path / "shock-relay" / "gmail-digest.toml"
     _write_interval_manifest(manifest_path)
