@@ -61,6 +61,10 @@ should change how future sessions work in this repo.
   more than a few actions, hide long text labels at mobile widths and preserve
   them as `title`/`aria-label` text instead of allowing the header to wrap into
   a tall multi-row toolbar.
+- A web UI button that restarts the web service hosting the current request
+  should return the HTTP response first, then schedule a short delayed
+  `systemctl --user restart ...` out of process. A direct blocking restart can
+  kill the handler before the browser receives useful feedback.
 - When one downstream repo schedules multiple unattended agentic maintenance
   jobs, keep them as separate manifests and stagger their boot delays instead of
   hiding unrelated workflows behind one timer.

@@ -54,6 +54,18 @@
       opacity: 0.7; transition: opacity 0.15s;
     }
     .back-link:hover { opacity: 1; }
+    .nav-category-link {
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .refresh-form { display: inline-flex; margin: 0; }
+    .refresh-btn {
+      border: 0;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+    }
+    .nav-icon { display: none; }
     header h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; }
     .subtitle { color: var(--muted); font-size: 12px; }
 
@@ -365,6 +377,17 @@
     /* ── Mobile ── */
     @media (max-width: 600px) {
       header { flex-wrap: wrap; padding: 10px 14px; }
+      .nav-category-link {
+        width: 24px;
+        height: 24px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        font-size: 18px;
+      }
+      .nav-label { display: none; }
+      .nav-icon { display: inline; }
       .item { min-height: 48px; }
     }
   </style>
@@ -376,7 +399,13 @@
     <a href="/home" class="back-link" title="Home">🏠</a>
     <a href="/shopping" class="back-link" title="Shopping">🛍️</a>
     <a href="/" class="back-link" title="Clockwork">⏰</a>
-    {% for cat in nav_categories %}<a href="{{ cat.href }}" class="back-link" style="font-size:13px;font-weight:500">{{ cat.label }}</a>{% endfor %}
+    <form method="post" action="/refresh/site" class="refresh-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next" value="/groceries">
+      <button type="submit" class="back-link refresh-btn" title="Refresh site" aria-label="Refresh site">↻</button>
+    </form>
+    {% set nav_icons = {"Monitoring": "📊", "Pit Box": "💻", "Infrastructure": "🧰", "AI": "🤖"} %}
+    {% for cat in nav_categories %}<a href="{{ cat.href }}" class="back-link nav-category-link" title="{{ cat.label }}" aria-label="{{ cat.label }}"><span class="nav-icon" aria-hidden="true">{{ nav_icons.get(cat.label, "🔗") }}</span><span class="nav-label">{{ cat.label }}</span></a>{% endfor %}
     <div>
       <h1>🛒 Groceries</h1>
       <div class="subtitle">

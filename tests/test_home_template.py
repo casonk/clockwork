@@ -1,6 +1,8 @@
 from pathlib import Path
 
 HOME_TEMPLATE = Path(__file__).resolve().parents[1] / "web" / "templates" / "home.html"
+GROCERIES_TEMPLATE = Path(__file__).resolve().parents[1] / "web" / "templates" / "groceries.html"
+SHOPPING_TEMPLATE = Path(__file__).resolve().parents[1] / "web" / "templates" / "shopping.html"
 
 
 def test_home_cards_use_shrinkable_mobile_grid_tracks():
@@ -26,3 +28,22 @@ def test_home_header_uses_compact_mobile_icon_toolbar():
         'nav_icons = {"Monitoring": "📊", "Pit Box": "💻", "Infrastructure": "🧰", "AI": "🤖"}'
         in css
     )
+    assert 'action="/refresh/site"' in css
+    assert 'aria-label="Refresh site"' in css
+
+
+def test_list_pages_use_compact_mobile_category_icons():
+    for template in (GROCERIES_TEMPLATE, SHOPPING_TEMPLATE):
+        css = template.read_text()
+
+        assert ".nav-category-link {" in css
+        assert ".nav-label { display: none; }" in css
+        assert ".nav-icon { display: inline; }" in css
+        assert (
+            'nav_icons = {"Monitoring": "📊", "Pit Box": "💻", "Infrastructure": "🧰", "AI": "🤖"}'
+            in css
+        )
+        assert 'class="back-link nav-category-link"' in css
+        assert 'aria-label="{{ cat.label }}"' in css
+        assert 'action="/refresh/site"' in css
+        assert 'aria-label="Refresh site"' in css
