@@ -94,6 +94,24 @@ def test_windows_interval_timer_becomes_a_repetition():
     assert interval.text == "PT15M"
 
 
+def test_windows_stepped_minutes_become_a_daily_repetition():
+    job = _job(timer=TimerSpec(kind="calendar", on_calendar="*:0/5"))
+    root = ET.fromstring(render_windows_task(job))
+
+    trigger = root.find(f"{NS}Triggers/{NS}CalendarTrigger")
+    assert trigger.find(f"{NS}StartBoundary").text.endswith("T00:00:00")
+    assert trigger.find(f"{NS}Repetition/{NS}Interval").text == "PT5M"
+    assert trigger.find(f"{NS}Repetition/{NS}Duration").text == "P1D"
+    assert trigger.find(f"{NS}ScheduleByDay/{NS}DaysInterval").text == "1"
+
+
+def test_windows_refuses_a_minute_step_that_does_not_divide_the_hour():
+    job = _job(timer=TimerSpec(kind="calendar", on_calendar="*:0/7"))
+
+    with pytest.raises(ValueError, match="divides 60"):
+        render_windows_task(job)
+
+
 @pytest.mark.parametrize(
     "exec_start",
     [
