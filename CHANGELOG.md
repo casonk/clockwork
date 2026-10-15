@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Render stepped-minute calendars such as `*:0/5` for `launchd-user` (one
+  `Minute` entry per step, no hour) and `windows-user` (a daily trigger that
+  repeats every step). A five-minute sampler previously could not be
+  installed on macOS at all.
 - Add the shared `install-check` workflow to CI, so the package is installed
   from a clean runner on Linux, macOS and Windows and the `clockwork` console
   script is actually executed. `python-ci` imports the source tree on ubuntu

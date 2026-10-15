@@ -27,6 +27,9 @@ _SYSTEMD_CALENDAR_RE = re.compile(
     r"\*-\*-\*\s+(\d{1,2})(?:/(\d{1,2}))?:(\d{2})(?::(\d{2}))?$",
     re.IGNORECASE,
 )
+# systemd's every-N-minutes form: "*:0/5" or "*-*-* *:00/15:00". Hours are
+# left open, so it repeats every hour of every day.
+_MINUTE_STEP_RE = re.compile(r"^(?:\*-\*-\*\s+)?\*:(\d{1,2})/(\d{1,2})(?::00)?$")
 _DURATION_RE = re.compile(r"^(\d+)\s*([smhd]?)$", re.IGNORECASE)
 _LAUNCHD_WEEKDAYS = {
     "sun": 0,
@@ -242,12 +245,29 @@ def _duration_seconds(
     return seconds
 
 
+def _minute_step(value: str) -> tuple[int, int] | None:
+    """(first minute, step) for an every-N-minutes calendar, else None."""
+    match = _MINUTE_STEP_RE.fullmatch(value.strip())
+    if not match:
+        return None
+    start, step = int(match.group(1)), int(match.group(2))
+    if start > 59 or step < 1 or step > 59:
+        raise ValueError(f"invalid calendar minute step: {value!r}")
+    return start, step
+
+
 def _calendar_intervals(value: str) -> dict[str, int] | list[dict[str, int]]:
+    minute_step = _minute_step(value)
+    if minute_step:
+        # No Hour key: launchd then matches the minute in every hour.
+        start, step = minute_step
+        return [{"Minute": minute} for minute in range(start, 60, step)]
     match = _SYSTEMD_CALENDAR_RE.fullmatch(value.strip())
     if not match:
         raise ValueError(
             "launchd calendar rendering supports only '*-*-* HH:MM[:SS]', "
-            "'Day *-*-* HH:MM[:SS]', and stepped hours such as '*-*-* 00/4:00'"
+            "'Day *-*-* HH:MM[:SS]', stepped hours such as '*-*-* 00/4:00', "
+            "and stepped minutes such as '*:0/5'"
         )
 
     weekday, hour_text, step_text, minute_text, second_text = match.groups()
@@ -631,6 +651,32 @@ def _windows_triggers(job: JobSpec) -> list[str]:
         ]
 
     assert timer.on_calendar is not None
+    minute_step = _minute_step(timer.on_calendar)
+    if minute_step:
+        # One daily trigger repeating every step reproduces systemd's minute
+        # list only when the step divides the hour; otherwise systemd restarts
+        # the list at each hour and a fixed repetition would drift from it.
+        start, step = minute_step
+        if 60 % step or start >= step:
+            raise ValueError(
+                f"windows-user can repeat {timer.on_calendar!r} exactly only when "
+                "the minute step divides 60 and the first minute is below the step"
+            )
+        return [
+            "    <CalendarTrigger>\n"
+            f"      <StartBoundary>{_WINDOWS_START_DATE}T00:{start:02d}:00</StartBoundary>\n"
+            "      <Enabled>true</Enabled>\n"
+            "      <Repetition>\n"
+            f"        <Interval>PT{step}M</Interval>\n"
+            "        <Duration>P1D</Duration>\n"
+            "        <StopAtDurationEnd>false</StopAtDurationEnd>\n"
+            "      </Repetition>"
+            f"{random_delay}\n"
+            "      <ScheduleByDay>\n"
+            "        <DaysInterval>1</DaysInterval>\n"
+            "      </ScheduleByDay>\n"
+            "    </CalendarTrigger>"
+        ]
     intervals = _calendar_intervals(timer.on_calendar)
     if isinstance(intervals, dict):
         intervals = [intervals]
