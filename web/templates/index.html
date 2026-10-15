@@ -420,7 +420,8 @@
     <a href="/home" style="font-size:18px; text-decoration:none; opacity:0.6; transition:opacity 0.15s;" title="Home" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">🏠</a>
     <a href="/groceries" style="font-size:18px; text-decoration:none; opacity:0.6; transition:opacity 0.15s;" title="Groceries" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">🛒</a>
     <a href="/shopping" style="font-size:18px; text-decoration:none; opacity:0.6; transition:opacity 0.15s;" title="Shopping" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">🛍️</a>
-    {% for cat in nav_categories %}<a href="{{ cat.href }}" style="font-size:13px; font-weight:500; text-decoration:none; opacity:0.6; transition:opacity 0.15s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6">{{ cat.label }}</a>{% endfor %}
+    {% set nav_icons = {"Monitoring": "📊", "Pit Box": "💻", "Infrastructure": "🧰", "AI": "🤖"} %}
+    {% for cat in nav_categories %}<a href="{{ cat.href }}" title="{{ cat.label }}" aria-label="{{ cat.label }}" style="font-size:20px; font-weight:500; text-decoration:none; opacity:0.6; transition:opacity 0.15s;" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6"><span aria-hidden="true">{{ nav_icons.get(cat.label, "🔗") }}</span></a>{% endfor %}
   </div>
 
   <div class="global-controls">

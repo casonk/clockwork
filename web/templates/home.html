@@ -59,10 +59,11 @@
       opacity: 0.6; transition: opacity 0.15s;
     }
     .nav-link:hover { opacity: 1; }
-    .nav-link-text { font-size: 13px; font-weight: 500; width: auto; padding: 0 4px; }
+    .nav-link-text { gap: 5px; font-size: 13px; font-weight: 500; width: auto; padding: 0 4px; }
     .nav-form { display: inline-flex; flex: 0 0 auto; margin: 0; }
     .nav-button { border: 0; background: transparent; color: inherit; cursor: pointer; }
-    .nav-icon { display: none; }
+    .nav-icon { display: inline; }
+    .nav-label { display: none; }
 
     main { max-width: 1100px; margin: 0 auto; padding: 28px 20px 80px; }
 
@@ -218,7 +219,7 @@
     <a href="/to-tradility" class="nav-link" title="Tradility">📈</a>
     <a href="/" class="nav-link" title="Clockwork">⏰</a>
     {% set nav_icons = {"Monitoring": "📊", "Pit Box": "💻", "Infrastructure": "🧰", "AI": "🤖"} %}
-    {% for cat in nav_categories %}<a href="{{ cat.href }}" class="nav-link nav-link-text" title="{{ cat.label }}" aria-label="{{ cat.label }}"><span class="nav-icon" aria-hidden="true">{{ nav_icons.get(cat.label, "🔗") }}</span><span class="nav-label">{{ cat.label }}</span></a>{% endfor %}
+    {% for cat in nav_categories %}<a href="{{ cat.href }}" class="nav-link" title="{{ cat.label }}" aria-label="{{ cat.label }}"><span class="nav-icon" aria-hidden="true">{{ nav_icons.get(cat.label, "🔗") }}</span><span class="nav-label">{{ cat.label }}</span></a>{% endfor %}
     <form method="post" action="/refresh/site" class="nav-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="next" value="/home">
