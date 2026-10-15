@@ -115,6 +115,34 @@ def test_launchd_stepped_calendar_maps_each_hour():
     assert [entry["Hour"] for entry in payload["StartCalendarInterval"]] == [2, 8, 14, 20]
 
 
+@pytest.mark.parametrize("on_calendar", ["*:0/5", "*-*-* *:00/5:00"])
+def test_launchd_stepped_minutes_repeat_every_hour(on_calendar):
+    job = _job(
+        service_type="oneshot",
+        restart=None,
+        restart_sec=None,
+        service_install_wanted_by=(),
+        timer=TimerSpec(kind="calendar", on_calendar=on_calendar),
+    )
+
+    payload = plistlib.loads(render_launchd_plist(job, home=Path("/Users/tester")).encode("utf-8"))
+
+    assert payload["StartCalendarInterval"] == [{"Minute": m} for m in range(0, 60, 5)]
+
+
+def test_launchd_rejects_an_out_of_range_minute_step():
+    job = _job(
+        service_type="oneshot",
+        restart=None,
+        restart_sec=None,
+        service_install_wanted_by=(),
+        timer=TimerSpec(kind="calendar", on_calendar="*:0/60"),
+    )
+
+    with pytest.raises(ValueError, match="minute step"):
+        render_launchd_plist(job, home=Path("/Users/tester"))
+
+
 def test_launchd_calendar_maps_multiple_weekdays_without_duplicate_labels():
     job = _job(
         service_type="oneshot",

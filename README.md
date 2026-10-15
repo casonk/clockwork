@@ -193,8 +193,12 @@ Launchd rendering intentionally rejects fields that cannot be mapped without
 changing behavior: user/group identity changes, systemd ordering dependencies,
 delayed-login `on_boot_sec`, timer randomization/accuracy, non-default install
 targets, system scope, and unsupported restart policies. Supported calendar
-forms are daily, weekday, and stepped-hour schedules. Supported interval jobs
-use `on_unit_active_sec` without `on_boot_sec`.
+forms are daily, weekday, stepped-hour, and stepped-minute schedules. A
+stepped-minute calendar such as `*:0/5` becomes one `StartCalendarInterval`
+entry per minute with no hour, so it repeats every hour. Windows renders it as
+a daily trigger repeating every step, and refuses a step that does not divide
+60, where a fixed repetition would drift from systemd's hourly restart.
+Supported interval jobs use `on_unit_active_sec` without `on_boot_sec`.
 
 ## Manifest Shape
 
