@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Pin registry services to the `/home` top bar (`_TOP_BAR_SERVICES`); the
+  career web UI gets a 💼 link whose URL comes from the wiring-harness registry.
+
 - Render stepped-minute calendars such as `*:0/5` for `launchd-user` (one
   `Minute` entry per step, no hour) and `windows-user` (a daily trigger that
   repeats every step). A five-minute sampler previously could not be

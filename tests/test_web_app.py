@@ -1531,3 +1531,33 @@ def test_cron_autogeneration_requires_explicit_opt_in(monkeypatch):
 
     monkeypatch.setenv("CLOCKWORK_WEB_AUTOGENERATE_CRON", "true")
     assert web_app._autogenerate_cron_enabled() is True
+
+
+def test_top_bar_links_pinned_services_from_the_registry():
+    groups = [
+        (
+            "Other",
+            [
+                {
+                    "name": "career-web",
+                    "url": "https://career.home.internal",
+                    "icon": "💼",
+                    "display": "Career",
+                }
+            ],
+        ),
+        (
+            "AI",
+            [
+                {
+                    "name": "session-control",
+                    "url": "https://sessions.home.internal",
+                    "icon": "🤖",
+                    "display": "S",
+                }
+            ],
+        ),
+    ]
+
+    assert [c["url"] for c in web_app._top_bar_services(groups)] == ["https://career.home.internal"]
+    assert web_app._top_bar_services([]) == []
