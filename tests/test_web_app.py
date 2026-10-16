@@ -1539,10 +1539,11 @@ def test_top_bar_links_pinned_services_from_the_registry():
             "Other",
             [
                 {
-                    "name": "career-web",
-                    "url": "https://career.home.internal",
+                    "name": "example-web",
+                    "url": "https://example.home.internal",
                     "icon": "💼",
-                    "display": "Career",
+                    "display": "Example",
+                    "top_bar": True,
                 }
             ],
         ),
@@ -1559,5 +1560,21 @@ def test_top_bar_links_pinned_services_from_the_registry():
         ),
     ]
 
-    assert [c["url"] for c in web_app._top_bar_services(groups)] == ["https://career.home.internal"]
+    assert [c["url"] for c in web_app._top_bar_services(groups)] == [
+        "https://example.home.internal"
+    ]
     assert web_app._top_bar_services([]) == []
+
+
+def test_registry_entry_sets_top_bar_pin_and_icon(tmp_path, monkeypatch):
+    (tmp_path / "services.local.toml").write_text(
+        "[[services]]\n"
+        'name = "example-web"\ndescription = "Example"\nhostname = "example.home.internal"\n'
+        'access_mode = "shared-mtls"\ntop_bar = true\nicon = "💼"\n\n'
+        "[[services]]\n"
+        'name = "other-web"\ndescription = "Other"\nhostname = "other.home.internal"\naccess_mode = "shared-mtls"\n'
+    )
+    monkeypatch.setattr(web_app, "WIRING_HARNESS_DIR", tmp_path)
+    with web_app.app.test_request_context("/home", base_url="https://clockwork.home.internal"):
+        pinned = web_app._top_bar_services(web_app._load_portal_groups())
+    assert [(c["name"], c["icon"]) for c in pinned] == [("example-web", "💼")]
