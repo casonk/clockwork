@@ -4627,7 +4627,12 @@ _SERVICE_ICONS: dict[str, str] = {
     "nordility-web": "🛡️",
     "magneto-web": "🧲",
     "session-control": "🤖",
+    "career-web": "💼",
 }
+
+# Registry services that also get a direct link in the /home top bar. The URL
+# always comes from the wiring-harness registry, never a second hostname list.
+_TOP_BAR_SERVICES: tuple[str, ...] = ("career-web",)
 
 _REPO_GROUP: dict[str, str] = {
     "./util-repos/clockwork": "Clockwork",
@@ -4695,6 +4700,12 @@ def _load_nav_categories() -> list[dict]:
         for g in _NAV_CATEGORY_GROUPS
         if g in populated
     ]
+
+
+def _top_bar_services(groups: list[tuple[str, list[dict]]]) -> list[dict]:
+    """Portal cards for the services pinned to the top bar, in pin order."""
+    cards = {card["name"]: card for _, group_cards in groups for card in group_cards}
+    return [cards[name] for name in _TOP_BAR_SERVICES if name in cards]
 
 
 def _load_portal_groups() -> list[tuple[str, list[dict]]]:
@@ -4811,7 +4822,8 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
 
 @app.get("/home")
 def home():
-    return render_template("home.html", groups=_load_portal_groups())
+    groups = _load_portal_groups()
+    return render_template("home.html", groups=groups, top_bar_services=_top_bar_services(groups))
 
 
 def _schedule_clockwork_web_refresh() -> tuple[bool, str]:

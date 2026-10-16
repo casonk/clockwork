@@ -218,6 +218,7 @@
     <a href="/to-do" class="nav-link" title="To Do">✅</a>
     <a href="/to-tradility" class="nav-link" title="Tradility">📈</a>
     <a href="/" class="nav-link" title="Clockwork">⏰</a>
+    {% for svc in top_bar_services %}<a href="{{ svc.url }}" class="nav-link" title="{{ svc.display }}" aria-label="{{ svc.display }}">{{ svc.icon }}</a>{% endfor %}
     {% set nav_icons = {"Monitoring": "📊", "Pit Box": "💻", "Infrastructure": "🧰", "AI": "🤖"} %}
     {% for cat in nav_categories %}<a href="{{ cat.href }}" class="nav-link" title="{{ cat.label }}" aria-label="{{ cat.label }}"><span class="nav-icon" aria-hidden="true">{{ nav_icons.get(cat.label, "🔗") }}</span><span class="nav-label">{{ cat.label }}</span></a>{% endfor %}
     <form method="post" action="/refresh/site" class="nav-form">
