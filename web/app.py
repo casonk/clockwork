@@ -4627,12 +4627,7 @@ _SERVICE_ICONS: dict[str, str] = {
     "nordility-web": "🛡️",
     "magneto-web": "🧲",
     "session-control": "🤖",
-    "career-web": "💼",
 }
-
-# Registry services that also get a direct link in the /home top bar. The URL
-# always comes from the wiring-harness registry, never a second hostname list.
-_TOP_BAR_SERVICES: tuple[str, ...] = ("career-web",)
 
 _REPO_GROUP: dict[str, str] = {
     "./util-repos/clockwork": "Clockwork",
@@ -4703,9 +4698,13 @@ def _load_nav_categories() -> list[dict]:
 
 
 def _top_bar_services(groups: list[tuple[str, list[dict]]]) -> list[dict]:
-    """Portal cards for the services pinned to the top bar, in pin order."""
-    cards = {card["name"]: card for _, group_cards in groups for card in group_cards}
-    return [cards[name] for name in _TOP_BAR_SERVICES if name in cards]
+    """Portal cards pinned to the /home top bar, in registry order.
+
+    A service is pinned by ``top_bar = true`` in its wiring-harness registry
+    entry, so the pins (which may name private services) stay in the ignored
+    local registry rather than in this repository.
+    """
+    return [card for _, group_cards in groups for card in group_cards if card.get("top_bar")]
 
 
 def _load_portal_groups() -> list[tuple[str, list[dict]]]:
@@ -4739,7 +4738,10 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
             "url": _svc_url(svc, air_wireguard_ip=air_wireguard_ip, local_air=local_air),
             "hostname": str(svc.get("hostname", "")),
             "access_mode": str(svc.get("access_mode", "")),
-            "icon": _SERVICE_ICONS.get(name, "🔗"),
+            # A registry entry may set its own icon; private services do so
+            # because they are not named here.
+            "icon": str(svc.get("icon") or _SERVICE_ICONS.get(name, "🔗")),
+            "top_bar": bool(svc.get("top_bar", False)),
         }
         if name == "pit-box-remote-desktop":
             card["rdp_url"] = rdp_url
