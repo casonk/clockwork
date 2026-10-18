@@ -179,3 +179,19 @@ should change how future sessions work in this repo.
 - `wbsearchentities` matches aliases (searching "Napoleon Dynamite" returns a
   musician); use the full-text `Search` API through `mwapi` with
   `haswbstatement:P31=...` filters, then score candidates by title and year.
+
+### 2026-10-18 — On-demand HLS transcoding
+
+- `h264_nvenc` ignores `-force_key_frames` unless `-forced-idr 1` is set; without
+  it segments follow the default GOP (about 10 s) instead of `-hls_time`.
+- Seeking with `-ss` before `-i` plus `-output_ts_offset <start>` (not
+  `-copyts`) keeps `-t`, `-force_key_frames expr:gte(t,n_forced*N)` and the
+  segment timestamps consistent across runs that start at different points.
+- Fedora's ffmpeg has no `scale_cuda`; decode with `-hwaccel cuda` and convert
+  10-bit to 8-bit with `-vf format=yuv420p` before NVENC.
+- Recent Chromium answers `canPlayType("application/vnd.apple.mpegurl")`, and
+  its native HLS stalls on seeks into segments still being produced. Prefer
+  hls.js whenever Media Source Extensions exist.
+- When several transcoder runs share one segment directory, judge a run's
+  progress from its own playlist only; counting segments left by earlier seeks
+  made a fresh run look finished, so requests waited on a paused process.

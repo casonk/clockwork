@@ -147,18 +147,68 @@ def test_subtitles_are_served_as_webvtt(client):
     )
 
 
-def test_play_page_embeds_video_and_tracks(client):
+@pytest.fixture()
+def probed(monkeypatch):
+    streaming = pages.streaming
+
+    def probe(path):
+        if path.suffix == ".mp4":
+            return streaming.MediaInfo(5400.0, ".mp4", "h264", "yuv420p", "aac")
+        return streaming.MediaInfo(13.0, ".mkv", "hevc", "yuv420p10le", "aac", ((0, "eng"),))
+
+    monkeypatch.setattr(streaming, "probe_media", probe)
+    return streaming
+
+
+def test_play_page_plays_mp4_directly_and_streams_mkv(client, probed):
     html = client.get(
         "/library/play/movies/Thriller/Seven (1995)/Seven_1995_1080p_David_Fincher.mp4"
     ).get_data(as_text=True)
 
     assert "<video" in html and 'kind="subtitles"' in html
-    assert "cannot play" not in html
+    assert "direct play" in html and "data-hls" not in html and "hls.min.js" not in html
+
     mkv = client.get(
         "/library/play/shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E01_1080p.mkv"
     ).get_data(as_text=True)
-    assert "cannot play" in mkv
+    assert 'data-hls="/library/stream/shows/Breaking' in mkv
+    assert "index.m3u8" in mkv and "hls.min.js" in mkv and 'integrity="sha384-' in mkv
+    assert "hevc 10-bit → h264" in mkv
+    assert "/sub/0.vtt" in mkv and "eng (embedded)" in mkv
     assert "Breaking Bad (2008)" in mkv
+
+
+def test_stream_routes_serve_playlist_segments_and_subtitles(client, probed, tmp_path, monkeypatch):
+    segment_file = tmp_path / "seg_1.ts"
+    segment_file.write_bytes(b"\x47" * 188)
+    calls = []
+
+    class FakeManager:
+        def session(self, source):
+            calls.append(("session", source.name))
+            return probed.Session("k", source, tmp_path, probed.probe_media(source))
+
+        def segment(self, source, index):
+            calls.append(("segment", index))
+            return segment_file if index == 1 else None
+
+    monkeypatch.setattr(probed, "manager", lambda: FakeManager())
+    monkeypatch.setattr(
+        probed, "subtitle_vtt", lambda _source, index: f"WEBVTT\n\nstream {index}\n"
+    )
+    base = "/library/stream/shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E01_1080p.mkv"
+
+    playlist = client.get(base + "/index.m3u8")
+    assert playlist.mimetype == "application/vnd.apple.mpegurl"
+    assert playlist.get_data(as_text=True).count("seg/") == 3
+
+    segment = client.get(base + "/seg/1.ts")
+    assert segment.status_code == 200 and segment.mimetype == "video/mp2t"
+    assert client.get(base + "/seg/2.ts").status_code == 503
+
+    assert client.get(base + "/sub/0.vtt").get_data(as_text=True) == "WEBVTT\n\nstream 0\n"
+    assert client.get("/library/stream/../../etc/passwd/index.m3u8").status_code == 404
+    assert ("segment", 1) in calls
 
 
 def test_browse_lists_folders_and_hides_release_clutter(client):

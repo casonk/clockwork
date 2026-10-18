@@ -22,7 +22,7 @@
     </td>
     <td class="small" style="white-space:nowrap">{{ item.size }}</td>
     <td style="white-space:nowrap">
-      <a class="btn primary" href="{{ url_for('library_pages.play_page', rel=item.rel) }}" title="{% if not item.playable %}This format may not play in the browser{% endif %}">▶ Play</a>
+      <a class="btn primary" href="{{ url_for('library_pages.play_page', rel=item.rel) }}" title="{% if item.playable %}Plays directly{% else %}Streams with on-the-fly conversion{% endif %}">▶ Play</a>
       <a class="btn" href="{{ url_for('library_pages.media_file', rel=item.rel, download=1) }}" title="Download">⬇</a>
     </td>
   </tr>

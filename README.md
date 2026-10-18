@@ -165,9 +165,19 @@ Library pages (`web/library_pages.py`):
   subtitle and audio tracks, episodes grouped by season, extras, and a
   genre-folder dropdown that moves a movie (journaled; sync keeps the choice).
 - `/library/play/<file>`: plays a video in the browser with its `.srt`
-  subtitles converted to WebVTT. Files are served with HTTP range support for
-  seeking; nothing is transcoded, so MKV/HEVC/AVI files show a warning and a
-  download link instead.
+  subtitles (and embedded text subtitles) converted to WebVTT. MP4 with
+  H.264/AAC plays directly with HTTP range seeking. Everything else (MKV,
+  HEVC, 10-bit, AC3/DTS audio, AVI) streams as HLS from `web/streaming.py`:
+  the player gets a playlist for the whole file in 6-second segments and
+  ffmpeg transcodes them on demand to H.264 + stereo AAC, on the GPU with
+  NVENC when available (x264 otherwise). Seeking past what is converted
+  restarts ffmpeg at that point; forced IDR frames and an output timestamp
+  offset keep segments from different runs aligned. A transcoder pauses when
+  it is 40 segments ahead of the viewer (also after the tab closes), and
+  sessions idle for 10 minutes are removed. Segments live in
+  `CLOCKWORK_STREAM_CACHE` (default `~/.cache/clockwork/library-hls`), at most
+  three sessions at a time. hls.js (pinned, SRI-checked) drives playback;
+  browsers without Media Source Extensions fall back to native HLS.
 - `/library/browse/`: the folder tree as it is on disk, hidden `.release/`
   folders excluded, with play and download links.
 - `/library/manage`: start a sync (`systemctl --user start` of
