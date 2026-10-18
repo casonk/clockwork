@@ -275,13 +275,19 @@ def test_quality_profiles_follow_the_source_resolution():
     uhd = streaming.MediaInfo(60, ".mkv", "hevc", "yuv420p10le", "aac", height=2160)
     sd = streaming.MediaInfo(60, ".avi", "mpeg4", "yuv420p", "mp3", height=360)
 
-    assert [p.name for p in streaming.available_profiles(hd)] == ["original", "720p", "480p"]
+    assert [p.name for p in streaming.available_profiles(hd)] == [
+        "original",
+        "720p",
+        "480p",
+        "360p",
+    ]
     assert [p.name for p in streaming.available_profiles(uhd)] == [
         "original",
         "1440p",
         "1080p",
         "720p",
         "480p",
+        "360p",
     ]
     assert [p.name for p in streaming.available_profiles(sd)] == ["original"]
     original = streaming.PROFILES["original"]

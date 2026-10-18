@@ -29,7 +29,7 @@
 <div class="panel" style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center">
   <label class="small muted" style="display:inline-flex; gap:6px; align-items:center">Quality
     <select id="quality">
-      {% for q in qualities %}<option value="{{ q.name }}">{{ q.label }}{% if q.name != "original" %} · ~{{ "%.1f"|format(q.kbps / 1000) }} Mb/s{% endif %}</option>{% endfor %}
+      {% for q in qualities %}<option value="{{ q.name }}">{{ q.label }}{% if q.kbps and q.name != "original" %} · ~{{ "%.1f"|format(q.kbps / 1000) }} Mb/s{% endif %}</option>{% endfor %}
     </select>
   </label>
   <span id="mode-badge" class="badge kind"
@@ -87,9 +87,15 @@
       resumeAt(time, playing);
       return;
     }
-    badge.textContent = quality === "original" ? badge.dataset.converted : "streaming at " + quality;
+    const ai = quality.indexOf("ai-") === 0;
+    badge.textContent = ai
+      ? "✨ AI super-resolution (experimental)"
+      : quality === "original" ? badge.dataset.converted : "streaming at " + quality;
     badge.className = "badge kind";
-    const source = hlsBase + "?q=" + encodeURIComponent(quality);
+    // AI renders stream at their own full resolution through the same converter.
+    const source = ai
+      ? hlsBase + "?q=original&v=" + encodeURIComponent(quality)
+      : hlsBase + "?q=" + encodeURIComponent(quality);
     // Prefer hls.js wherever Media Source Extensions exist: it handles seeking into
     // segments that are still being converted. Native HLS (older iOS) is the fallback.
     if (!window.Hls || !window.Hls.isSupported()) {
