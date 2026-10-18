@@ -221,3 +221,53 @@ def test_existing_list_api_add_toggle_delete_item(client, api_path, category, it
     )
     assert delete_resp.status_code == 200
     assert delete_resp.get_json()["ok"] is True
+
+
+def test_watch_check_get_describes_endpoint(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(web_app, "WATCH_DIR", tmp_path)
+    monkeypatch.setattr(web_app, "_EXTRA_WATCH_DIRS", [tmp_path / "missing"])
+
+    resp = client.get("/api/watch-check")
+
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["available"] is True
+    assert body["dirs"] == [
+        {"path": str(tmp_path), "exists": True},
+        {"path": str(tmp_path / "missing"), "exists": False},
+    ]
+    assert body["usage"].startswith("POST")
+
+
+def test_to_watch_renders_torrent_and_library_controls(client, list_files):
+    list_files["WATCH_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {
+                        "name": "Movies",
+                        "items": [
+                            {"title": "Napoleon Dynamite", "year": 2004, "watched": False},
+                            {"title": "Brazil", "year": 1985, "watched": True},
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+
+    html = client.get("/to-watch").get_data(as_text=True)
+
+    assert 'id="lib-check-btn"' in html
+    assert 'href="/api/watch-check"' not in html
+    assert 'data-query="Napoleon Dynamite 2004"' in html
+    assert 'data-query="Brazil' not in html
+    assert html.count('class="search-panel"') == 1
+    assert "/api/torrent-add" in html
+
+
+def test_other_lists_do_not_render_torrent_controls(client):
+    html = client.get("/to-read").get_data(as_text=True)
+
+    assert "find-btn" not in html.split("</style>")[1]
+    assert "lib-check-btn" not in html.split("</style>")[1]
