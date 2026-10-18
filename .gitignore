@@ -29,6 +29,8 @@ config/shopping-rules.json
 *.crontab
 config/web/caddy/*.local
 *.local.toml
+# Local env files next to their tracked *.env.example (e.g. config/upscale.env.local).
+*.env.local
 
 /REFS-LOCAL.md
 
