@@ -722,3 +722,32 @@ def test_plan_file_names_is_stable_for_underscored_episodes(tmp_path):
 
     assert (season / "Breaking_Bad_S01E01_1080p.mkv").exists()
     assert ml.plan_file_names(root, conn, prober=_prober) == []
+
+
+def test_wikidata_shows_prefer_creators_over_episode_directors():
+    rows = iter(
+        [
+            {
+                "results": {
+                    "bindings": [
+                        {
+                            "item": {"value": "http://www.wikidata.org/entity/Q1079"},
+                            "itemLabel": {"value": "Breaking Bad"},
+                            "type": {"value": "http://www.wikidata.org/entity/Q5398426"},
+                            "year": {"value": "2008"},
+                        }
+                    ]
+                }
+            },
+            {
+                "results": {
+                    "bindings": [
+                        {"p": {"value": "director"}, "valueLabel": {"value": "Michelle MacLaren"}},
+                        {"p": {"value": "creator"}, "valueLabel": {"value": "Vince Gilligan"}},
+                    ]
+                }
+            },
+        ]
+    )
+    meta = ml.WikidataProvider(fetch=lambda _url: next(rows)).search("Breaking Bad", 2008, "shows")
+    assert meta.directors == ["Vince Gilligan"]
