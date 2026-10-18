@@ -883,8 +883,8 @@ UNKNOWN = "Unknown"
 
 
 def _field(text: str) -> str:
-    # Underscores separate fields, so a field itself never contains one.
-    return safe_component(text.replace("_", " "))
+    # File names carry no spaces at all: every space, inside or between fields, is "_".
+    return re.sub(r"_+", "_", safe_component(text.replace("_", " ")).replace(" ", "_"))
 
 
 def director_field(directors: Iterable[str]) -> str:
@@ -899,23 +899,28 @@ def movie_stem(
     directors: Iterable[str] = (),
     edition: str | None = None,
 ) -> str:
-    """NAME_DATE_QUALITY_DIRECTOR[_EDITION], e.g. ``Napoleon Dynamite_2004_1080p_Jared Hess``."""
+    """NAME_DATE_QUALITY_DIRECTOR[_EDITION], e.g. ``Napoleon_Dynamite_2004_1080p_Jared_Hess``."""
     fields = [title, str(year) if year else UNKNOWN, quality or UNKNOWN, director_field(directors)]
     if edition:
         fields.append(edition)
     return "_".join(_field(f) for f in fields)
 
 
+EDITIONS = tuple(label for _pattern, label in _EDITION_PATTERNS)
+
+
 def _stem_edition(stem: str) -> str | None:
-    parts = stem.split("_")
-    if len(parts) >= 5:
-        return parts[4]
+    """Edition from a file stem; it is the trailing field when present."""
+    normalized = stem.replace(" ", "_")
+    for label in EDITIONS:
+        if normalized.endswith("_" + label.replace(" ", "_")):
+            return label
     legacy = re.search(r"\{edition-([^}]+)\}", stem)
     return legacy.group(1) if legacy else None
 
 
 def episode_stem(show: str, code: str, quality: str | None) -> str:
-    """NAME_EPISODE_QUALITY, e.g. ``Breaking Bad_S01E01_1080p``."""
+    """NAME_EPISODE_QUALITY, e.g. ``Breaking_Bad_S01E01_1080p``."""
     return "_".join(_field(f) for f in (show, code, quality or UNKNOWN))
 
 

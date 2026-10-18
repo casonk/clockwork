@@ -100,17 +100,18 @@ run as root.
 Jellyfin/Plex layout and builds a searchable metadata catalog:
 
 ```text
-watch/movies/Comedy/Napoleon Dynamite (2004)/Napoleon Dynamite_2004_1080p_Jared Hess.mp4
-watch/movies/Comedy/Napoleon Dynamite (2004)/Napoleon Dynamite_2004_1080p_Jared Hess.en.srt
-watch/movies/Crime/Goodfellas (1990)/Goodfellas_1990_1080p_Martin Scorsese_Remastered.mkv
-watch/shows/Breaking Bad (2008)/Season 01/Breaking Bad_S01E01_1080p.mkv
+watch/movies/Comedy/Napoleon Dynamite (2004)/Napoleon_Dynamite_2004_1080p_Jared_Hess.mp4
+watch/movies/Comedy/Napoleon Dynamite (2004)/Napoleon_Dynamite_2004_1080p_Jared_Hess.en.srt
+watch/movies/Crime/Goodfellas (1990)/Goodfellas_1990_1080p_Martin_Scorsese_Remastered.mkv
+watch/shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E01_1080p.mkv
 ```
 
 Folders stay `Title (Year)` so media servers keep matching them. Files are
-`NAME_DATE_QUALITY_DIRECTOR[_EDITION]` (episodes `SHOW_SxxEyy_QUALITY`):
-underscores separate fields, spaces stay inside a field, up to two directors
-are joined with ` & `, and a missing value is written `Unknown` so the fields
-keep their positions. Subtitles and audio tracks share the video's stem
+`NAME_DATE_QUALITY_DIRECTOR[_EDITION]` (episodes `SHOW_SxxEyy_QUALITY`) with
+every space written as `_`. Up to two directors are joined with `_&_`, a
+missing value is written `Unknown` so the fields keep their positions, and an
+edition (Extended, Director's Cut, …) is recognized by name as the last
+field. Subtitles and audio tracks share the video's stem
 (`….en.srt`, `….ac3`). Each `sync` renames existing files that drift from the
 convention, taking directors from the catalog.
 

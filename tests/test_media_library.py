@@ -127,8 +127,8 @@ def test_organize_movie_folder_renames_video_and_subtitles_and_can_undo(tmp_path
 
     folder = root / "movies" / "Other" / "The Dark Knight (2008)"
     assert done == 4
-    assert (folder / "The Dark Knight_2008_1080p_Unknown.mp4").stat().st_size == 1000
-    assert (folder / "The Dark Knight_2008_1080p_Unknown.en.srt").exists()
+    assert (folder / "The_Dark_Knight_2008_1080p_Unknown.mp4").stat().st_size == 1000
+    assert (folder / "The_Dark_Knight_2008_1080p_Unknown.en.srt").exists()
     assert (folder / ".release" / "WWW.YIFY-TORRENTS.COM.jpg").exists()
     assert not (folder / "Subs").exists()
 
@@ -173,9 +173,9 @@ def test_organize_show_files_episodes_into_seasons(tmp_path):
     ml.apply_plans(plans, tmp_path / "j.jsonl")
 
     show = root / "shows" / "It's Always Sunny in Philadelphia (2005)"
-    assert (show / "Season 01" / "It's Always Sunny in Philadelphia_S01E01_1080p.mkv").exists()
-    assert (show / "Season 01" / "It's Always Sunny in Philadelphia_S01E01_1080p.srt").exists()
-    assert (show / "Season 07" / "It's Always Sunny in Philadelphia_S07E02_1080p.mkv").exists()
+    assert (show / "Season 01" / "It's_Always_Sunny_in_Philadelphia_S01E01_1080p.mkv").exists()
+    assert (show / "Season 01" / "It's_Always_Sunny_in_Philadelphia_S01E01_1080p.srt").exists()
+    assert (show / "Season 07" / "It's_Always_Sunny_in_Philadelphia_S07E02_1080p.mkv").exists()
     assert (show / "Extras" / "Blooper reel.mkv").exists()
 
 
@@ -223,22 +223,22 @@ def test_organize_splits_movie_collections_into_one_folder_per_title(tmp_path):
     movies = root / "movies" / "Other"
     chamber = movies / "Harry Potter and the Chamber of Secrets (2002)"
     assert (
-        chamber / "Harry Potter and the Chamber of Secrets_2002_1080p_Unknown_Extended.mkv"
+        chamber / "Harry_Potter_and_the_Chamber_of_Secrets_2002_1080p_Unknown_Extended.mkv"
     ).exists()
     assert (
-        chamber / "Harry Potter and the Chamber of Secrets_2002_1080p_Unknown_Extended.en.srt"
+        chamber / "Harry_Potter_and_the_Chamber_of_Secrets_2002_1080p_Unknown_Extended.en.srt"
     ).exists()
     goblet = movies / "Harry Potter and the Goblet of Fire (2005)"
-    assert (goblet / "Harry Potter and the Goblet of Fire_2005_1080p_Unknown.mkv").exists()
+    assert (goblet / "Harry_Potter_and_the_Goblet_of_Fire_2005_1080p_Unknown.mkv").exists()
     assert (
         movies
         / "Jay and Silent Bob Reboot (2019)"
-        / "Jay and Silent Bob Reboot_2019_1080p_Unknown.mkv"
+        / "Jay_and_Silent_Bob_Reboot_2019_1080p_Unknown.mkv"
     ).exists()
     assert (
         movies
         / "Jay and Silent Bob Strike Back (2001)"
-        / "Jay and Silent Bob Strike Back_2001_1080p_Unknown.mkv"
+        / "Jay_and_Silent_Bob_Strike_Back_2001_1080p_Unknown.mkv"
     ).exists()
     assert not duo.exists()
     assert not pack.exists()
@@ -273,14 +273,14 @@ def test_show_pack_files_feature_films_as_movies(tmp_path):
 
     assert (root / "shows" / "Futurama (1999)" / "Season 01" / "Futurama_S01E02_1080p.mp4").exists()
     film = root / "movies" / "Other" / "Futurama - Bender's Big Score (2007)"
-    assert (film / "Futurama - Bender's Big Score_2007_1080p_Unknown.mp4").exists()
+    assert (film / "Futurama_-_Bender's_Big_Score_2007_1080p_Unknown.mp4").exists()
     assert not (root / "shows" / "Futurama (1999)" / "Futurama S05 (360p re-dvdrip)").exists()
 
 
 def test_apply_never_overwrites_existing_target(tmp_path):
     root = tmp_path / "watch"
     _touch(root / "Hot Rod 2007 1080p BluRay.mkv")
-    _touch(root / "movies" / "Other" / "Hot Rod (2007)" / "Hot Rod_2007_1080p_Unknown.mkv", 99)
+    _touch(root / "movies" / "Other" / "Hot Rod (2007)" / "Hot_Rod_2007_1080p_Unknown.mkv", 99)
 
     _batch, done = ml.apply_plans(
         ml.plan_library(root, prober=_prober, tracked=set()), tmp_path / "j"
@@ -382,7 +382,7 @@ def test_tmdb_provider_uses_credits():
 def test_scan_and_search_catalog(tmp_path):
     root = tmp_path / "watch"
     _touch(root / "movies" / "Seven (1995)" / "Seven_1995_1080p_Unknown.mkv")
-    _touch(root / "shows" / "Breaking Bad (2008)" / "Season 01" / "Breaking Bad_S01E01_720p.mkv")
+    _touch(root / "shows" / "Breaking Bad (2008)" / "Season 01" / "Breaking_Bad_S01E01_720p.mkv")
     provider = FakeProvider(
         {
             "Seven": ml.Metadata(
@@ -426,7 +426,7 @@ def test_journal_lines_are_json(tmp_path):
     batch, _ = ml.apply_plans(ml.plan_library(root, prober=_prober, tracked=set()), journal)
     entry = json.loads(journal.read_text().splitlines()[0])
     assert entry["batch"] == batch
-    assert entry["dst"].endswith("Hot Rod_2007_1080p_Unknown.mkv")
+    assert entry["dst"].endswith("Hot_Rod_2007_1080p_Unknown.mkv")
 
 
 def test_lookup_cache_serves_parsed_and_canonical_names(tmp_path):
@@ -512,7 +512,7 @@ def test_apply_continues_after_a_failed_rename(tmp_path, monkeypatch, capsys):
 
     assert done == 1
     assert (
-        root / "movies" / "Other" / "Hot Rod (2007)" / "Hot Rod_2007_1080p_Unknown.mkv"
+        root / "movies" / "Other" / "Hot Rod (2007)" / "Hot_Rod_2007_1080p_Unknown.mkv"
     ).exists()
     assert "rename failed" in capsys.readouterr().err
 
@@ -550,7 +550,7 @@ def test_movie_keeps_external_audio_tracks(tmp_path):
     ml.apply_plans(ml.plan_library(root, prober=_prober, tracked=set()), tmp_path / "j")
 
     goblet = root / "movies" / "Other" / "Goblet Of Fire (2005)"
-    assert (goblet / "Goblet Of Fire_2005_1080p_Unknown.ac3").exists()
+    assert (goblet / "Goblet_Of_Fire_2005_1080p_Unknown.ac3").exists()
     assert not pack.exists()
 
 
@@ -620,7 +620,7 @@ def test_organize_files_movies_into_genre_folders_and_respects_manual_moves(tmp_
     ml.apply_plans(plans, tmp_path / "j")
 
     assert (
-        root / "movies" / "Comedy" / "Hot Rod (2007)" / "Hot Rod_2007_1080p_Unknown.mkv"
+        root / "movies" / "Comedy" / "Hot Rod (2007)" / "Hot_Rod_2007_1080p_Unknown.mkv"
     ).exists()
     assert (root / "movies" / "Crime" / "Seven (1995)" / "Seven_1995_1080p_Unknown.mkv").exists()
     assert (root / "movies" / "Romance" / "Memento (2000)").exists()
@@ -650,19 +650,19 @@ def test_connect_adds_category_column_to_old_catalogs(tmp_path):
 
 def test_movie_and_episode_stems():
     assert ml.movie_stem("Napoleon Dynamite", 2004, "1080p", ["Jared Hess"]) == (
-        "Napoleon Dynamite_2004_1080p_Jared Hess"
+        "Napoleon_Dynamite_2004_1080p_Jared_Hess"
     )
     assert ml.movie_stem(
         "The Matrix", 1999, "1080p", ["Lana Wachowski", "Lilly Wachowski", "Extra"]
-    ) == ("The Matrix_1999_1080p_Lana Wachowski & Lilly Wachowski")
+    ) == ("The_Matrix_1999_1080p_Lana_Wachowski_&_Lilly_Wachowski")
     assert ml.movie_stem("Star Wars: Episode V", 1980, None, [], "Director's Cut") == (
-        "Star Wars - Episode V_1980_Unknown_Unknown_Director's Cut"
+        "Star_Wars_-_Episode_V_1980_Unknown_Unknown_Director's_Cut"
     )
-    assert ml.movie_stem("Under_Score", None, "720p", ["A_B"]) == "Under Score_Unknown_720p_A B"
-    assert ml.episode_stem("Breaking Bad", "S01E01", "1080p") == "Breaking Bad_S01E01_1080p"
-    assert ml._stem_edition("Goodfellas_1990_1080p_Martin Scorsese_Remastered") == "Remastered"
+    assert ml.movie_stem("Under_Score", None, "720p", ["A_B"]) == "Under_Score_Unknown_720p_A_B"
+    assert ml.episode_stem("Breaking Bad", "S01E01", "1080p") == "Breaking_Bad_S01E01_1080p"
+    assert ml._stem_edition("Goodfellas_1990_1080p_Martin_Scorsese_Remastered") == "Remastered"
     assert ml._stem_edition("Goodfellas (1990) {edition-Remastered} [1080p]") == "Remastered"
-    assert ml._stem_edition("Seven_1995_1080p_David Fincher") is None
+    assert ml._stem_edition("Seven_1995_1080p_David_Fincher") is None
 
 
 def test_plan_file_names_renames_existing_titles_with_catalog_directors(tmp_path):
@@ -693,10 +693,10 @@ def test_plan_file_names_renames_existing_titles_with_catalog_directors(tmp_path
 
     assert sorted(p.name for p in movie.iterdir()) == [
         ".release",
-        "Napoleon Dynamite_2004_1080p_Jared Hess.en.srt",
-        "Napoleon Dynamite_2004_1080p_Jared Hess.mp4",
+        "Napoleon_Dynamite_2004_1080p_Jared_Hess.en.srt",
+        "Napoleon_Dynamite_2004_1080p_Jared_Hess.mp4",
     ]
-    assert (remastered / "Goodfellas_1990_1080p_Martin Scorsese_Remastered.mkv").exists()
-    assert (show / "Breaking Bad_S01E01_1080p.mkv").exists()
-    assert (show / "Breaking Bad_S01E01_1080p.en.srt").exists()
+    assert (remastered / "Goodfellas_1990_1080p_Martin_Scorsese_Remastered.mkv").exists()
+    assert (show / "Breaking_Bad_S01E01_1080p.mkv").exists()
+    assert (show / "Breaking_Bad_S01E01_1080p.en.srt").exists()
     assert ml.plan_file_names(root, conn, prober=_prober) == []
