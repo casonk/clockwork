@@ -40,3 +40,6 @@ config/*-history.jsonl
 config/*.hot.json
 config/*.cold.json
 config/*.archive.json
+
+# Media library catalog and rename journal (local library state).
+config/media-library*

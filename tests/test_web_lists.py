@@ -234,6 +234,8 @@ def test_watch_check_get_describes_endpoint(client, tmp_path, monkeypatch):
     assert body["available"] is True
     assert body["dirs"] == [
         {"path": str(tmp_path), "exists": True},
+        {"path": str(tmp_path / "movies"), "exists": False},
+        {"path": str(tmp_path / "shows"), "exists": False},
         {"path": str(tmp_path / "missing"), "exists": False},
     ]
     assert body["usage"].startswith("POST")
@@ -271,3 +273,72 @@ def test_other_lists_do_not_render_torrent_controls(client):
 
     assert "find-btn" not in html.split("</style>")[1]
     assert "lib-check-btn" not in html.split("</style>")[1]
+
+
+def test_watch_check_finds_titles_filed_under_movies(client, tmp_path, monkeypatch):
+    (tmp_path / "movies" / "Napoleon Dynamite (2004)").mkdir(parents=True)
+    (tmp_path / "shows").mkdir()
+    monkeypatch.setattr(web_app, "WATCH_DIR", tmp_path)
+    monkeypatch.setattr(web_app, "_EXTRA_WATCH_DIRS", [])
+
+    resp = client.post(
+        "/api/watch-check",
+        json={"titles": [{"title": "Napoleon Dynamite"}, {"title": "Movies"}]},
+        headers={"X-CSRF-Token": _csrf(client, "/api/watch")},
+    )
+
+    matches = resp.get_json()["matches"]
+    assert matches["Napoleon Dynamite"] == {"found": True, "match": "Napoleon Dynamite (2004)"}
+    assert matches["Movies"]["found"] is False
+
+
+def test_library_page_and_search_api(client, tmp_path, monkeypatch):
+    media = web_app.media_library
+    db = tmp_path / "lib.sqlite"
+    root = tmp_path / "watch"
+    video = root / "movies" / "Seven (1995)" / "Seven (1995) [1080p].mkv"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"x")
+
+    class Provider:
+        name = "fake"
+
+        def search(self, title, year, kind):
+            return media.Metadata(
+                directors=["David Fincher"], genres=["thriller"], sources=["fake"]
+            )
+
+    conn = media.connect(db)
+    media.scan_library(
+        root,
+        conn,
+        providers=[Provider()],
+        prober=lambda _p: media.StreamInfo(width=1920, height=800),
+    )
+    conn.close()
+    monkeypatch.setattr(media, "CATALOG_DB", db)
+
+    assert b"Library" in client.get("/library").data
+    data = client.get("/api/library?director=fincher&year_from=1990").get_json()
+    assert data["available"] is True
+    assert data["count"] == 1
+    item = data["items"][0]
+    assert (item["title"], item["quality"], item["folder_name"]) == (
+        "Seven",
+        "1080p",
+        "Seven (1995)",
+    )
+    assert "folder" not in item
+    assert data["facets"]["directors"] == ["David Fincher"]
+    assert client.get("/api/library?director=nolan").get_json()["count"] == 0
+
+
+def test_library_search_reports_missing_catalog(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(web_app.media_library, "CATALOG_DB", tmp_path / "missing.sqlite")
+
+    assert client.get("/api/library").get_json() == {
+        "available": False,
+        "count": 0,
+        "items": [],
+        "facets": {},
+    }
