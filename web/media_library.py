@@ -1769,15 +1769,17 @@ def search_catalog(
 
 def catalog_facets(conn: sqlite3.Connection) -> dict[str, list[str]]:
     rows = conn.execute(
-        "SELECT directors, genres, quality, video_codec, category FROM titles"
+        "SELECT directors, cast_members, genres, quality, video_codec, category FROM titles"
     ).fetchall()
     categories = {row["category"] for row in rows if row["category"]}
     directors: set[str] = set()
+    actors: set[str] = set()
     genres: set[str] = set()
     qualities: set[str] = set()
     codecs: set[str] = set()
     for row in rows:
         directors.update(json.loads(row["directors"]))
+        actors.update(json.loads(row["cast_members"]))
         genres.update(json.loads(row["genres"]))
         if row["quality"]:
             qualities.add(row["quality"])
@@ -1785,6 +1787,7 @@ def catalog_facets(conn: sqlite3.Connection) -> dict[str, list[str]]:
             codecs.add(row["video_codec"])
     return {
         "directors": sorted(directors),
+        "actors": sorted(actors),
         "genres": sorted(genres),
         "qualities": sorted(qualities, key=lambda q: -_QUALITY_RANK.get(q, 0)),
         "codecs": sorted(codecs),

@@ -413,6 +413,7 @@ def test_scan_and_search_catalog(tmp_path):
     assert [r["title"] for r in ml.search_catalog(conn, year_from=2000)] == ["Breaking Bad"]
     assert [r["title"] for r in ml.search_catalog(conn, q="crime")] == ["Breaking Bad"]
     assert ml.catalog_facets(conn)["directors"] == ["David Fincher", "Vince Gilligan"]
+    assert ml.catalog_facets(conn)["actors"] == []
 
     (root / "movies" / "Seven (1995)" / "Seven_1995_1080p_Unknown.mkv").unlink()
     (root / "movies" / "Seven (1995)").rmdir()
