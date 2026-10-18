@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Library - Clockwork</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:#0f1117; --surface:#1a1d27; --surface2:#22263a; --surface3:#191c2a;
+      --border:#2e3250; --accent:#5b9eff; --accent-dim:#1a2a4d; --green:#3ecf6e;
+      --green-dim:#1a4d30; --red:#e05252; --yellow:#e0b832; --text:#e2e4f0; --muted:#8890b0;
+    }
+    body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; font-size:14px; line-height:1.55; min-height:100vh; }
+    header { background:var(--surface); border-bottom:1px solid var(--border); padding:14px 20px; display:flex; align-items:center; justify-content:space-between; gap:12px; position:sticky; top:0; z-index:100; }
+    .header-left { display:flex; align-items:center; gap:12px; }
+    .back-link { font-size:20px; text-decoration:none; opacity:.75; }
+    .back-link:hover { opacity:1; }
+    h1 { font-size:17px; font-weight:700; }
+    .subtitle { color:var(--muted); font-size:12px; }
+    .action-btn { display:inline-flex; align-items:center; gap:5px; padding:6px 11px; border-radius:6px; border:1px solid var(--border); background:var(--surface2); color:var(--muted); font-size:12px; font-weight:600; text-decoration:none; }
+    .action-btn:hover { color:var(--text); border-color:var(--muted); }
+    main { max-width:980px; margin:0 auto; padding:18px 14px 100px; }
+    form.filters { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:8px; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:14px; }
+    form.filters .wide { grid-column:1 / -1; }
+    label { display:flex; flex-direction:column; gap:3px; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+    input, select { font:inherit; font-size:13px; text-transform:none; letter-spacing:0; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:7px 9px; color:var(--text); outline:none; min-width:0; }
+    input:focus, select:focus { border-color:var(--accent); }
+    .years { display:flex; gap:6px; }
+    .years input { width:100%; }
+    #status { color:var(--muted); font-size:12px; margin:0 2px 10px; }
+    .results { display:flex; flex-direction:column; gap:8px; }
+    .card { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px 14px; }
+    .card-head { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+    .card-title { font-weight:700; font-size:15px; }
+    .card-year { color:var(--muted); }
+    .badge { font-size:11px; padding:1px 7px; border-radius:99px; border:1px solid var(--border); background:var(--surface2); color:var(--muted); white-space:nowrap; }
+    .badge.quality { color:var(--green); border-color:var(--green-dim); background:var(--green-dim); }
+    .badge.kind { color:var(--accent); border-color:var(--accent-dim); background:var(--accent-dim); }
+    .card-meta { color:var(--muted); font-size:12px; margin-top:4px; overflow-wrap:anywhere; }
+    .card-meta b { color:var(--text); font-weight:600; }
+    .card-plot { font-size:12px; margin-top:6px; }
+    .chip-link { color:inherit; text-decoration:underline dotted; cursor:pointer; background:none; border:0; font:inherit; padding:0; }
+    .chip-link:hover { color:var(--accent); }
+    .card-links { margin-top:6px; display:flex; gap:10px; font-size:12px; }
+    .card-links a { color:var(--accent); text-decoration:none; }
+    .empty { color:var(--muted); font-style:italic; padding:20px 0; text-align:center; }
+    @media (max-width:560px) { header { padding:12px 16px; } main { padding:14px 16px 80px; } }
+  </style>
+</head>
+<body>
+<header>
+  <div class="header-left">
+    <a class="back-link" href="/home" title="Home">🏠</a>
+    <div>
+      <h1>🎬 Library</h1>
+      <div class="subtitle">Search the watch folder by title, director, cast, year, genre or quality</div>
+    </div>
+  </div>
+  <a class="action-btn" href="/to-watch">📺 To Watch</a>
+</header>
+<main>
+  <form class="filters" id="filters" autocomplete="off">
+    <label class="wide">Search<input type="search" name="q" placeholder="Title, director, actor, genre, plot…"></label>
+    <label>Director<input type="text" name="director" list="director-list" placeholder="Any"></label>
+    <label>Actor<input type="text" name="actor" placeholder="Any"></label>
+    <label>Genre<select name="genre" id="genre-select"><option value="">Any</option></select></label>
+    <label>Type<select name="kind"><option value="">Movies &amp; shows</option><option value="movies">Movies</option><option value="shows">Shows</option></select></label>
+    <label>Quality<select name="quality" id="quality-select"><option value="">Any</option></select></label>
+    <label>Codec<select name="codec" id="codec-select"><option value="">Any</option></select></label>
+    <label>Year<span class="years"><input type="number" name="year_from" placeholder="From" min="1880" max="2100"><input type="number" name="year_to" placeholder="To" min="1880" max="2100"></span></label>
+    <label>Sort<select name="sort"><option value="title">Title</option><option value="year">Newest</option><option value="rating">Rating</option><option value="size">Size</option><option value="added">Recently scanned</option></select></label>
+    <datalist id="director-list"></datalist>
+  </form>
+  <div id="status">Loading…</div>
+  <div class="results" id="results"></div>
+</main>
+<script>
+(function () {
+  const form = document.getElementById("filters");
+  const results = document.getElementById("results");
+  const status = document.getElementById("status");
+  let facetsLoaded = false;
+  let timer = null;
+
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  }
+
+  function fillSelect(select, values) {
+    const current = select.value;
+    for (const value of values) {
+      const option = el("option", "", value);
+      option.value = value;
+      select.appendChild(option);
+    }
+    select.value = current;
+  }
+
+  function loadFacets(facets) {
+    if (facetsLoaded || !facets) return;
+    facetsLoaded = true;
+    fillSelect(document.getElementById("genre-select"), facets.genres || []);
+    fillSelect(document.getElementById("quality-select"), facets.qualities || []);
+    fillSelect(document.getElementById("codec-select"), facets.codecs || []);
+    const list = document.getElementById("director-list");
+    for (const name of facets.directors || []) {
+      const option = el("option");
+      option.value = name;
+      list.appendChild(option);
+    }
+  }
+
+  function filterBy(field, value) {
+    form.elements[field].value = value;
+    search();
+  }
+
+  function people(label, names, field) {
+    const span = el("span");
+    span.appendChild(el("b", "", label + ": "));
+    names.forEach(function (name, index) {
+      if (index) span.appendChild(document.createTextNode(", "));
+      const link = el("button", "chip-link", name);
+      link.type = "button";
+      link.addEventListener("click", function () { filterBy(field, name); });
+      span.appendChild(link);
+    });
+    return span;
+  }
+
+  function formatSize(bytes) {
+    if (!bytes) return "";
+    const gb = bytes / 1024 ** 3;
+    return gb >= 1 ? gb.toFixed(1) + " GB" : Math.round(bytes / 1024 ** 2) + " MB";
+  }
+
+  function card(item) {
+    const node = el("article", "card");
+    const head = el("div", "card-head");
+    head.appendChild(el("span", "card-title", item.title));
+    if (item.year) head.appendChild(el("span", "card-year", "(" + item.year + ")"));
+    if (item.kind === "shows") head.appendChild(el("span", "badge kind", "show"));
+    if (item.quality) head.appendChild(el("span", "badge quality", item.quality));
+    if (item.edition) head.appendChild(el("span", "badge", item.edition));
+    if (item.video_codec) head.appendChild(el("span", "badge", item.video_codec));
+    if (item.rating) head.appendChild(el("span", "badge", "★ " + Number(item.rating).toFixed(1)));
+    node.appendChild(head);
+
+    const meta = el("div", "card-meta");
+    const parts = [];
+    if (item.directors.length) parts.push(people(item.kind === "shows" ? "Created by" : "Director", item.directors, "director"));
+    if (item.cast.length) parts.push(people("Cast", item.cast.slice(0, 5), "actor"));
+    const facts = [];
+    if (item.genres.length) facts.push(item.genres.slice(0, 4).join(", "));
+    if (item.runtime_min) facts.push(item.runtime_min + " min");
+    if (item.kind === "shows" && item.file_count) facts.push(item.file_count + " episodes");
+    if (item.size_bytes) facts.push(formatSize(item.size_bytes));
+    if (item.audio_codec) facts.push(item.audio_codec + (item.channels ? " " + item.channels + "ch" : ""));
+    if (facts.length) parts.push(el("span", "", facts.join(" · ")));
+    parts.forEach(function (part, index) {
+      if (index) meta.appendChild(document.createTextNode("  ·  "));
+      meta.appendChild(part);
+    });
+    if (!item.sources.length) meta.appendChild(el("span", "", " (no online metadata found)"));
+    node.appendChild(meta);
+
+    if (item.plot) node.appendChild(el("p", "card-plot", item.plot));
+
+    const links = el("div", "card-links");
+    if (item.imdb_id) {
+      const a = el("a", "", "IMDb");
+      a.href = "https://www.imdb.com/title/" + encodeURIComponent(item.imdb_id) + "/";
+      a.target = "_blank"; a.rel = "noopener noreferrer";
+      links.appendChild(a);
+    }
+    if (item.wikidata_id) {
+      const a = el("a", "", "Wikidata");
+      a.href = "https://www.wikidata.org/wiki/" + encodeURIComponent(item.wikidata_id);
+      a.target = "_blank"; a.rel = "noopener noreferrer";
+      links.appendChild(a);
+    }
+    links.appendChild(el("span", "card-meta", item.folder_name));
+    node.appendChild(links);
+    return node;
+  }
+
+  async function search() {
+    const params = new URLSearchParams();
+    for (const [key, value] of new FormData(form)) {
+      if (String(value).trim()) params.set(key, String(value).trim());
+    }
+    history.replaceState(null, "", params.toString() ? "?" + params : location.pathname);
+    status.textContent = "Searching…";
+    try {
+      const response = await fetch("/api/library?" + params, { headers: { Accept: "application/json" } });
+      const data = await response.json();
+      results.replaceChildren();
+      if (!data.available) {
+        status.textContent = "The catalog has not been built yet. Run: python3 web/media_library.py sync";
+        return;
+      }
+      loadFacets(data.facets);
+      status.textContent = data.count + (data.count === 1 ? " title" : " titles");
+      if (!data.count) results.appendChild(el("div", "empty", "Nothing matches these filters."));
+      for (const item of data.items) results.appendChild(card(item));
+    } catch (err) {
+      status.textContent = "Search failed: " + err;
+    }
+  }
+
+  const initial = new URLSearchParams(location.search);
+  for (const [key, value] of initial) {
+    if (form.elements[key]) form.elements[key].value = value;
+  }
+  form.addEventListener("input", function () {
+    clearTimeout(timer);
+    timer = setTimeout(search, 250);
+  });
+  form.addEventListener("submit", function (event) { event.preventDefault(); search(); });
+  search().then(function () {
+    // Dropdown options arrive with the first response; reapply and rerun deep links.
+    if (!initial.toString()) return;
+    for (const [key, value] of initial) {
+      if (form.elements[key]) form.elements[key].value = value;
+    }
+    search();
+  });
+})();
+</script>
+</body>
+</html>

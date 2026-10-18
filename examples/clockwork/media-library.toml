@@ -1,0 +1,28 @@
+[[jobs]]
+name = "clockwork-media-library"
+description = "Organize the watch library into movies/ and shows/ and refresh the metadata catalog"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h/git/util-repos/clockwork"
+exec_start = "/usr/bin/python3 %h/git/util-repos/clockwork/web/media_library.py sync"
+# Optional: CLOCKWORK_TMDB_API_KEY=... adds TMDB plots and ratings to the Wikidata metadata.
+environment_files = ["-%h/.config/clockwork/media-library.env"]
+after = ["network-online.target"]
+wants = ["network-online.target"]
+standard_output = "journal"
+standard_error = "journal"
+timer_description = "Organize and catalog the watch library"
+
+[jobs.environment]
+CLOCKWORK_WATCH_DIR = "%h/watch"
+
+[jobs.timer]
+kind = "interval"
+on_boot_sec = "10m"
+on_unit_active_sec = "30m"
+persistent = true
+
+[jobs.cron]
+expression = "*/30 * * * *"
+command = "cd $HOME/git/util-repos/clockwork && /usr/bin/python3 web/media_library.py sync >> $HOME/.local/share/clockwork-media-library/cron.log 2>&1"
+comments = ["Auto-generated from systemd timer: every 30m"]

@@ -28,6 +28,7 @@ from clockwork.manifest import load_manifest
 from clockwork.render import _LAUNCHD_ENV_LOADER, render_launchd_plist, resolve_launchd_label
 
 try:
+    from web import media_library
     from web.security import same_origin_host, validate_remote_bind
     from web.status_helpers import (
         build_cron_status,
@@ -37,6 +38,7 @@ try:
         select_next_run,
     )
 except ModuleNotFoundError:
+    import media_library
     from security import same_origin_host, validate_remote_bind
     from status_helpers import (
         build_cron_status,
@@ -3560,6 +3562,49 @@ def to_watch():
     return _render_simple_list("watch")
 
 
+@app.get("/library")
+def library_page():
+    return render_template("library.html")
+
+
+def _int_arg(name: str) -> int | None:
+    value = request.args.get(name, "").strip()
+    return int(value) if value.isdigit() else None
+
+
+@app.get("/api/library")
+def library_search():
+    """Search the media catalog built by ``web/media_library.py scan``.
+
+    Query params: q, director, actor, genre, kind (movies|shows), quality,
+    codec, year_from, year_to, sort (title|year|added|size|rating).
+    Response: {"available": bool, "count": int, "items": [...], "facets": {...}}
+    """
+    if not media_library.CATALOG_DB.exists():
+        return jsonify({"available": False, "count": 0, "items": [], "facets": {}})
+    conn = media_library.connect(media_library.CATALOG_DB)
+    try:
+        items = media_library.search_catalog(
+            conn,
+            q=request.args.get("q", "").strip(),
+            director=request.args.get("director", "").strip(),
+            actor=request.args.get("actor", "").strip(),
+            genre=request.args.get("genre", "").strip(),
+            kind=request.args.get("kind", "").strip(),
+            quality=request.args.get("quality", "").strip(),
+            codec=request.args.get("codec", "").strip(),
+            year_from=_int_arg("year_from"),
+            year_to=_int_arg("year_to"),
+            sort=request.args.get("sort", "title"),
+        )
+        facets = media_library.catalog_facets(conn)
+    finally:
+        conn.close()
+    for item in items:
+        item["folder_name"] = Path(item.pop("folder")).name
+    return jsonify({"available": True, "count": len(items), "items": items, "facets": facets})
+
+
 @app.get("/to-read")
 def to_read():
     return _render_simple_list("read")
@@ -3904,7 +3949,9 @@ def api_tradility_analysis():
 
 
 def _watch_scan_dirs() -> list[Path]:
-    return [WATCH_DIR] + [d for d in _EXTRA_WATCH_DIRS if d != WATCH_DIR]
+    # The organizer files titles under movies/ and shows/; new downloads land at the top.
+    library = [WATCH_DIR, WATCH_DIR / media_library.MOVIES, WATCH_DIR / media_library.SHOWS]
+    return library + [d for d in _EXTRA_WATCH_DIRS if d not in library]
 
 
 @app.get("/api/watch-check")
@@ -3947,6 +3994,11 @@ def watch_check():
     for scan_dir in accessible:
         with contextlib.suppress(OSError):
             for entry in scan_dir.iterdir():
+                if scan_dir == WATCH_DIR and entry.name in (
+                    media_library.MOVIES,
+                    media_library.SHOWS,
+                ):
+                    continue
                 entries.append((entry.name, _normalize_media_title(entry.name)))
 
     matches: dict[str, dict] = {}
@@ -4796,6 +4848,16 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
             "hostname": "",
             "access_mode": "shared-mtls",
             "icon": "📺",
+        }
+    )
+    groups["Clockwork"].append(
+        {
+            "name": "clockwork-library",
+            "display": "Library",
+            "url": "/library",
+            "hostname": "",
+            "access_mode": "shared-mtls",
+            "icon": "🎬",
         }
     )
     groups["Clockwork"].append(
