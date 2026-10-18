@@ -227,6 +227,8 @@ def test_manage_page_lists_attention_and_starts_sync(client, monkeypatch):
 def test_search_api_links_titles(client):
     data = client.get("/api/library?director=fincher").get_json()
     assert data["items"][0]["path"] == "movies/Thriller/Seven (1995)"
+    assert data["facets"]["actors"] == ["Brad Pitt", "Morgan Freeman"]
+    assert 'list="actor-list"' in client.get("/library").get_data(as_text=True)
 
 
 def test_srt_to_vtt_strips_bom():
