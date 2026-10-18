@@ -268,3 +268,45 @@ def test_new_run_is_not_paused_by_segments_far_ahead(harness):
     manager.housekeeping()
 
     assert signal.SIGSTOP not in processes[-1].signals
+
+
+def test_quality_profiles_follow_the_source_resolution():
+    hd = streaming.MediaInfo(60, ".mkv", "hevc", "yuv420p10le", "aac", height=1080)
+    uhd = streaming.MediaInfo(60, ".mkv", "hevc", "yuv420p10le", "aac", height=2160)
+    sd = streaming.MediaInfo(60, ".avi", "mpeg4", "yuv420p", "mp3", height=360)
+
+    assert [p.name for p in streaming.available_profiles(hd)] == ["original", "720p", "480p"]
+    assert [p.name for p in streaming.available_profiles(uhd)] == [
+        "original",
+        "1440p",
+        "1080p",
+        "720p",
+        "480p",
+    ]
+    assert [p.name for p in streaming.available_profiles(sd)] == ["original"]
+    original = streaming.PROFILES["original"]
+    assert streaming.for_source(original, uhd).maxrate_kbps == 30000
+    assert streaming.for_source(original, hd).maxrate_kbps == 12000
+    assert streaming.for_source(streaming.PROFILES["720p"], uhd).maxrate_kbps == 4000
+    assert streaming.profile("bogus").name == "original"
+
+
+def test_transcode_command_scales_and_sets_bitrate_per_profile(tmp_path):
+    command = streaming.transcode_command(
+        Path("/v.mkv"), tmp_path, 0, "h264_nvenc", streaming.PROFILES["720p"]
+    )
+    assert command[command.index("-vf") + 1] == "format=yuv420p,scale=-2:'min(720,ih)'"
+    assert command[command.index("-maxrate") + 1] == "4000k"
+    assert command[command.index("-b:a") + 1] == "160k"
+    original = streaming.transcode_command(Path("/v.mkv"), tmp_path, 0, "libx264")
+    assert original[original.index("-vf") + 1] == "format=yuv420p"
+
+
+def test_each_quality_gets_its_own_session_and_switching_stops_the_old_one(harness):
+    manager, source, processes, _clock = harness
+    manager.segment(source, 0, "original")
+    manager.segment(source, 0, "480p")
+
+    assert len(manager.sessions) == 2
+    assert not processes[0].alive and processes[1].alive
+    assert "scale=-2:'min(480,ih)'" in processes[1].command[processes[1].command.index("-vf") + 1]
