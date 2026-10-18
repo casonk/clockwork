@@ -373,3 +373,15 @@ def test_manage_page_shows_ai_status_and_controls_the_service(client, monkeypatc
         client.post("/library/manage/upscale/rm", data={"csrf_token": _csrf(client)}).status_code
         == 404
     )
+
+
+def test_manage_page_explains_cooling(client, monkeypatch, tmp_path):
+    upscale = pages.upscale
+    monkeypatch.setattr(
+        upscale,
+        "read_status",
+        lambda: {"state": "cooling", "title": "Futurama", "gpu_c": 73.0, "cpu_c": 61.0},
+    )
+    html = client.get("/library/manage").get_data(as_text=True)
+    assert "Cooling down before continuing Futurama" in html
+    assert "GPU 73 °C, CPU 61 °C" in html

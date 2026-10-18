@@ -146,3 +146,78 @@ def test_progress_reporter_writes_eta(tmp_path, monkeypatch):
     data = json.loads(status.read_text())
     assert data["state"] == "rendering" and data["total_frames"] == 2500
     assert data["eta_seconds"] == 40 and data["target"] == "1080p" and data["queued"] == 3
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 0.0
+        self.slept = []
+
+    def sleep(self, seconds):
+        self.slept.append(seconds)
+        self.now += seconds
+
+    def clock(self):
+        return self.now
+
+
+def test_throttle_rests_to_keep_the_duty_cycle():
+    fake = FakeClock()
+    throttle = upscale.Throttle(
+        0.25, gpu=lambda: 50.0, cpu=lambda: 50.0, sleep=fake.sleep, clock=fake.clock
+    )
+
+    throttle.after_batch(1.0)
+
+    assert fake.slept == [3.0]  # 1 s of work, 3 s of rest: 25% duty
+
+
+def test_throttle_pauses_when_hot_until_both_cool_below_the_margin():
+    fake = FakeClock()
+    gpu = iter([73.0, 70.0, 66.0, 65.0])
+    events = []
+    throttle = upscale.Throttle(
+        1.0, 72, 78, gpu=lambda: next(gpu), cpu=lambda: 60.0, sleep=fake.sleep, clock=fake.clock
+    )
+    throttle.on_cooling = events.append
+
+    throttle.after_batch(0.1)
+
+    # 73 trips it; 70 and 66 are not yet 6 C below 72; 65 resumes.
+    assert fake.slept == [30, 30]
+    assert [e["gpu_c"] for e in events] == [70.0, 66.0]
+    assert not throttle.cooling
+
+
+def test_throttle_only_checks_temperatures_every_few_seconds():
+    fake = FakeClock()
+    reads = []
+    throttle = upscale.Throttle(
+        1.0,
+        gpu=lambda: reads.append("gpu") or 40.0,
+        cpu=lambda: 40.0,
+        sleep=fake.sleep,
+        clock=fake.clock,
+        check_every=10,
+    )
+    for _ in range(5):
+        throttle.after_batch(0.5)
+        fake.now += 1
+    assert reads == ["gpu"]
+
+
+def test_steady_cpu_temperature_ignores_spikes(monkeypatch):
+    monkeypatch.setattr(upscale.time, "sleep", lambda _s: None)
+    readings = iter([62.0, 79.0, 63.0, 61.0, 80.0, 62.0])
+    assert upscale.steady_cpu_temperature(read=lambda: next(readings)) == 63.0
+    assert upscale.steady_cpu_temperature(read=lambda: None) is None
+
+
+def test_cpu_temperature_reads_the_package_sensor(tmp_path):
+    (tmp_path / "hwmon0").mkdir()
+    (tmp_path / "hwmon0" / "name").write_text("nvme\n")
+    (tmp_path / "hwmon5").mkdir()
+    (tmp_path / "hwmon5" / "name").write_text("coretemp\n")
+    (tmp_path / "hwmon5" / "temp1_input").write_text("64000\n")
+    assert upscale.cpu_temperature(tmp_path) == 64.0
+    assert upscale.cpu_temperature(tmp_path / "missing") is None

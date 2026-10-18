@@ -50,10 +50,14 @@
       → {{ st.target }} with {{ st.model }} ·
       {{ (100 * st.frames / st.total_frames)|round(1) if st.total_frames else 0 }}% ·
       {{ st.fps }} fps{% if st.eta_seconds %} · about {{ (st.eta_seconds / 60)|round|int }} min left{% endif %}
+      {% if st.duty is defined and st.duty < 1 %} · throttled to {{ (st.duty * 100)|round|int }}% duty{% endif %}
     </p>
     <div style="height:6px; background:var(--border); border-radius:3px; margin-top:6px">
       <div style="height:100%; border-radius:3px; background:var(--accent); width:{{ (100 * st.frames / st.total_frames)|round(1) if st.total_frames else 0 }}%"></div>
     </div>
+  {% elif st.state == "cooling" %}
+    <p class="small" style="margin-top:8px">🌡 Cooling down before continuing {{ st.title }}:
+      GPU {{ st.gpu_c|int if st.gpu_c is not none else "?" }} °C, CPU {{ st.cpu_c|int if st.cpu_c is not none else "?" }} °C.</p>
   {% elif st.state == "disk-floor" %}
     <p class="small" style="margin-top:8px">Paused: the next render ({{ st.next }}) would take free space below the floor. Checking again hourly.</p>
   {% elif st.state == "done" %}
