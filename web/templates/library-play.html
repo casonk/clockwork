@@ -8,13 +8,14 @@
   .player { width:100%; max-height:75vh; background:#000; border-radius:8px; display:block; }
   #stream-status:empty { display:none; }
 </style>
-{% if not direct %}
+{% if not direct or qualities|length > 1 %}
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js" integrity="sha384-V5ruNBgmYcC3SJRUQeNykAAAgde5gOFq/Hu0CZj7bygDP0yRIhkvX8+w0u/7mRvr" crossorigin="anonymous"></script>
 {% endif %}
 {% endblock %}
 {% block content %}
 <video id="player" class="player" controls preload="metadata" playsinline
-  {% if direct %}src="{{ url_for('library_pages.media_file', rel=info.rel) }}"{% else %}data-hls="{{ url_for('library_pages.stream_playlist', rel=info.rel) }}"{% endif %}>
+  data-hls="{{ url_for('library_pages.stream_playlist', rel=info.rel) }}"
+  {% if direct %}data-direct="{{ url_for('library_pages.media_file', rel=info.rel) }}"{% endif %}>
   {% for t in tracks %}
     <track kind="subtitles" label="{{ t.label }}" srclang="{{ t.label.split('.')[0] if t.label != 'subtitles' else 'und' }}"
            src="{{ url_for('library_pages.subtitle_vtt', rel=t.rel) }}" {% if loop.first %}default{% endif %}>
@@ -26,11 +27,14 @@
 </video>
 <div id="stream-status" class="flash" style="margin-top:10px"></div>
 <div class="panel" style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center">
-  {% if direct %}
-    <span class="badge quality">direct play</span>
-  {% else %}
-    <span class="badge kind" title="Converted to H.264/AAC on the server while you watch">streaming: {{ media.video_codec or "video" }}{% if media.pixel_format and "10" in media.pixel_format %} 10-bit{% endif %} → h264</span>
-  {% endif %}
+  <label class="small muted" style="display:inline-flex; gap:6px; align-items:center">Quality
+    <select id="quality">
+      {% for q in qualities %}<option value="{{ q.name }}">{{ q.label }}{% if q.name != "original" %} · ~{{ "%.1f"|format(q.kbps / 1000) }} Mb/s{% endif %}</option>{% endfor %}
+    </select>
+  </label>
+  <span id="mode-badge" class="badge kind"
+        data-converted="streaming: {{ media.video_codec or 'video' }}{% if media.pixel_format and '10' in media.pixel_format %} 10-bit{% endif %} → h264"
+        title="Converted to H.264/AAC on the server while you watch"></span>
   {% if info.quality %}<span class="badge quality">{{ info.quality }}</span>{% endif %}
   {% if info.audio_codec %}<span class="badge">{{ info.audio_codec }}{% if info.channels %} {{ info.channels }}ch{% endif %}</span>{% endif %}
   <span class="badge">{{ info.size }}</span>
@@ -41,39 +45,97 @@
 (function () {
   const video = document.getElementById("player");
   const status = document.getElementById("stream-status");
-  const source = video.dataset.hls;
-  if (!source) return;
+  const select = document.getElementById("quality");
+  const badge = document.getElementById("mode-badge");
+  const hlsBase = video.dataset.hls;
+  const directSrc = video.dataset.direct;
+  const storageKey = "clockwork-library-quality";
+  let hls = null;
+
   function show(message, kind) {
     status.className = "flash " + (kind || "");
     status.textContent = message;
   }
-  // Prefer hls.js wherever Media Source Extensions exist: it handles seeking into
-  // segments that are still being converted. Native HLS (older iOS) is the fallback.
-  if (!window.Hls || !window.Hls.isSupported()) {
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = source;
-    } else {
-      show("This browser cannot stream here. Use the download button and open the file in VLC.", "error");
-    }
-    return;
+
+  function remembered() {
+    try { return localStorage.getItem(storageKey); } catch (_err) { return null; }
   }
-  const hls = new window.Hls({ maxBufferLength: 60, fragLoadingTimeOut: 60000, fragLoadingMaxRetry: 4 });
-  window.libraryHls = hls;  // handy when debugging from the console
-  hls.loadSource(source);
-  hls.attachMedia(video);
-  video.addEventListener("waiting", function () { show("Converting… playback resumes in a moment."); });
-  video.addEventListener("playing", function () { show(""); });
-  hls.on(window.Hls.Events.ERROR, function (_event, data) {
-    if (!data.fatal) return;
-    if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) {
-      show("Streaming stalled; retrying…");
-      hls.startLoad();
-    } else if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) {
-      hls.recoverMediaError();
-    } else {
-      show("Streaming failed (" + data.details + "). Try the download button.", "error");
+
+  function remember(value) {
+    try { localStorage.setItem(storageKey, value); } catch (_err) { /* private mode */ }
+  }
+
+  function resumeAt(time, playing) {
+    if (!time) { if (playing) video.play().catch(function () {}); return; }
+    const jump = function () {
+      video.currentTime = time;
+      if (playing) video.play().catch(function () {});
+    };
+    if (video.readyState >= 1) jump();
+    else video.addEventListener("loadedmetadata", jump, { once: true });
+  }
+
+  function load(quality) {
+    const time = video.currentTime;
+    const playing = !video.paused;
+    if (hls) { hls.destroy(); hls = null; }
+    show("");
+    if (quality === "original" && directSrc) {
+      badge.textContent = "direct play";
+      badge.className = "badge quality";
+      video.src = directSrc;
+      resumeAt(time, playing);
+      return;
     }
+    badge.textContent = quality === "original" ? badge.dataset.converted : "streaming at " + quality;
+    badge.className = "badge kind";
+    const source = hlsBase + "?q=" + encodeURIComponent(quality);
+    // Prefer hls.js wherever Media Source Extensions exist: it handles seeking into
+    // segments that are still being converted. Native HLS (older iOS) is the fallback.
+    if (!window.Hls || !window.Hls.isSupported()) {
+      if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = source;
+        resumeAt(time, playing);
+      } else {
+        show("This browser cannot stream here. Use the download button and open the file in VLC.", "error");
+      }
+      return;
+    }
+    hls = new window.Hls({
+      maxBufferLength: 60,
+      fragLoadingTimeOut: 60000,
+      fragLoadingMaxRetry: 4,
+      startPosition: time || -1,
+    });
+    window.libraryHls = hls;  // handy when debugging from the console
+    hls.loadSource(source);
+    hls.attachMedia(video);
+    if (playing) video.play().catch(function () {});
+    hls.on(window.Hls.Events.ERROR, function (_event, data) {
+      if (!data.fatal) return;
+      if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) {
+        show("Streaming stalled; retrying…");
+        hls.startLoad();
+      } else if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) {
+        hls.recoverMediaError();
+      } else {
+        show("Streaming failed (" + data.details + "). Try the download button.", "error");
+      }
+    });
+  }
+
+  video.addEventListener("waiting", function () { if (hls) show("Converting… playback resumes in a moment."); });
+  video.addEventListener("playing", function () { show(""); });
+  select.addEventListener("change", function () {
+    remember(select.value);
+    load(select.value);
   });
+
+  const saved = remembered();
+  if (saved && [...select.options].some(function (o) { return o.value === saved; })) {
+    select.value = saved;
+  }
+  load(select.value);
 })();
 </script>
 {% endblock %}

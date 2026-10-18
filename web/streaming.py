@@ -25,7 +25,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 SEGMENT_SECONDS = 6
@@ -57,6 +57,7 @@ class MediaInfo:
     pixel_format: str | None
     audio_codec: str | None
     text_subtitles: tuple[tuple[int, str], ...] = ()  # (subtitle stream index, language)
+    height: int | None = None
 
 
 def probe_media(
@@ -68,7 +69,7 @@ def probe_media(
             "-v",
             "error",
             "-show_entries",
-            "format=duration:stream=codec_type,codec_name,pix_fmt:stream_tags=language",
+            "format=duration:stream=codec_type,codec_name,pix_fmt,height:stream_tags=language",
             "-of",
             "json",
             str(path),
@@ -95,6 +96,7 @@ def probe_media(
         pixel_format=video.get("pix_fmt"),
         audio_codec=audio.get("codec_name"),
         text_subtitles=text_subtitles,
+        height=video.get("height"),
     )
 
 
@@ -106,6 +108,51 @@ def plays_directly(info: MediaInfo) -> bool:
         and info.pixel_format in DIRECT_PIXEL_FORMATS
         and info.audio_codec in DIRECT_AUDIO
     )
+
+
+@dataclass(frozen=True)
+class Profile:
+    name: str
+    label: str
+    height: int | None  # None keeps the source resolution
+    maxrate_kbps: int
+    nvenc_cq: int
+    x264_crf: int
+    audio_kbps: int
+
+
+PROFILES = {
+    p.name: p
+    for p in (
+        Profile("original", "Original", None, 12000, 23, 22, 192),
+        Profile("1440p", "1440p", 1440, 12000, 24, 23, 192),
+        Profile("1080p", "1080p", 1080, 8000, 24, 23, 192),
+        Profile("720p", "720p", 720, 4000, 25, 24, 160),
+        Profile("480p", "480p", 480, 1500, 27, 26, 128),
+    )
+}
+DEFAULT_PROFILE = "original"
+
+
+def profile(name: str | None) -> Profile:
+    return PROFILES.get(name or DEFAULT_PROFILE, PROFILES[DEFAULT_PROFILE])
+
+
+def for_source(quality: Profile, info: MediaInfo) -> Profile:
+    """Original keeps the source resolution, so give 4K and 1440p sources more bits."""
+    if quality.height is not None or not info.height:
+        return quality
+    if info.height > 1800:
+        return replace(quality, maxrate_kbps=30000)
+    if info.height > 1200:
+        return replace(quality, maxrate_kbps=16000)
+    return quality
+
+
+def available_profiles(info: MediaInfo) -> list[Profile]:
+    """Original plus every downscaled profile below the source height."""
+    height = info.height or 0
+    return [p for p in PROFILES.values() if p.height is None or (height and p.height < height)]
 
 
 def segment_count(duration: float) -> int:
@@ -166,32 +213,43 @@ def pick_encoder(runner: Callable[..., subprocess.CompletedProcess] = subprocess
         return _ENCODER
 
 
-def transcode_command(source: Path, out_dir: Path, start_index: int, encoder: str) -> list[str]:
+def transcode_command(
+    source: Path,
+    out_dir: Path,
+    start_index: int,
+    encoder: str,
+    quality: Profile = PROFILES[DEFAULT_PROFILE],
+) -> list[str]:
     start = start_index * SEGMENT_SECONDS
     keyframes = f"expr:gte(t,n_forced*{SEGMENT_SECONDS})"
+    rate = [
+        "-maxrate", f"{quality.maxrate_kbps}k", "-bufsize", f"{quality.maxrate_kbps * 2}k",
+    ]  # fmt: skip
     if encoder == "h264_nvenc":
         decode = ["-hwaccel", "cuda"]
         video = [
-            "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23",
-            "-maxrate", "12M", "-bufsize", "24M",
+            "-c:v", "h264_nvenc", "-preset", "p4", "-cq", str(quality.nvenc_cq), *rate,
             "-forced-idr", "1", "-no-scenecut", "1",
         ]  # fmt: skip
     else:
         decode = []
         video = [
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
-            "-maxrate", "12M", "-bufsize", "24M", "-sc_threshold", "0",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", str(quality.x264_crf), *rate,
+            "-sc_threshold", "0",
         ]  # fmt: skip
+    # 10-bit and other formats down to what H.264 decoders in browsers accept.
+    filters = "format=yuv420p"
+    if quality.height:
+        filters += f",scale=-2:'min({quality.height},ih)'"
     return [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
         *decode,
         "-ss", str(start), "-i", str(source),
         "-map", "0:v:0", "-map", "0:a:0?",
-        # 10-bit and other formats down to what H.264 decoders in browsers accept.
-        "-vf", "format=yuv420p",
+        "-vf", filters,
         *video,
         "-force_key_frames", keyframes,
-        "-c:a", "aac", "-ac", "2", "-b:a", "192k",
+        "-c:a", "aac", "-ac", "2", "-b:a", f"{quality.audio_kbps}k",
         "-output_ts_offset", str(start),
         "-f", "hls", "-hls_time", str(SEGMENT_SECONDS),
         "-start_number", str(start_index),
@@ -207,6 +265,7 @@ class Session:
     source: Path
     directory: Path
     info: MediaInfo
+    quality: Profile = PROFILES[DEFAULT_PROFILE]
     process: subprocess.Popen | None = None
     run_start: int = 0
     last_index: int = 0
@@ -274,9 +333,11 @@ class StreamManager:
         self.sessions: dict[str, Session] = {}
         self.lock = threading.Lock()
 
-    def session(self, source: Path) -> Session:
+    def session(self, source: Path, quality: str | None = None) -> Session:
+        chosen = profile(quality)
         stat = source.stat()
-        key = hashlib.sha256(f"{source}|{stat.st_size}|{stat.st_mtime}".encode()).hexdigest()[:24]
+        identity = f"{source}|{stat.st_size}|{stat.st_mtime}|{chosen.name}"
+        key = hashlib.sha256(identity.encode()).hexdigest()[:24]
         with self.lock:
             self._reap()
             session = self.sessions.get(key)
@@ -284,15 +345,22 @@ class StreamManager:
                 directory = self.cache_dir / key
                 shutil.rmtree(directory, ignore_errors=True)
                 directory.mkdir(parents=True, exist_ok=True)
-                session = Session(key, source, directory, self.probe(source))
+                info = self.probe(source)
+                session = Session(key, source, directory, info, for_source(chosen, info))
                 self.sessions[key] = session
                 self._enforce_limit(keep=key)
+                # A viewer switching quality leaves the old profile's transcoder
+                # running; stop it but keep its segments for switching back.
+                for other in self.sessions.values():
+                    if other is not session and other.source == source:
+                        with other.lock:
+                            other.stop()
             session.last_access = self.clock()
             return session
 
-    def segment(self, source: Path, index: int) -> Path | None:
+    def segment(self, source: Path, index: int, quality: str | None = None) -> Path | None:
         """Path of a finished segment, transcoding it first if needed; None on failure."""
-        session = self.session(source)
+        session = self.session(source, quality)
         if index < 0 or index >= segment_count(session.info.duration):
             return None
         target = session.directory / f"seg_{index}.ts"
@@ -324,7 +392,9 @@ class StreamManager:
     def _start(self, session: Session, index: int) -> None:
         session.stop()
         session.run_start = index
-        command = transcode_command(session.source, session.directory, index, self.encoder())
+        command = transcode_command(
+            session.source, session.directory, index, self.encoder(), session.quality
+        )
         session.process = self.popen(
             command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
         )

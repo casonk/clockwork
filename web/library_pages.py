@@ -251,6 +251,18 @@ def play_page(rel: str):
     title_dir = video.parent
     if re.fullmatch(r"Season \d{2}", title_dir.name):
         title_dir = title_dir.parent
+    qualities = [
+        {
+            "name": p.name,
+            "label": (
+                f"Original ({media.height}p{', direct' if direct else ''})"
+                if p.height is None and media.height
+                else p.label
+            ),
+            "kbps": p.maxrate_kbps + p.audio_kbps,
+        }
+        for p in (streaming.for_source(q, media) for q in streaming.available_profiles(media))
+    ]
     return render_template(
         "library-play.html",
         info=info,
@@ -258,6 +270,7 @@ def play_page(rel: str):
         embedded=embedded,
         direct=direct,
         media=media,
+        qualities=qualities,
         title_rel=_rel(title_dir),
         title_name=title_dir.name,
     )
@@ -270,10 +283,18 @@ def _stream_source(rel: str) -> Path:
     return video
 
 
+def _quality_arg() -> str:
+    name = request.args.get("q", streaming.DEFAULT_PROFILE)
+    if name not in streaming.PROFILES:
+        abort(404)
+    return name
+
+
 @library_pages.get("/library/stream/<path:rel>/index.m3u8")
 def stream_playlist(rel: str):
-    session = streaming.manager().session(_stream_source(rel))
-    playlist = streaming.vod_playlist(session.info.duration, lambda i: f"seg/{i}.ts")
+    quality = _quality_arg()
+    session = streaming.manager().session(_stream_source(rel), quality)
+    playlist = streaming.vod_playlist(session.info.duration, lambda i: f"seg/{i}.ts?q={quality}")
     return Response(
         playlist,
         mimetype="application/vnd.apple.mpegurl",
@@ -283,7 +304,7 @@ def stream_playlist(rel: str):
 
 @library_pages.get("/library/stream/<path:rel>/seg/<int:index>.ts")
 def stream_segment(rel: str, index: int):
-    segment = streaming.manager().segment(_stream_source(rel), index)
+    segment = streaming.manager().segment(_stream_source(rel), index, _quality_arg())
     if segment is None:
         abort(503, description="The segment could not be transcoded in time.")
     return send_file(segment, mimetype="video/mp2t", max_age=3600)
