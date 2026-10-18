@@ -700,3 +700,25 @@ def test_plan_file_names_renames_existing_titles_with_catalog_directors(tmp_path
     assert (show / "Breaking_Bad_S01E01_1080p.mkv").exists()
     assert (show / "Breaking_Bad_S01E01_1080p.en.srt").exists()
     assert ml.plan_file_names(root, conn, prober=_prober) == []
+
+
+def test_underscored_names_parse_back():
+    episode = ml.parse_release_name("Breaking_Bad_S01E01_1080p.mkv")
+    assert (episode.title, episode.season, episode.episode) == ("Breaking Bad", 1, 1)
+    double = ml.parse_release_name("Its_Always_Sunny_S05E13-E14_720p.avi")
+    assert (double.season, double.episode, double.episode_end) == (5, 13, 14)
+    movie = ml.parse_release_name("Napoleon_Dynamite_2004_1080p_Jared_Hess.mp4")
+    assert (movie.title, movie.year) == ("Napoleon Dynamite", 2004)
+    assert ml.parse_release_name("Movie.2019.DDP5.1.mkv").title == "Movie"
+
+
+def test_plan_file_names_is_stable_for_underscored_episodes(tmp_path):
+    root = tmp_path / "watch"
+    season = root / "shows" / "Breaking Bad (2008)" / "Season 01"
+    _touch(season / "Breaking Bad_S01E01_1080p.mkv")
+    conn = ml.connect(tmp_path / "lib.sqlite")
+
+    ml.apply_plans(ml.plan_file_names(root, conn, prober=_prober), tmp_path / "j")
+
+    assert (season / "Breaking_Bad_S01E01_1080p.mkv").exists()
+    assert ml.plan_file_names(root, conn, prober=_prober) == []
