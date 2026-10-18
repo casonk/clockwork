@@ -238,6 +238,10 @@ b8a8376811077954d82ca3fcf476f1ac3da3e8a68a4f4d71363008000a18b75d  realesr-animev
 SUMS
 ```
 
+All settings are environment variables, documented with their defaults in
+`config/upscale.env.example`; copy it to `~/.config/clockwork/upscale.env`
+(the service loads it) and restart `clockwork-upscale` after editing.
+
 `examples/clockwork/upscale.toml` runs `upscale.py run` as an always-on user
 service at `nice 19` / idle IO; the Manage page shows its progress and starts or
 stops it. `python3 web/upscale.py queue` lists what is left.
