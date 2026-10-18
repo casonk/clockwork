@@ -6,6 +6,7 @@ on the same catalog (media_library.CATALOG_DB) and library root.
 
 from __future__ import annotations
 
+import datetime
 import json
 import mimetypes
 import re
@@ -192,6 +193,11 @@ def title_page(rel: str):
         extras=extras,
         genre=genre,
         genres=ml.GENRE_FOLDERS,
+        downloaded=(
+            datetime.datetime.fromtimestamp(meta["downloaded_at"]).strftime("%Y-%m-%d")
+            if meta.get("downloaded_at")
+            else None
+        ),
         breadcrumbs=_breadcrumbs(_rel(folder)),
     )
 

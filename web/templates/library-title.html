@@ -39,6 +39,7 @@
     {% if meta.runtime_min %}<span class="badge">{{ meta.runtime_min }} min</span>{% endif %}
     {% if meta.rating %}<span class="badge">★ {{ "%.1f"|format(meta.rating) }}</span>{% endif %}
     {% if meta.size_bytes %}<span class="badge">{{ "%.1f"|format(meta.size_bytes / 1073741824) }} GB</span>{% endif %}
+    {% if downloaded %}<span class="badge">downloaded {{ downloaded }}</span>{% endif %}
   </div>
   {% if meta.directors %}<p><span class="muted">{{ "Created by" if kind == "shows" else "Directed by" }}</span>
     {% for d in meta.directors %}{% if not loop.first %}, {% endif %}<a href="/library?director={{ d|urlencode }}">{{ d }}</a>{% endfor %}</p>{% endif %}
