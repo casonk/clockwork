@@ -168,8 +168,9 @@ class ParsedName:
 
 def _spaced(name: str) -> str:
     name = _SITE_PREFIX_RE.sub("", name)
-    # Dots and underscores separate words in release names; keep decimals like 5.1.
-    name = re.sub(r"(?<!\d)[._](?!\d)|(?<=\d)[._](?!\d)|(?<!\d)[._](?=\d)", " ", name)
+    # Underscores always separate words; dots do too, except in decimals like 5.1.
+    name = name.replace("_", " ")
+    name = re.sub(r"(?<!\d)\.(?!\d)|(?<=\d)\.(?!\d)|(?<!\d)\.(?=\d)", " ", name)
     return re.sub(r"\s+", " ", name).strip()
 
 
