@@ -232,7 +232,7 @@ def decode_command(source: Path) -> list[str]:
     return [
         # CPU decoding keeps up with the model and accepts streams NVDEC rejects.
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
-        "-i", str(source),
+        "-threads", str(THREADS), "-i", str(source),
         "-map", "0:v:0", "-fps_mode", "passthrough",
         "-f", "rawvideo", "-pix_fmt", "rgb24", "-",
     ]  # fmt: skip
@@ -254,12 +254,118 @@ def encode_command(
         "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
         "-color_range", "tv",
         "-c:v", "hevc_nvenc", "-preset", "p5", "-cq", "22", "-tag:v", "hvc1",
+        "-threads", str(THREADS), "-filter_threads", "1",
         # Re-encoded rather than copied: copied packets keep edit-list offsets
         # (hidden pre-roll) that would shift the new video against the audio.
         "-c:a", "aac", "-b:a", "320k", "-map_metadata", "1",
         "-metadata:s:v:0", "comment=AI upscaled (Real-ESRGAN, clockwork experimental)",
         "-f", "matroska", str(output),
     ]  # fmt: skip
+
+
+DUTY = float(os.environ.get("CLOCKWORK_UPSCALE_DUTY", "0.35"))
+MAX_GPU_C = float(os.environ.get("CLOCKWORK_UPSCALE_MAX_GPU_C", "72"))
+MAX_CPU_C = float(os.environ.get("CLOCKWORK_UPSCALE_MAX_CPU_C", "78"))
+# Resume only once both have cooled this far below their limit. Idle here is
+# about 60 C GPU / 65 C CPU, so a wider margin would rarely let it resume.
+COOL_MARGIN_C = 6.0
+THREADS = int(os.environ.get("CLOCKWORK_UPSCALE_THREADS", "2"))
+
+
+def gpu_temperature() -> float | None:
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        return max(float(line) for line in result.stdout.split())
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def cpu_temperature(hwmon: Path = Path("/sys/class/hwmon")) -> float | None:
+    """CPU package temperature from the coretemp/k10temp hwmon driver."""
+    for device in sorted(hwmon.glob("hwmon*")):
+        try:
+            if (device / "name").read_text().strip() in ("coretemp", "k10temp", "zenpower"):
+                return int((device / "temp1_input").read_text()) / 1000
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def steady_cpu_temperature(
+    samples: int = 6, interval: float = 0.5, read=cpu_temperature
+) -> float | None:
+    """Median over a few seconds: Intel package readings spike for a moment
+    whenever a process wakes, including this check itself."""
+    readings = []
+    for index in range(samples):
+        if index:
+            time.sleep(interval)
+        value = read()
+        if value is not None:
+            readings.append(value)
+    if not readings:
+        return None
+    readings.sort()
+    return readings[len(readings) // 2]
+
+
+class Throttle:
+    """Keeps the renderer cool and quiet: a duty cycle plus a temperature guard.
+
+    After each batch it rests so that work takes only ``duty`` of wall time,
+    and every ``check_every`` seconds it reads GPU and CPU temperatures; at or
+    above a limit it pauses until both are COOL_MARGIN_C below their limits.
+    """
+
+    def __init__(
+        self,
+        duty: float = DUTY,
+        max_gpu: float = MAX_GPU_C,
+        max_cpu: float = MAX_CPU_C,
+        *,
+        gpu=gpu_temperature,
+        cpu=steady_cpu_temperature,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
+        check_every: float = 10.0,
+    ) -> None:
+        self.duty = min(max(duty, 0.05), 1.0)
+        self.max_gpu, self.max_cpu = max_gpu, max_cpu
+        self.gpu, self.cpu = gpu, cpu
+        self.sleep, self.clock = sleep, clock
+        self.check_every = check_every
+        self.last_check = float("-inf")
+        self.cooling = False
+        self.temps: dict[str, float | None] = {}
+        self.on_cooling: Callable[[dict[str, float | None]], None] = lambda _temps: None
+
+    def _hot(self, margin: float) -> bool:
+        gpu, cpu = self.gpu(), self.cpu()
+        self.temps = {"gpu_c": gpu, "cpu_c": cpu}
+        return (gpu is not None and gpu >= self.max_gpu - margin) or (
+            cpu is not None and cpu >= self.max_cpu - margin
+        )
+
+    def after_batch(self, worked_seconds: float) -> None:
+        if self.duty < 1:
+            self.sleep(worked_seconds * (1 - self.duty) / self.duty)
+        if self.clock() - self.last_check < self.check_every:
+            return
+        self.last_check = self.clock()
+        if not self._hot(0):
+            return
+        self.cooling = True
+        while self._hot(COOL_MARGIN_C):
+            self.on_cooling(self.temps)
+            self.sleep(30)
+        self.cooling = False
+        self.last_check = self.clock()
 
 
 class Renderer:
@@ -274,6 +380,8 @@ class Renderer:
         self.model_dir = model_dir
         self.models: dict[str, Any] = {}
         self.stopping = False
+        self.throttle = Throttle()
+        torch.set_num_threads(THREADS)
 
     def model(self, name: str):
         if name not in self.models:
@@ -313,6 +421,7 @@ class Renderer:
         try:
             with torch.inference_mode():
                 while not self.stopping:
+                    batch_started = time.time()
                     raw = decoder.stdout.read(frame_bytes * batch)
                     count = len(raw) // frame_bytes
                     if count == 0:
@@ -330,6 +439,7 @@ class Renderer:
                     encoder.stdin.write(out.cpu().numpy().tobytes())
                     done += count
                     progress(done, done / max(time.time() - started, 1e-6))
+                    self.throttle.after_batch(time.time() - batch_started)
             encoder.stdin.close()
             if self.stopping:
                 raise InterruptedError("stopped")
@@ -401,7 +511,14 @@ def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
                 return 0
             time.sleep(3600)
             continue
-        progress = progress_reporter(job, base)
+        progress = progress_reporter(job, {**base, "duty": renderer.throttle.duty})
+
+        def cooling(
+            temps: dict[str, float | None], job: Job = job, base: dict[str, Any] = base
+        ) -> None:
+            write_status({**base, "state": "cooling", "title": job.title, **temps})
+
+        renderer.throttle.on_cooling = cooling
         try:
             renderer.render(job, progress)
             finished += 1

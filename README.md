@@ -209,8 +209,18 @@ starting new renders when free space on the library disk would fall below
 `CLOCKWORK_UPSCALE_MIN_FREE_GB` (default 1000) and rechecks hourly; failures
 are listed in `config/media-library-upscale-failed.json` and skipped.
 
-Measured on an RTX 3090: 360p animation about 85 fps end to end (3x real
-time), 1080p live action to 4K about 6 fps (a quarter of real time).
+The worker is throttled so it does not run the machine hot or loud: it works
+only `CLOCKWORK_UPSCALE_DUTY` of the time (default 0.35) and rests the rest,
+pauses when the GPU reaches `CLOCKWORK_UPSCALE_MAX_GPU_C` (72) or the CPU
+package `CLOCKWORK_UPSCALE_MAX_CPU_C` (78, a median over a few seconds since
+Intel package readings spike) until both are 6 C cooler, and limits ffmpeg and
+PyTorch to `CLOCKWORK_UPSCALE_THREADS` (2) CPU threads. The Manage page shows
+the duty cycle and any cooling pause.
+
+Measured on an RTX 3090: unthrottled, 360p animation runs about 85 fps (3x
+real time) and 1080p live action to 4K about 6 fps, at 300 W and over 90 C.
+With the defaults, 360p animation runs about 22 fps at roughly 150-180 W with
+the GPU holding near 70 C.
 
 Setup, outside the repo:
 
