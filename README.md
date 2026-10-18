@@ -179,7 +179,9 @@ Paths are resolved inside `CLOCKWORK_WATCH_DIR` only; anything outside it or
 hidden returns 404.
 
 The `/library` page searches the catalog by text, director, actor, genre,
-genre folder, type, quality, codec and year range; `GET /api/library` returns the same data
+genre folder, type, quality, codec and year range, sorted by title, year
+(newest first), recently downloaded (newest file modification time, which
+moves and renames keep), rating or size; `GET /api/library` returns the same data
 as JSON. `examples/clockwork/media-library.toml` runs `sync` every 30 minutes.
 
 ## mTLS and Caddy
