@@ -27,10 +27,11 @@ from flask import (
 
 try:
     from web import media_library as ml
-    from web import streaming
+    from web import streaming, upscale
 except ModuleNotFoundError:
     import media_library as ml
     import streaming
+    import upscale
 
 library_pages = Blueprint("library_pages", __name__)
 
@@ -263,6 +264,10 @@ def play_page(rel: str):
         }
         for p in (streaming.for_source(q, media) for q in streaming.available_profiles(media))
     ]
+    # Experimental AI super-resolution renders, when the background job has made them.
+    for label, _path in upscale.upscaled_versions(_root(), _root() / _rel(video)):
+        variant = "ai-4k" if label == "AI 4K" else "ai-1080p"
+        qualities.insert(0, {"name": variant, "label": f"✨ {label} (experimental)", "kbps": None})
     return render_template(
         "library-play.html",
         info=info,
@@ -276,10 +281,27 @@ def play_page(rel: str):
     )
 
 
+AI_VARIANTS = {"ai-4k": 2160, "ai-1080p": 1080}
+
+
+def _variant_arg() -> str:
+    variant = request.args.get("v", "")
+    if variant and variant not in AI_VARIANTS:
+        abort(404)
+    return variant
+
+
 def _stream_source(rel: str) -> Path:
+    """The library file, or its AI-upscaled render when ?v=ai-4k|ai-1080p asks for it."""
     video = _resolve(rel)
     if not video.is_file() or video.suffix.lower() not in ml.VIDEO_EXTS:
         abort(404)
+    variant = _variant_arg()
+    if variant:
+        rendered = upscale.output_path(_root(), _root() / _rel(video), AI_VARIANTS[variant])
+        if not rendered.is_file():
+            abort(404)
+        return rendered
     return video
 
 
@@ -293,8 +315,10 @@ def _quality_arg() -> str:
 @library_pages.get("/library/stream/<path:rel>/index.m3u8")
 def stream_playlist(rel: str):
     quality = _quality_arg()
+    variant = _variant_arg()
     session = streaming.manager().session(_stream_source(rel), quality)
-    playlist = streaming.vod_playlist(session.info.duration, lambda i: f"seg/{i}.ts?q={quality}")
+    suffix = f"?q={quality}" + (f"&v={variant}" if variant else "")
+    playlist = streaming.vod_playlist(session.info.duration, lambda i: f"seg/{i}.ts{suffix}")
     return Response(
         playlist,
         mimetype="application/vnd.apple.mpegurl",
@@ -465,6 +489,15 @@ def manage_page():
         f"{SYNC_UNIT}.service", "ActiveState", "Result", "ExecMainExitTimestamp"
     )
     timer = _systemctl_show(f"{SYNC_UNIT}.timer", "ActiveState", "NextElapseUSecRealtime")
+    upscale_root = _root() / upscale.UPSCALED_DIR
+    rendered = list(upscale_root.rglob("*.mkv")) if upscale_root.is_dir() else []
+    ai = {
+        "status": upscale.read_status(),
+        "service": _systemctl_show(f"{upscale.SERVICE}.service", "ActiveState", "LoadState"),
+        "rendered": len(rendered),
+        "rendered_size": _format_size(sum(p.stat().st_size for p in rendered)),
+        "failed": len(upscale.load_failed()),
+    }
     return render_template(
         "library-manage.html",
         attention=attention,
@@ -473,6 +506,7 @@ def manage_page():
         timer=timer,
         log=_recent_log(),
         batches=ml.recent_batches(ml.RENAME_JOURNAL),
+        ai=ai,
         journal=str(ml.RENAME_JOURNAL),
     )
 
@@ -494,4 +528,26 @@ def start_sync():
         flash(f"Could not start the sync: {result.stderr.strip()}", "error")
     else:
         flash("Sync started; refresh in a minute to see the result.", "success")
+    return redirect(url_for("library_pages.manage_page"))
+
+
+@library_pages.post("/library/manage/upscale/<action>")
+def control_upscale(action: str):
+    if action not in ("start", "stop"):
+        abort(404)
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", action, "--no-block", f"{upscale.SERVICE}.service"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        flash(f"Could not {action} AI upscaling: {exc}", "error")
+        return redirect(url_for("library_pages.manage_page"))
+    if result.returncode:
+        flash(f"Could not {action} AI upscaling: {result.stderr.strip()}", "error")
+    else:
+        flash(f"AI upscaling {'started' if action == 'start' else 'stopping'}.", "success")
     return redirect(url_for("library_pages.manage_page"))
