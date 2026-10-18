@@ -1,0 +1,59 @@
+{% extends "library-base.html" %}
+{% set tab = "manage" %}
+{% block title %}Manage library{% endblock %}
+{% block heading %}🛠 Manage library{% endblock %}
+{% block subheading %}{{ totals.titles }} titles · {{ totals.files }} videos · {{ totals.size }}{% endblock %}
+{% block content %}
+<h2>Sync</h2>
+<div class="panel">
+  <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
+    <form method="post" action="{{ url_for('library_pages.start_sync') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="btn primary" type="submit" {% if service.ActiveState == "activating" %}disabled{% endif %}>
+        {% if service.ActiveState == "activating" %}⏳ Syncing…{% else %}🔄 Sync now{% endif %}
+      </button>
+    </form>
+    <span class="small muted">
+      Organize new downloads, rename drifted files, refresh metadata.
+      {% if service.ExecMainExitTimestamp %}Last run {{ service.ExecMainExitTimestamp }}{% if service.Result and service.Result != "success" %} <span class="badge warn">{{ service.Result }}</span>{% endif %}.{% endif %}
+      {% if timer.ActiveState == "active" %}Runs every 30 minutes.{% else %}<span class="badge warn">timer {{ timer.ActiveState or "not installed" }}</span>{% endif %}
+    </span>
+  </div>
+  {% if log %}<pre class="small muted" style="margin-top:10px; white-space:pre-wrap; overflow-wrap:anywhere">{{ log|join("\n") }}</pre>{% endif %}
+</div>
+
+<h2>Needs attention <span class="muted">· {{ attention|length }}</span></h2>
+<div class="panel scroll">
+  <table>
+    {% for item in attention %}
+      <tr>
+        <td>{% if "/" in item.path %}<a href="{{ url_for('library_pages.title_page', rel=item.path) }}">{{ item.title }}</a>{% else %}<a href="{{ url_for('library_pages.browse', rel=item.path) }}">{{ item.title }}</a>{% endif %}</td>
+        <td class="small muted">{{ item.reason }}</td>
+      </tr>
+    {% else %}
+      <tr><td class="muted">Nothing to do. Everything is organized.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<h2>Recent rename batches</h2>
+<div class="panel scroll">
+  <table>
+    <tr><th>Batch</th><th>Renames</th><th class="hide-sm">Examples</th></tr>
+    {% for b in batches %}
+      <tr>
+        <td class="small"><code>{{ b.batch }}</code></td>
+        <td class="small">{{ b.count }}</td>
+        <td class="small muted hide-sm">{{ b.examples|join(", ") }}</td>
+      </tr>
+    {% else %}
+      <tr><td class="muted">No renames yet.</td></tr>
+    {% endfor %}
+  </table>
+  <p class="small muted" style="margin-top:8px">
+    Every rename is journaled in <code>{{ journal }}</code>. To reverse a batch, stop the timer first
+    (otherwise the next sync redoes it), then run
+    <code>python3 web/media_library.py undo &lt;batch&gt;</code>.
+  </p>
+</div>
+{% endblock %}
