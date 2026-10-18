@@ -153,8 +153,10 @@ def probed(monkeypatch):
 
     def probe(path):
         if path.suffix == ".mp4":
-            return streaming.MediaInfo(5400.0, ".mp4", "h264", "yuv420p", "aac")
-        return streaming.MediaInfo(13.0, ".mkv", "hevc", "yuv420p10le", "aac", ((0, "eng"),))
+            return streaming.MediaInfo(5400.0, ".mp4", "h264", "yuv420p", "aac", height=800)
+        return streaming.MediaInfo(
+            13.0, ".mkv", "hevc", "yuv420p10le", "aac", ((0, "eng"),), height=1080
+        )
 
     monkeypatch.setattr(streaming, "probe_media", probe)
     return streaming
@@ -166,14 +168,17 @@ def test_play_page_plays_mp4_directly_and_streams_mkv(client, probed):
     ).get_data(as_text=True)
 
     assert "<video" in html and 'kind="subtitles"' in html
-    assert "direct play" in html and "data-hls" not in html and "hls.min.js" not in html
+    assert 'data-direct="/library/media/movies/Thriller/Seven' in html
+    assert 'value="original">Original (800p, direct)' in html
+    assert 'value="720p">720p' in html and 'value="1080p"' not in html
 
     mkv = client.get(
         "/library/play/shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E01_1080p.mkv"
     ).get_data(as_text=True)
     assert 'data-hls="/library/stream/shows/Breaking' in mkv
     assert "index.m3u8" in mkv and "hls.min.js" in mkv and 'integrity="sha384-' in mkv
-    assert "hevc 10-bit → h264" in mkv
+    assert "hevc 10-bit → h264" in mkv and "data-direct" not in mkv
+    assert 'value="original">Original (1080p)' in mkv and 'value="720p">720p · ~4.2 Mb/s' in mkv
     assert "/sub/0.vtt" in mkv and "eng (embedded)" in mkv
     assert "Breaking Bad (2008)" in mkv
 
@@ -184,12 +189,12 @@ def test_stream_routes_serve_playlist_segments_and_subtitles(client, probed, tmp
     calls = []
 
     class FakeManager:
-        def session(self, source):
-            calls.append(("session", source.name))
+        def session(self, source, quality=None):
+            calls.append(("session", quality))
             return probed.Session("k", source, tmp_path, probed.probe_media(source))
 
-        def segment(self, source, index):
-            calls.append(("segment", index))
+        def segment(self, source, index, quality=None):
+            calls.append(("segment", index, quality))
             return segment_file if index == 1 else None
 
     monkeypatch.setattr(probed, "manager", lambda: FakeManager())
@@ -198,9 +203,12 @@ def test_stream_routes_serve_playlist_segments_and_subtitles(client, probed, tmp
     )
     base = "/library/stream/shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E01_1080p.mkv"
 
-    playlist = client.get(base + "/index.m3u8")
+    playlist = client.get(base + "/index.m3u8?q=720p")
     assert playlist.mimetype == "application/vnd.apple.mpegurl"
     assert playlist.get_data(as_text=True).count("seg/") == 3
+    assert "seg/0.ts?q=720p" in playlist.get_data(as_text=True)
+    assert ("session", "720p") in calls
+    assert client.get(base + "/index.m3u8?q=8k").status_code == 404
 
     segment = client.get(base + "/seg/1.ts")
     assert segment.status_code == 200 and segment.mimetype == "video/mp2t"
@@ -208,7 +216,9 @@ def test_stream_routes_serve_playlist_segments_and_subtitles(client, probed, tmp
 
     assert client.get(base + "/sub/0.vtt").get_data(as_text=True) == "WEBVTT\n\nstream 0\n"
     assert client.get("/library/stream/../../etc/passwd/index.m3u8").status_code == 404
-    assert ("segment", 1) in calls
+    assert ("segment", 1, "original") in calls
+    client.get(base + "/seg/1.ts?q=480p")
+    assert ("segment", 1, "480p") in calls
 
 
 def test_browse_lists_folders_and_hides_release_clutter(client):

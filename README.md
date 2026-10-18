@@ -178,6 +178,11 @@ Library pages (`web/library_pages.py`):
   `CLOCKWORK_STREAM_CACHE` (default `~/.cache/clockwork/library-hls`), at most
   three sessions at a time. hls.js (pinned, SRI-checked) drives playback;
   browsers without Media Source Extensions fall back to native HLS.
+  A Quality menu offers Original (direct play when possible, otherwise the
+  source resolution at up to 12 Mb/s, 16 Mb/s for 1440p and 30 Mb/s for 4K
+  sources) and every lower step of 1440p, 1080p (8 Mb/s), 720p (4 Mb/s) and
+  480p (1.5 Mb/s). Switching continues from the same moment, stops the
+  previous quality's transcoder, and is remembered per browser.
 - `/library/browse/`: the folder tree as it is on disk, hidden `.release/`
   folders excluded, with play and download links.
 - `/library/manage`: start a sync (`systemctl --user start` of
