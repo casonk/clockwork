@@ -167,3 +167,15 @@ should change how future sessions work in this repo.
 - Importing a web/control module must not rewrite tracked manifests by default.
   Keep migration helpers explicit opt-ins so read-only tests and diagnostics
   remain read-only.
+
+### 2026-10-18 — Wikidata lookups for media titles
+
+- Ask the SPARQL label service for `"en,mul"`, not `"en"`: many items now keep
+  their name only as a multilingual (`mul`) label, and an `en`-only query
+  returns the bare QID (Forrest Gump came back as `Q134773`).
+- `P577` (publication date) usually includes festival premieres, so the
+  earliest year is often one before the wide release. Trust the year in the
+  release name and use Wikidata's year only when the name has none.
+- `wbsearchentities` matches aliases (searching "Napoleon Dynamite" returns a
+  musician); use the full-text `Search` API through `mwapi` with
+  `haswbstatement:P31=...` filters, then score candidates by title and year.

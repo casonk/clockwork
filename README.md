@@ -94,6 +94,48 @@ sudoers drop-in (`config/sudoers/clockwork-web`) and a wrapper script
 (`config/scripts/clockwork-system-install`) so only the specific commands needed
 run as root.
 
+### Media library
+
+`web/media_library.py` keeps the watch folder (`CLOCKWORK_WATCH_DIR`) in
+Jellyfin/Plex layout and builds a searchable metadata catalog:
+
+```text
+watch/movies/Napoleon Dynamite (2004)/Napoleon Dynamite (2004) [1080p].mp4
+watch/movies/Napoleon Dynamite (2004)/Napoleon Dynamite (2004) [1080p].en.srt
+watch/shows/Breaking Bad (2008)/Season 01/Breaking Bad S01E01 [1080p].mkv
+```
+
+```bash
+python3 web/media_library.py organize            # dry run: print the rename plan
+python3 web/media_library.py organize --apply    # rename, journaled per batch
+python3 web/media_library.py undo <batch>        # reverse one batch
+python3 web/media_library.py scan                # refresh the catalog
+python3 web/media_library.py sync                # organize --apply, then scan
+python3 web/media_library.py search --director fincher --year-from 1990
+```
+
+- Titles, years and canonical names come from Wikidata (no key needed). With
+  `CLOCKWORK_TMDB_API_KEY` set, TMDB adds plots, ratings and fills any gaps.
+  Only parsed titles and years are sent to either service. Lookups are cached
+  in the catalog; titles with no match are retried weekly.
+- Resolution, codecs, channels, runtime and stream languages come from local
+  `ffprobe`; quality labels count widescreen crops (1920x800) as 1080p.
+- Entries Transmission still tracks (asked through Magneto's `/api/torrents`)
+  are never renamed, since that would break seeding. If Magneto is
+  unreachable, anything owned by the `transmission` user is skipped instead.
+- Every title gets its own folder. Multi-movie packs are split into one
+  folder per film, and feature films inside a show pack (`S05M01 ...`) are
+  filed under `movies/`. Multi-part movies (CD1/CD2), extras and episodes
+  without an `SxxEyy` or `Season N Episode N` code stay where they are and are
+  reported. Existing targets are never overwritten.
+- Shows without a director list their creators in the director field.
+- The catalog (`config/media-library.sqlite`) and rename journal
+  (`config/media-library-renames.jsonl`) are local and gitignored.
+
+The `/library` page searches the catalog by text, director, actor, genre,
+type, quality, codec and year range; `GET /api/library` returns the same data
+as JSON. `examples/clockwork/media-library.toml` runs `sync` every 30 minutes.
+
 ## mTLS and Caddy
 
 mTLS provisioning, Caddyfile generation, and DNS setup live in the

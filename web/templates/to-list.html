@@ -107,6 +107,7 @@
   <div class="actions">
     {% if cfg.key == "watch" %}
       <button class="action-btn lib-check-btn" type="button" id="lib-check-btn" title="Check which titles are already in the watch folder">📚 Check Library</button>
+      <a class="action-btn" href="/library" title="Search the organized library by director, year, quality and more">🎬 Library</a>
     {% endif %}
     {% if cfg.get("holdings_sync") %}
       <a class="action-btn" href="/api/invest-holdings" title="Tooling endpoint for holdings sync">↻ Holdings API</a>
