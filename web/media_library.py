@@ -1495,7 +1495,8 @@ CREATE TABLE IF NOT EXISTS titles (
     file_count INTEGER NOT NULL DEFAULT 0,
     metadata_checked_at REAL,
     scanned_at REAL,
-    category TEXT
+    category TEXT,
+    downloaded_at REAL
 );
 CREATE TABLE IF NOT EXISTS files (
     path TEXT PRIMARY KEY,
@@ -1531,9 +1532,11 @@ def connect(db_path: Path = CATALOG_DB) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA)
+    # Catalogs built by earlier versions lack the newer columns.
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(titles)")}
-    if "category" not in columns:  # catalogs built before genre folders
-        conn.execute("ALTER TABLE titles ADD COLUMN category TEXT")
+    for column, sql_type in (("category", "TEXT"), ("downloaded_at", "REAL")):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE titles ADD COLUMN {column} {sql_type}")
     return conn
 
 
@@ -1677,7 +1680,8 @@ def _summarize_title(conn, key: str, folder_name: str, scanned_at: float) -> Non
     edition = _stem_edition(Path(largest["path"]).stem) if largest else None
     conn.execute(
         """UPDATE titles SET quality = ?, video_codec = ?, audio_codec = ?, channels = ?,
-        size_bytes = ?, file_count = ?, edition = ?, scanned_at = ? WHERE folder = ?""",
+        size_bytes = ?, file_count = ?, edition = ?, scanned_at = ?, downloaded_at = ?
+        WHERE folder = ?""",
         (
             best["quality"] if best else None,
             best["video_codec"] if best else None,
@@ -1687,6 +1691,8 @@ def _summarize_title(conn, key: str, folder_name: str, scanned_at: float) -> Non
             len(files),
             edition,
             scanned_at,
+            # Moves and renames keep mtimes, so the newest one is when the download finished.
+            max((f["mtime"] for f in files if f["mtime"]), default=None),
             key,
         ),
     )
@@ -1757,8 +1763,9 @@ def search_catalog(
         params.append(year_to)
     order = {
         "title": "title COLLATE NOCASE",
-        "year": "year DESC, title COLLATE NOCASE",
-        "added": "scanned_at DESC",
+        "year": "year IS NULL, year DESC, title COLLATE NOCASE",
+        "downloaded": "downloaded_at IS NULL, downloaded_at DESC, title COLLATE NOCASE",
+        "added": "downloaded_at IS NULL, downloaded_at DESC, title COLLATE NOCASE",
         "size": "size_bytes DESC",
         "rating": "rating DESC",
     }.get(sort, "title COLLATE NOCASE")
@@ -1964,6 +1971,9 @@ def main(argv: list[str] | None = None) -> int:
     search.add_argument("--quality", default="")
     search.add_argument("--year-from", type=int)
     search.add_argument("--year-to", type=int)
+    search.add_argument(
+        "--sort", default="title", choices=["title", "year", "downloaded", "rating", "size"]
+    )
     args = parser.parse_args(argv)
 
     if args.command in ("organize", "sync"):
@@ -2017,6 +2027,7 @@ def main(argv: list[str] | None = None) -> int:
             quality=args.quality,
             year_from=args.year_from,
             year_to=args.year_to,
+            sort=args.sort,
         ):
             directors = ", ".join(item["directors"]) or "?"
             print(f"{item['title']} ({item['year']}) [{item['quality']}] - {directors}")

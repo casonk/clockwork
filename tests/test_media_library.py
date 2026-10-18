@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -752,3 +753,25 @@ def test_wikidata_shows_prefer_creators_over_episode_directors():
     )
     meta = ml.WikidataProvider(fetch=lambda _url: next(rows)).search("Breaking Bad", 2008, "shows")
     assert meta.directors == ["Vince Gilligan"]
+
+
+def test_sort_by_year_and_by_download_time(tmp_path):
+    root = tmp_path / "watch"
+    old = _touch(
+        root / "movies" / "Drama" / "Network (1976)" / "Network_1976_720p_Sidney_Lumet.mkv"
+    )
+    new = _touch(
+        root / "movies" / "Comedy" / "Hot Rod (2007)" / "Hot_Rod_2007_1080p_Akiva_Schaffer.mkv"
+    )
+    fresh = _touch(root / "movies" / "Comedy" / "Napoleon Dynamite (2004)" / "Napoleon.mp4")
+    for path, stamp in ((old, 1_700_000_000), (new, 1_750_000_000), (fresh, 1_760_000_000)):
+        os.utime(path, (stamp, stamp))
+    conn = ml.connect(tmp_path / "lib.sqlite")
+    ml.scan_library(root, conn, prober=_prober)
+
+    by_year = [r["title"] for r in ml.search_catalog(conn, sort="year")]
+    by_download = [r["title"] for r in ml.search_catalog(conn, sort="downloaded")]
+
+    assert by_year == ["Hot Rod", "Napoleon Dynamite", "Network"]
+    assert by_download == ["Napoleon Dynamite", "Hot Rod", "Network"]
+    assert ml.search_catalog(conn, sort="downloaded")[0]["downloaded_at"] == 1_760_000_000
