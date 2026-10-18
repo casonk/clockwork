@@ -18,6 +18,7 @@ Run ``python3 web/media_library.py --help`` for the CLI.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
 import json
 import os
@@ -71,12 +72,16 @@ SUBTITLE_EXTS = {".srt", ".sub", ".idx", ".ass", ".ssa", ".vtt"}
 _SITE_PREFIX_RE = re.compile(r"^\s*(?:www\.)?[\w-]+\.(?:org|com|net|to|cc|me)\s*-\s*", re.I)
 _YEAR_RE = re.compile(r"(?<![\d])[\(\[]?\s*((?:19|20)\d\d)\s*[\)\]]?(?![\d])")
 _YEAR_SPAN_RE = re.compile(r"\b(?:19|20)\d\d\s*[-,]\s*(?:(?:19|20)\d\d)?")
-_EPISODE_RE = re.compile(r"\bS(\d{1,2})[ ._-]?E(\d{1,3})(?:[-E]+(\d{1,3}))?\b|\b(\d{1,2})x(\d{2,3})\b", re.I)
+_EPISODE_RE = re.compile(
+    r"\bS(\d{1,2})[ ._-]?E(\d{1,3})(?:[-E]+(\d{1,3}))?\b|\b(\d{1,2})x(\d{2,3})\b", re.I
+)
 _LONG_EPISODE_RE = re.compile(
     r"\bSeason[ ._]*(\d{1,2})[ ._-]*Episode[ ._]*(\d{1,3})(?:[ ._]*(?:&|-|and)[ ._]*(\d{1,3}))?\b",
     re.I,
 )
-_SEASON_ONLY_RE = re.compile(r"\bS(\d{1,2})(?:\s*-\s*S?\d{1,2})?\b(?!E)|\bSeason[ ._]*(\d{1,2})\b", re.I)
+_SEASON_ONLY_RE = re.compile(
+    r"\bS(\d{1,2})(?:\s*-\s*S?\d{1,2})?\b(?!E)|\bSeason[ ._]*(\d{1,2})\b", re.I
+)
 _COLLECTION_RE = re.compile(r"\b(collection|trilogy|quadrilogy|anthology|\d+\s+movies)\b", re.I)
 _TAG_RE = re.compile(
     r"\b(2160p|1080p|720p|576p|480p|4k|uhd|hdr|bluray|blu-ray|brrip|bdrip|dvdrip|dvdscr|webrip|"
@@ -213,9 +218,7 @@ def parse_release_name(name: str) -> ParsedName:
             season, ep, ep_end = int(episode.group(1)), int(episode.group(2)), episode.group(3)
         else:
             season, ep, ep_end = int(episode.group(4)), int(episode.group(5)), None
-        return ParsedName(
-            title, year, SHOWS, edition, season, ep, int(ep_end) if ep_end else None
-        )
+        return ParsedName(title, year, SHOWS, edition, season, ep, int(ep_end) if ep_end else None)
     if long_episode:
         end = long_episode.group(3)
         return ParsedName(
@@ -475,8 +478,7 @@ class WikidataProvider:
     def search(self, title: str, year: int | None, kind: str) -> Metadata | None:
         types = "|".join(f"P31={qid}" for qid in _WD_TYPES)
         search = json.dumps(f"{title} haswbstatement:{types}")
-        rows = self._query(
-            f"""SELECT ?item ?itemLabel ?type (MIN(YEAR(?date)) AS ?year) WHERE {{
+        rows = self._query(f"""SELECT ?item ?itemLabel ?type (MIN(YEAR(?date)) AS ?year) WHERE {{
   SERVICE wikibase:mwapi {{
     bd:serviceParam wikibase:api "Search"; wikibase:endpoint "www.wikidata.org";
       mwapi:srsearch {search}; mwapi:srlimit "10".
@@ -485,13 +487,16 @@ class WikidataProvider:
   ?item wdt:P31 ?type. VALUES ?type {{ {" ".join(f"wd:{q}" for q in _WD_TYPES)} }}
   OPTIONAL {{ ?item wdt:P577|wdt:P580 ?date }}
   SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,mul". }}
-}} GROUP BY ?item ?itemLabel ?type"""
-        )
+}} GROUP BY ?item ?itemLabel ?type""")
         candidates = [
             {
                 "id": row["item"].rsplit("/", 1)[-1],
                 # An item without an English or multilingual label comes back as its QID.
-                "title": "" if re.fullmatch(r"Q\d+", row.get("itemLabel", "")) else row.get("itemLabel", ""),
+                "title": (
+                    ""
+                    if re.fullmatch(r"Q\d+", row.get("itemLabel", ""))
+                    else row.get("itemLabel", "")
+                ),
                 "year": int(row["year"]) if row.get("year") else None,
                 "kind": _WD_TYPES.get(row.get("type", "").rsplit("/", 1)[-1]),
             }
@@ -503,8 +508,7 @@ class WikidataProvider:
         return self.details(chosen["id"], chosen)
 
     def details(self, qid: str, chosen: dict[str, Any]) -> Metadata:
-        rows = self._query(
-            f"""SELECT ?p ?valueLabel ?value WHERE {{
+        rows = self._query(f"""SELECT ?p ?valueLabel ?value WHERE {{
   VALUES ?p {{ "director" "creator" "cast" "genre" "country" "language" "imdb" "tmdb" "tmdbtv" "duration" }}
   {{ wd:{qid} wdt:P57 ?value. BIND("director" AS ?p) }}
   UNION {{ wd:{qid} wdt:P170 ?value. BIND("creator" AS ?p) }}
@@ -517,8 +521,7 @@ class WikidataProvider:
   UNION {{ wd:{qid} wdt:P4983 ?value. BIND("tmdbtv" AS ?p) }}
   UNION {{ wd:{qid} wdt:P2047 ?value. BIND("duration" AS ?p) }}
   SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en,mul". }}
-}}"""
-        )
+}}""")
         values: dict[str, list[str]] = {}
         for row in rows:
             label = row.get("valueLabel") or row.get("value", "")
@@ -751,11 +754,15 @@ def plan_movie(
         return plan
     plan.moves.append(Move(entry, folder))
     plan.prune = folder
-    plan.moves.append(Move(folder / main.relative_to(entry), folder / f"{stem}{main.suffix.lower()}"))
+    plan.moves.append(
+        Move(folder / main.relative_to(entry), folder / f"{stem}{main.suffix.lower()}")
+    )
     plan.moves.extend(
         Move(folder / s.relative_to(entry), m.dst)
         for s, m in zip(
-            _subtitle_files(entry), _subtitle_moves(_subtitle_files(entry), folder, stem), strict=True
+            _subtitle_files(entry),
+            _subtitle_moves(_subtitle_files(entry), folder, stem),
+            strict=True,
         )
     )
     return plan
@@ -962,6 +969,7 @@ def plan_library(
             continue
         if entry.is_file() and entry.suffix.lower() not in VIDEO_EXTS:
             continue
+
         def lookup(title: str, year: int | None, kind: str) -> Metadata:
             return lookup_metadata(title, year, kind, providers, cache)
 
@@ -1014,7 +1022,12 @@ def apply_plans(plans: Iterable[EntryPlan], journal: Path = RENAME_JOURNAL) -> t
                     continue
                 log.write(
                     json.dumps(
-                        {"batch": batch, "src": str(move.src), "dst": str(move.dst), "at": time.time()}
+                        {
+                            "batch": batch,
+                            "src": str(move.src),
+                            "dst": str(move.dst),
+                            "at": time.time(),
+                        }
                     )
                     + "\n"
                 )
@@ -1028,15 +1041,9 @@ def _prune_empty_dirs(plan: EntryPlan) -> None:
     top = plan.prune
     if not top or not top.is_dir():
         return
-    for directory in sorted((d for d in top.rglob("*") if d.is_dir()), reverse=True):
-        try:
+    for directory in [*sorted((d for d in top.rglob("*") if d.is_dir()), reverse=True), top]:
+        with contextlib.suppress(OSError):
             directory.rmdir()  # only succeeds when empty
-        except OSError:
-            pass
-    try:
-        top.rmdir()
-    except OSError:
-        pass
 
 
 def undo_batch(batch: str, journal: Path = RENAME_JOURNAL) -> int:
@@ -1167,7 +1174,9 @@ def scan_library(
             row = conn.execute("SELECT * FROM titles WHERE folder = ?", (key,)).fetchone()
         stats["probed"] += _scan_files(conn, key, folder, kind, prober)
         checked = row["metadata_checked_at"]
-        stale = checked is None or (not json.loads(row["sources"]) and now() - checked > METADATA_RETRY_SECONDS)
+        stale = checked is None or (
+            not json.loads(row["sources"]) and now() - checked > METADATA_RETRY_SECONDS
+        )
         if providers and (refresh_metadata or stale):
             meta = lookup_metadata(title, year, kind, providers, None if refresh_metadata else conn)
             conn.execute(
@@ -1211,7 +1220,11 @@ def _scan_files(conn, key: str, folder: Path, kind: str, prober) -> int:
         existing = conn.execute(
             "SELECT size_bytes, mtime FROM files WHERE path = ?", (str(video),)
         ).fetchone()
-        if existing and existing["size_bytes"] == stat.st_size and existing["mtime"] == stat.st_mtime:
+        if (
+            existing
+            and existing["size_bytes"] == stat.st_size
+            and existing["mtime"] == stat.st_mtime
+        ):
             continue
         info = prober(video)
         probed += 1

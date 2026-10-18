@@ -114,7 +114,11 @@ def test_organize_movie_folder_renames_video_and_subtitles_and_can_undo(tmp_path
     _touch(entry / "Subs" / "2_English.srt")
     _touch(entry / "WWW.YIFY-TORRENTS.COM.jpg")
     provider = FakeProvider(
-        {"Batman The Dark Knight": ml.Metadata(title="The Dark Knight", year=2008, kind="movies", sources=["fake"])}
+        {
+            "Batman The Dark Knight": ml.Metadata(
+                title="The Dark Knight", year=2008, kind="movies", sources=["fake"]
+            )
+        }
     )
 
     plans = ml.plan_library(root, providers=[provider], prober=_prober, tracked=set())
@@ -214,13 +218,21 @@ def test_organize_splits_movie_collections_into_one_folder_per_title(tmp_path):
 
     movies = root / "movies"
     chamber = movies / "Harry Potter and the Chamber of Secrets (2002)"
-    assert (chamber / "Harry Potter and the Chamber of Secrets (2002) {edition-Extended} [1080p].mkv").exists()
-    assert (chamber / "Harry Potter and the Chamber of Secrets (2002) {edition-Extended} [1080p].en.srt").exists()
+    assert (
+        chamber / "Harry Potter and the Chamber of Secrets (2002) {edition-Extended} [1080p].mkv"
+    ).exists()
+    assert (
+        chamber / "Harry Potter and the Chamber of Secrets (2002) {edition-Extended} [1080p].en.srt"
+    ).exists()
     goblet = movies / "Harry Potter and the Goblet of Fire (2005)"
     assert (goblet / "Harry Potter and the Goblet of Fire (2005) [1080p].mkv").exists()
-    assert (movies / "Jay and Silent Bob Reboot (2019)" / "Jay and Silent Bob Reboot (2019) [1080p].mkv").exists()
     assert (
-        movies / "Jay and Silent Bob Strike Back (2001)" / "Jay and Silent Bob Strike Back (2001) [1080p].mkv"
+        movies / "Jay and Silent Bob Reboot (2019)" / "Jay and Silent Bob Reboot (2019) [1080p].mkv"
+    ).exists()
+    assert (
+        movies
+        / "Jay and Silent Bob Strike Back (2001)"
+        / "Jay and Silent Bob Strike Back (2001) [1080p].mkv"
     ).exists()
     assert not duo.exists()
     assert (pack / "Goblet.Of.Fire.2005.1080p" / "sample.mkv").exists()
@@ -235,7 +247,9 @@ def test_show_pack_files_feature_films_as_movies(tmp_path):
     _touch(pack / "Futurama S01 (360p re-dvdrip)" / "Futurama S01E01 Space Pilot 3000.mp4")
     _touch(pack / "Futurama S01 (360p re-dvdrip)" / "Futurama S01E02 The Series Has Landed.mp4")
     _touch(
-        pack / "Futurama S05 (360p re-dvdrip)" / "Futurama S05M01 Bender's Big Score (2007 360p re-blurip).mp4"
+        pack
+        / "Futurama S05 (360p re-dvdrip)"
+        / "Futurama S05M01 Bender's Big Score (2007 360p re-blurip).mp4"
     )
     provider = FakeProvider(
         {
@@ -250,7 +264,9 @@ def test_show_pack_files_feature_films_as_movies(tmp_path):
         ml.plan_library(root, providers=[provider], prober=_prober, tracked=set()), tmp_path / "j"
     )
 
-    assert (root / "shows" / "Futurama (1999)" / "Season 01" / "Futurama S01E02 [1080p].mp4").exists()
+    assert (
+        root / "shows" / "Futurama (1999)" / "Season 01" / "Futurama S01E02 [1080p].mp4"
+    ).exists()
     film = root / "movies" / "Futurama - Bender's Big Score (2007)"
     assert (film / "Futurama - Bender's Big Score (2007) [1080p].mp4").exists()
     assert not (root / "shows" / "Futurama (1999)" / "Futurama S05 (360p re-dvdrip)").exists()
@@ -261,7 +277,9 @@ def test_apply_never_overwrites_existing_target(tmp_path):
     _touch(root / "Hot Rod 2007 1080p BluRay.mkv")
     _touch(root / "movies" / "Hot Rod (2007)" / "Hot Rod (2007) [1080p].mkv", 99)
 
-    _batch, done = ml.apply_plans(ml.plan_library(root, prober=_prober, tracked=set()), tmp_path / "j")
+    _batch, done = ml.apply_plans(
+        ml.plan_library(root, prober=_prober, tracked=set()), tmp_path / "j"
+    )
 
     assert done == 0
     assert (root / "Hot Rod 2007 1080p BluRay.mkv").exists()
@@ -369,7 +387,9 @@ def test_scan_and_search_catalog(tmp_path):
                 genres=["thriller"],
                 sources=["fake"],
             ),
-            "Breaking Bad": ml.Metadata(directors=["Vince Gilligan"], genres=["crime"], sources=["fake"]),
+            "Breaking Bad": ml.Metadata(
+                directors=["Vince Gilligan"], genres=["crime"], sources=["fake"]
+            ),
         }
     )
     conn = ml.connect(tmp_path / "lib.sqlite")
@@ -407,7 +427,11 @@ def test_journal_lines_are_json(tmp_path):
 def test_lookup_cache_serves_parsed_and_canonical_names(tmp_path):
     conn = ml.connect(tmp_path / "lib.sqlite")
     provider = FakeProvider(
-        {"Se7en": ml.Metadata(title="Seven", year=1995, directors=["David Fincher"], sources=["fake"])}
+        {
+            "Se7en": ml.Metadata(
+                title="Seven", year=1995, directors=["David Fincher"], sources=["fake"]
+            )
+        }
     )
 
     first = ml.lookup_metadata("Se7en", 1995, "movies", [provider], conn)
@@ -427,7 +451,9 @@ def test_subtitle_language_codes_only_near_the_end():
 
 
 def test_parse_long_episode_form_and_extras():
-    double = ml.parse_release_name("Its Always Sunny Season 05 Episode 13 & 14 - A Very Sunny Christmas.avi")
+    double = ml.parse_release_name(
+        "Its Always Sunny Season 05 Episode 13 & 14 - A Very Sunny Christmas.avi"
+    )
     assert (double.season, double.episode, double.episode_end) == (5, 13, 14)
     extra = ml.parse_release_name("Its Always Sunny Season 01 Extra 01 - Charlie Has Cancer.mkv")
     assert extra.episode is None
@@ -458,7 +484,9 @@ def test_wikidata_label_falling_back_to_qid_is_ignored():
             ]
         }
     }
-    assert ml.WikidataProvider(fetch=lambda _url: rows).search("Forrest Gump", 1994, "movies") is None
+    assert (
+        ml.WikidataProvider(fetch=lambda _url: rows).search("Forrest Gump", 1994, "movies") is None
+    )
 
 
 def test_apply_continues_after_a_failed_rename(tmp_path, monkeypatch, capsys):
@@ -473,7 +501,9 @@ def test_apply_continues_after_a_failed_rename(tmp_path, monkeypatch, capsys):
         real_rename(src, dst)
 
     monkeypatch.setattr(ml.os, "rename", flaky)
-    _batch, done = ml.apply_plans(ml.plan_library(root, prober=_prober, tracked=set()), tmp_path / "j")
+    _batch, done = ml.apply_plans(
+        ml.plan_library(root, prober=_prober, tracked=set()), tmp_path / "j"
+    )
 
     assert done == 1
     assert (root / "movies" / "Hot Rod (2007)" / "Hot Rod (2007) [1080p].mkv").exists()
