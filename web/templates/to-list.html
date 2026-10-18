@@ -62,6 +62,28 @@
     .add-btn:hover { background:var(--accent-dim); }
     .backup-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 14px; border:1px solid var(--border); border-radius:8px; background:var(--surface); margin:0 0 14px; }
     .backup-label { color:var(--muted); font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
+    .find-btn { border:1px solid var(--border); background:transparent; color:var(--muted); cursor:pointer; border-radius:5px; width:28px; height:26px; flex-shrink:0; }
+    .find-btn:hover, .find-btn.active { border-color:var(--accent); background:var(--accent-dim); }
+    .lib-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+    .lib-dot.found { background:var(--green); box-shadow:0 0 5px var(--green); }
+    .lib-dot.missing { background:var(--border); }
+    .lib-check-btn:disabled { opacity:.5; cursor:progress; }
+    .search-panel { padding:8px 14px 10px 48px; background:var(--surface3); border-bottom:1px solid var(--border); }
+    .search-panel[hidden] { display:none; }
+    .search-panel-header { color:var(--muted); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; }
+    .search-note { color:var(--muted); font-size:12px; font-style:italic; padding:4px 0; }
+    .torrent-result { display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid rgba(46,50,80,.4); font-size:12px; }
+    .torrent-result:last-child { border-bottom:none; }
+    .torrent-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; }
+    .torrent-name.expanded { white-space:normal; overflow-wrap:anywhere; }
+    .torrent-meta { color:var(--muted); white-space:nowrap; }
+    .torrent-quality { padding:1px 6px; border-radius:4px; border:1px solid var(--accent-dim); color:var(--accent); font-size:11px; font-weight:700; }
+    .torrent-seeds { color:var(--green); white-space:nowrap; }
+    .torrent-seeds.low { color:var(--yellow); }
+    .torrent-seeds.dead { color:var(--red); }
+    .add-torrent-btn { padding:3px 9px; border-radius:5px; border:1px solid var(--green-dim); background:transparent; color:var(--green); font-weight:700; cursor:pointer; white-space:nowrap; }
+    .add-torrent-btn:hover:not(:disabled) { background:var(--green-dim); }
+    .add-torrent-btn:disabled { opacity:.5; cursor:not-allowed; }
     @media (max-width: 640px) {
       header { align-items:flex-start; flex-direction:column; padding:10px 14px; }
       .actions { justify-content:flex-start; }
@@ -84,7 +106,7 @@
   </div>
   <div class="actions">
     {% if cfg.key == "watch" %}
-      <a class="action-btn" href="/api/watch-check" title="Tooling endpoint for library checks">⬛ Library API</a>
+      <button class="action-btn lib-check-btn" type="button" id="lib-check-btn" title="Check which titles are already in the watch folder">📚 Check Library</button>
     {% endif %}
     {% if cfg.get("holdings_sync") %}
       <a class="action-btn" href="/api/invest-holdings" title="Tooling endpoint for holdings sync">↻ Holdings API</a>
@@ -142,7 +164,8 @@
       <div class="items">
         {% for item in active + completed %}
           {% set value = item[cfg.primary] %}
-          <div class="item">
+          {% set find_torrent = cfg.key == "watch" and not item[cfg.status] %}
+          <div class="item"{% if cfg.key == "watch" %} data-title="{{ value }}"{% endif %}>
             <form method="post" action="/{{ cfg.page }}/toggle-item">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <input type="hidden" name="category" value="{{ cat.name }}">
@@ -154,6 +177,11 @@
               {% if item.year %}<span class="item-meta">{{ item.year }}</span>{% endif %}
               {% if item.name %}<span class="item-meta">{{ item.name }}</span>{% endif %}
             </div>
+            {% if find_torrent %}
+              <button class="find-btn" type="button" title="Find torrent"
+                      data-query="{{ value }}{% if item.year %} {{ item.year }}{% endif %}"
+                      data-category="{{ cat.name }}">🔍</button>
+            {% endif %}
             <form method="post" action="/{{ cfg.page }}/delete-item">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <input type="hidden" name="category" value="{{ cat.name }}">
@@ -161,6 +189,7 @@
               <button class="delete-btn" type="submit" title="Remove">x</button>
             </form>
           </div>
+          {% if find_torrent %}<div class="search-panel" hidden></div>{% endif %}
         {% else %}
           <div class="item empty-item">Nothing here yet.</div>
         {% endfor %}
@@ -180,5 +209,153 @@
     <button class="add-btn" type="submit">+ {{ cfg.name_label }}</button>
   </form>
 </main>
+{% if cfg.key == "watch" %}
+<script>
+(() => {
+  const csrfToken = {{ csrf_token|tojson }};
+  const jsonHeaders = { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken };
+
+  function flash(message, type = 'success') {
+    let list = document.getElementById('flash-list');
+    if (!list) {
+      list = document.createElement('div');
+      list.id = 'flash-list';
+      document.querySelector('main').before(list);
+    }
+    const el = document.createElement('div');
+    el.className = `flash ${type}`;
+    el.textContent = message;
+    list.append(el);
+    setTimeout(() => el.remove(), 6000);
+  }
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function fmtBytes(bytes) {
+    if (!bytes) return '';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let v = bytes;
+    for (const u of units) {
+      if (v < 1024 || u === 'TB') return `${v.toFixed(u === 'B' ? 0 : 1)} ${u}`;
+      v /= 1024;
+    }
+    return '';
+  }
+
+  async function addTorrent(result, btn) {
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+      const resp = await fetch('/api/torrent-add', {
+        method: 'POST', headers: jsonHeaders, body: JSON.stringify({ magnet: result.magnet }),
+      });
+      const json = await resp.json();
+      if (!json.ok) throw new Error(json.error || `HTTP ${resp.status}`);
+      btn.textContent = '✓ Added';
+      flash(`Added "${result.name}" to Transmission via Magneto.`);
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = '+ Add';
+      flash(`Magneto error: ${e.message}`, 'error');
+    }
+  }
+
+  function renderResults(panel, source, results) {
+    panel.replaceChildren(el('div', 'search-panel-header', `Torrent search · ${source}`));
+    if (!results.length) {
+      panel.append(el('div', 'search-note', 'No torrents found.'));
+      return;
+    }
+    for (const r of results) {
+      const row = el('div', 'torrent-result');
+      const name = el('span', 'torrent-name', r.name);
+      name.title = 'Click to expand';
+      name.addEventListener('click', () => name.classList.toggle('expanded'));
+      row.append(name);
+      if (r.quality) row.append(el('span', 'torrent-quality', r.quality));
+      const seedClass = r.seeders > 20 ? '' : r.seeders > 5 ? ' low' : ' dead';
+      row.append(el('span', `torrent-seeds${seedClass}`, `↑${r.seeders}`));
+      const size = r.size_str || fmtBytes(r.size_bytes);
+      if (size) row.append(el('span', 'torrent-meta', size));
+      const add = el('button', 'add-torrent-btn', '+ Add');
+      add.type = 'button';
+      add.title = 'Send to Magneto / Transmission';
+      add.addEventListener('click', () => addTorrent(r, add));
+      row.append(add);
+      panel.append(row);
+    }
+  }
+
+  async function toggleSearch(btn) {
+    const panel = btn.closest('.item').nextElementSibling;
+    if (!panel.hidden) {
+      panel.hidden = true;
+      btn.classList.remove('active');
+      return;
+    }
+    panel.hidden = false;
+    btn.classList.add('active');
+    if (panel.dataset.loaded) return;
+    const source = btn.dataset.category.toLowerCase() === 'anime' ? 'Nyaa.si' : 'torrents-csv';
+    panel.replaceChildren(el('div', 'search-note', 'Searching…'));
+    try {
+      const params = new URLSearchParams({ q: btn.dataset.query, cat: btn.dataset.category });
+      const resp = await fetch(`/api/torrent-search?${params}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const json = await resp.json();
+      renderResults(panel, source, json.results || []);
+      panel.dataset.loaded = '1';
+    } catch (e) {
+      panel.replaceChildren(el('div', 'search-note', `Torrent search failed: ${e.message}`));
+    }
+  }
+
+  async function checkLibrary(btn) {
+    const items = [...document.querySelectorAll('.item[data-title]')];
+    if (!items.length) { flash('No items to check.', 'error'); return; }
+    const titles = items.map(item => ({ title: item.dataset.title }));
+    btn.disabled = true;
+    try {
+      const resp = await fetch('/api/watch-check', {
+        method: 'POST', headers: jsonHeaders, body: JSON.stringify({ titles }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const json = await resp.json();
+      if (!json.available) {
+        flash('Watch folder not accessible — check CLOCKWORK_WATCH_DIR.', 'error');
+        return;
+      }
+      let found = 0;
+      for (const item of items) {
+        const match = json.matches[item.dataset.title];
+        if (!match) continue;
+        if (match.found) found += 1;
+        let dot = item.querySelector('.lib-dot');
+        if (!dot) {
+          dot = el('span', 'lib-dot');
+          item.querySelector('.item-body').after(dot);
+        }
+        dot.className = `lib-dot ${match.found ? 'found' : 'missing'}`;
+        dot.title = match.found ? `In library: ${match.match}` : 'Not in library';
+      }
+      flash(`Library: ${found} of ${titles.length} titles found in watch folder.`, found ? 'success' : 'error');
+    } catch (e) {
+      flash(`Library check failed: ${e.message}`, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  document.querySelectorAll('.find-btn').forEach(btn => btn.addEventListener('click', () => toggleSearch(btn)));
+  const libBtn = document.getElementById('lib-check-btn');
+  if (libBtn) libBtn.addEventListener('click', () => checkLibrary(libBtn));
+})();
+</script>
+{% endif %}
 </body>
 </html>

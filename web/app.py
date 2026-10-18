@@ -3903,6 +3903,27 @@ def api_tradility_analysis():
     return jsonify(data)
 
 
+def _watch_scan_dirs() -> list[Path]:
+    return [WATCH_DIR] + [d for d in _EXTRA_WATCH_DIRS if d != WATCH_DIR]
+
+
+@app.get("/api/watch-check")
+def watch_check_status():
+    """Describe the library check endpoint for tooling (the to-watch "Library API" link).
+
+    Without this, a GET falls through to /api/<list_key> and 404s.
+    Response: {"available": bool, "dirs": [{"path": str, "exists": bool}], "usage": str}
+    """
+    dirs = [{"path": str(d), "exists": d.exists()} for d in _watch_scan_dirs()]
+    return jsonify(
+        {
+            "available": any(d["exists"] for d in dirs),
+            "dirs": dirs,
+            "usage": 'POST {"titles": [{"title": "...", "year": "..."|null}, ...]}',
+        }
+    )
+
+
 @app.post("/api/watch-check")
 def watch_check():
     """Fuzzy-match a list of titles against entries in WATCH_DIR.
@@ -3910,7 +3931,7 @@ def watch_check():
     Request body: {"titles": [{"title": "...", "year": "..."|null}, ...]}
     Response: {"available": bool, "matches": {"<title>": {"found": bool, "match": "<entry name>"|null}}}
     """
-    scan_dirs = [WATCH_DIR] + [d for d in _EXTRA_WATCH_DIRS if d != WATCH_DIR]
+    scan_dirs = _watch_scan_dirs()
     accessible = [d for d in scan_dirs if d.exists()]
     if not accessible:
         return jsonify({"available": False, "matches": {}})
