@@ -100,10 +100,19 @@ run as root.
 Jellyfin/Plex layout and builds a searchable metadata catalog:
 
 ```text
-watch/movies/Comedy/Napoleon Dynamite (2004)/Napoleon Dynamite (2004) [1080p].mp4
-watch/movies/Comedy/Napoleon Dynamite (2004)/Napoleon Dynamite (2004) [1080p].en.srt
-watch/shows/Breaking Bad (2008)/Season 01/Breaking Bad S01E01 [1080p].mkv
+watch/movies/Comedy/Napoleon Dynamite (2004)/Napoleon Dynamite_2004_1080p_Jared Hess.mp4
+watch/movies/Comedy/Napoleon Dynamite (2004)/Napoleon Dynamite_2004_1080p_Jared Hess.en.srt
+watch/movies/Crime/Goodfellas (1990)/Goodfellas_1990_1080p_Martin Scorsese_Remastered.mkv
+watch/shows/Breaking Bad (2008)/Season 01/Breaking Bad_S01E01_1080p.mkv
 ```
+
+Folders stay `Title (Year)` so media servers keep matching them. Files are
+`NAME_DATE_QUALITY_DIRECTOR[_EDITION]` (episodes `SHOW_SxxEyy_QUALITY`):
+underscores separate fields, spaces stay inside a field, up to two directors
+are joined with ` & `, and a missing value is written `Unknown` so the fields
+keep their positions. Subtitles and audio tracks share the video's stem
+(`….en.srt`, `….ac3`). Each `sync` renames existing files that drift from the
+convention, taking directors from the catalog.
 
 Movies sit in one genre folder each (Action, Adventure, Animation, Comedy,
 Crime, Documentary, Drama, Family, Fantasy, Horror, Musical, Mystery, Romance,

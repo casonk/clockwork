@@ -879,12 +879,44 @@ def _companion_files(path: Path) -> list[Path]:
     ]
 
 
-def _quality_suffix(info: StreamInfo) -> str:
-    return f" [{info.quality}]" if info.quality else ""
+UNKNOWN = "Unknown"
 
 
-def _edition_suffix(edition: str | None) -> str:
-    return f" {{edition-{edition}}}" if edition else ""
+def _field(text: str) -> str:
+    # Underscores separate fields, so a field itself never contains one.
+    return safe_component(text.replace("_", " "))
+
+
+def director_field(directors: Iterable[str]) -> str:
+    names = [d for d in directors if d][:2]
+    return " & ".join(names) if names else UNKNOWN
+
+
+def movie_stem(
+    title: str,
+    year: int | None,
+    quality: str | None,
+    directors: Iterable[str] = (),
+    edition: str | None = None,
+) -> str:
+    """NAME_DATE_QUALITY_DIRECTOR[_EDITION], e.g. ``Napoleon Dynamite_2004_1080p_Jared Hess``."""
+    fields = [title, str(year) if year else UNKNOWN, quality or UNKNOWN, director_field(directors)]
+    if edition:
+        fields.append(edition)
+    return "_".join(_field(f) for f in fields)
+
+
+def _stem_edition(stem: str) -> str | None:
+    parts = stem.split("_")
+    if len(parts) >= 5:
+        return parts[4]
+    legacy = re.search(r"\{edition-([^}]+)\}", stem)
+    return legacy.group(1) if legacy else None
+
+
+def episode_stem(show: str, code: str, quality: str | None) -> str:
+    """NAME_EPISODE_QUALITY, e.g. ``Breaking Bad_S01E01_1080p``."""
+    return "_".join(_field(f) for f in (show, code, quality or UNKNOWN))
 
 
 def _companion_moves(companions: list[Path], base: Path, video_stem: str) -> list[Move]:
@@ -936,6 +968,7 @@ def plan_movie(
     edition: str | None,
     prober,
     genre: str = "Other",
+    directors: Iterable[str] = (),
 ) -> EntryPlan:
     plan = EntryPlan(entry, MOVIES, title, year)
     videos = _video_files(entry)
@@ -949,7 +982,7 @@ def plan_movie(
         plan.skipped = "several full-length videos (multi-part or collection); review by hand"
         return plan
     folder = movie_dir(root, genre, title, year)
-    stem = f"{title_folder(title, year)}{_edition_suffix(edition)}{_quality_suffix(prober(main))}"
+    stem = movie_stem(title, year, prober(main).quality, directors, edition)
     if entry.is_file():
         plan.moves.append(Move(entry, folder / f"{stem}{entry.suffix.lower()}"))
         return plan
@@ -999,7 +1032,6 @@ def plan_show(
     folder = root / SHOWS / title_folder(title, year)
     plan.moves.append(Move(entry, folder))
     plan.prune = folder
-    show = safe_component(title)
 
     def rebase(p: Path) -> Path:
         return folder / p.relative_to(entry)
@@ -1036,6 +1068,7 @@ def plan_show(
                     prober,
                     companions=companions,
                     genre=genre_of(film_title, film_year, meta),
+                    directors=meta.directors,
                     rebase=rebase,
                 )
             )
@@ -1050,7 +1083,7 @@ def plan_show(
         season, ep, ep_end = found
         code = f"S{season:02d}E{ep:02d}" + (f"-E{ep_end:02d}" if ep_end else "")
         season_dir = folder / f"Season {season:02d}"
-        stem = f"{show} {code}{_quality_suffix(prober(video))}"
+        stem = episode_stem(title, code, prober(video).quality)
         dst = season_dir / f"{stem}{video.suffix.lower()}"
         if dst in targets:
             continue  # duplicate copy of an episode; parked with the release clutter
@@ -1080,11 +1113,12 @@ def _movie_moves(
     *,
     companions: list[Path],
     genre: str = "Other",
+    directors: Iterable[str] = (),
     rebase: Callable[[Path], Path] = lambda p: p,
 ) -> list[Move]:
     """Moves that file one feature video (and its companions) as its own movie folder."""
     folder = movie_dir(root, genre, title, year)
-    stem = f"{title_folder(title, year)}{_edition_suffix(edition)}{_quality_suffix(prober(video))}"
+    stem = movie_stem(title, year, prober(video).quality, directors, edition)
     moves = [Move(current, folder / f"{stem}{video.suffix.lower()}")]
     moves.extend(
         Move(rebase(c), m.dst)
@@ -1133,6 +1167,7 @@ def plan_collection(
             prober,
             companions=companions,
             genre=genre_of(title, year, meta),
+            directors=meta.directors,
         )
         placed.update([video, *companions])
         if not meta.sources:
@@ -1235,7 +1270,9 @@ def plan_library(
             plan = plan_show(entry, root, title, year, prober, lookup, genre_of)
         else:
             genre = genre_of(title, year, meta)
-            plan = plan_movie(entry, root, title, year, parsed.edition, prober, genre)
+            plan = plan_movie(
+                entry, root, title, year, parsed.edition, prober, genre, meta.directors
+            )
         if not meta.sources:
             plan.note = "; ".join(filter(None, [plan.note, "no metadata match; parsed name used"]))
         plans.append(plan)
@@ -1265,6 +1302,85 @@ def _plan_genre_folders(
         plans.append(
             EntryPlan(folder, MOVIES, title, year, [Move(folder, base / genre / folder.name)])
         )
+    return plans
+
+
+def _catalog_quality(conn: sqlite3.Connection | None, prober) -> Callable[[Path], str | None]:
+    """Quality from the catalog when it has probed this exact file, else ffprobe."""
+
+    def quality(path: Path) -> str | None:
+        if conn is not None:
+            row = conn.execute(
+                "SELECT quality, size_bytes, mtime FROM files WHERE path = ?", (str(path),)
+            ).fetchone()
+            stat = path.stat()
+            if row and row["size_bytes"] == stat.st_size and row["mtime"] == stat.st_mtime:
+                return row["quality"]
+        return prober(path).quality
+
+    return quality
+
+
+def _rename_with_companions(video: Path, stem: str) -> list[Move]:
+    """Rename a video and the subtitles/audio next to it that share its stem."""
+    if video.stem == stem:
+        return []
+    moves = [Move(video, video.with_name(f"{stem}{video.suffix}"))]
+    prefix = f"{video.stem}."
+    for sibling in sorted(video.parent.iterdir()):
+        if (
+            sibling.is_file()
+            and sibling.name.startswith(prefix)
+            and sibling.suffix.lower() in COMPANION_EXTS
+        ):
+            moves.append(Move(sibling, sibling.with_name(stem + "." + sibling.name[len(prefix) :])))
+    return moves
+
+
+def plan_file_names(root: Path, conn: sqlite3.Connection | None, prober=probe) -> list[EntryPlan]:
+    """Bring files already in the library to the current naming convention.
+
+    Directors come from the catalog, so a title gets them on the sync after
+    its first scan. Folder names are left as they are.
+    """
+    quality = _catalog_quality(conn, prober)
+    plans: list[EntryPlan] = []
+    for kind, folder, _category in _title_dirs(root):
+        match = _FOLDER_RE.match(folder.name)
+        title = match.group("title") if match else folder.name
+        year = int(match.group("year")) if match and match.group("year") else None
+        moves: list[Move] = []
+        if kind == MOVIES:
+            videos = [v for v in _video_files(folder) if v.parent == folder]
+            if not videos:
+                continue
+            sizes = {v: v.stat().st_size for v in videos}
+            main = max(videos, key=sizes.__getitem__)
+            if any(v != main and sizes[v] > sizes[main] * 0.4 for v in videos):
+                continue  # multi-part movie; leave its names alone
+            directors: list[str] = []
+            if conn is not None:
+                row = conn.execute(
+                    "SELECT directors FROM titles WHERE folder = ?", (str(folder),)
+                ).fetchone()
+                directors = json.loads(row["directors"]) if row else []
+            edition = _stem_edition(main.stem) or _edition(_spaced(main.stem))
+            stem = movie_stem(title, year, quality(main), directors, edition)
+            moves = _rename_with_companions(main, stem)
+        else:
+            for video in _video_files(folder):
+                if not re.fullmatch(r"Season \d{2}", video.parent.name):
+                    continue
+                found = _episode_of(video, folder)
+                if not found:
+                    continue
+                season, ep, ep_end = found
+                code = f"S{season:02d}E{ep:02d}" + (f"-E{ep_end:02d}" if ep_end else "")
+                moves.extend(
+                    _rename_with_companions(video, episode_stem(title, code, quality(video)))
+                )
+        if moves:
+            plans.append(EntryPlan(folder, kind, title, year, moves))
     return plans
 
 
@@ -1547,7 +1663,8 @@ def _scan_files(conn, key: str, folder: Path, kind: str, prober) -> int:
 def _summarize_title(conn, key: str, folder_name: str, scanned_at: float) -> None:
     files = conn.execute("SELECT * FROM files WHERE folder = ?", (key,)).fetchall()
     best = max(files, key=lambda f: _QUALITY_RANK.get(f["quality"] or "", 0), default=None)
-    edition = re.search(r"\{edition-([^}]+)\}", " ".join(Path(f["path"]).name for f in files))
+    largest = max(files, key=lambda f: f["size_bytes"] or 0, default=None)
+    edition = _stem_edition(Path(largest["path"]).stem) if largest else None
     conn.execute(
         """UPDATE titles SET quality = ?, video_codec = ?, audio_codec = ?, channels = ?,
         size_bytes = ?, file_count = ?, edition = ?, scanned_at = ? WHERE folder = ?""",
@@ -1558,7 +1675,7 @@ def _summarize_title(conn, key: str, folder_name: str, scanned_at: float) -> Non
             best["channels"] if best else None,
             sum(f["size_bytes"] or 0 for f in files),
             len(files),
-            edition.group(1) if edition else None,
+            edition,
             scanned_at,
             key,
         ),
@@ -1670,6 +1787,19 @@ def catalog_facets(conn: sqlite3.Connection) -> dict[str, list[str]]:
 # ---------------------------------------------------------------------------
 
 
+def _apply_file_names(root: Path, conn: sqlite3.Connection, journal: Path) -> None:
+    plans = plan_file_names(root, conn)
+    if not plans:
+        return
+    batch, done = apply_plans(plans, journal)
+    # Carry probe results over to the new paths; renaming keeps size and mtime.
+    for plan in plans:
+        for move in plan.moves:
+            conn.execute("UPDATE files SET path = ? WHERE path = ?", (str(move.dst), str(move.src)))
+    conn.commit()
+    print(f"file-name batch {batch}: {done} rename(s)")
+
+
 def _print_plans(plans: list[EntryPlan], root: Path) -> None:
     for plan in plans:
         label = f"{plan.entry.name}"
@@ -1727,12 +1857,13 @@ def main(argv: list[str] | None = None) -> int:
         if only:
             plans = [p for p in plans if p.entry.name in only]
         if args.command == "organize" and not args.apply:
-            _print_plans(plans, args.root)
+            _print_plans(plans + plan_file_names(args.root, cache), args.root)
             print("\ndry run; add --apply to rename")
             return 0
         batch, done = apply_plans(plans, args.journal)
         print(f"organize batch {batch}: {done} rename(s)")
         if args.command == "organize":
+            _apply_file_names(args.root, cache, args.journal)
             return 0
     if args.command in ("scan", "sync"):
         conn = connect(args.db)
@@ -1743,6 +1874,9 @@ def main(argv: list[str] | None = None) -> int:
             refresh_metadata=getattr(args, "refresh_metadata", False),
         )
         print("scan " + " ".join(f"{k}={v}" for k, v in stats.items()))
+        if args.command == "sync":
+            # After the scan, so titles filed this run already have their directors.
+            _apply_file_names(args.root, conn, args.journal)
         return 0
     if args.command == "undo":
         print(f"undid {undo_batch(args.batch, args.journal)} rename(s)")
