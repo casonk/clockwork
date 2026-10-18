@@ -239,8 +239,9 @@ SUMS
 ```
 
 All settings are environment variables, documented with their defaults in
-`config/upscale.env.example`; copy it to `~/.config/clockwork/upscale.env`
-(the service loads it) and restart `clockwork-upscale` after editing.
+`config/upscale.env.example`; copy it to the gitignored
+`config/upscale.env.local` (the service loads it) and restart
+`clockwork-upscale` after editing.
 
 `examples/clockwork/upscale.toml` runs `upscale.py run` as an always-on user
 service at `nice 19` / idle IO; the Manage page shows its progress and starts or
