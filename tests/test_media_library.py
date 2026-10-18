@@ -126,13 +126,14 @@ def test_organize_movie_folder_renames_video_and_subtitles_and_can_undo(tmp_path
     batch, done = ml.apply_plans(plans, journal)
 
     folder = root / "movies" / "The Dark Knight (2008)"
-    assert done == 3
+    assert done == 4
     assert (folder / "The Dark Knight (2008) [1080p].mp4").stat().st_size == 1000
     assert (folder / "The Dark Knight (2008) [1080p].en.srt").exists()
-    assert (folder / "WWW.YIFY-TORRENTS.COM.jpg").exists()
+    assert (folder / ".release" / "WWW.YIFY-TORRENTS.COM.jpg").exists()
     assert not (folder / "Subs").exists()
 
-    assert ml.undo_batch(batch, journal) == 3
+    assert ml.undo_batch(batch, journal) == 4
+    assert not (root / "movies").exists()
     assert (entry / "The.Dark.Knight.2008.1080p.BrRip.x264.YIFY.mp4").exists()
     assert (entry / "Subs" / "2_English.srt").exists()
 
@@ -172,7 +173,6 @@ def test_organize_show_files_episodes_into_seasons(tmp_path):
     assert (show / "Season 01" / "It's Always Sunny in Philadelphia S01E01 [1080p].srt").exists()
     assert (show / "Season 07" / "It's Always Sunny in Philadelphia S07E02 [1080p].mkv").exists()
     assert (show / "Extras" / "Blooper reel.mkv").exists()
-    assert "without an SxxEyy code" in plans[0].note
 
 
 def test_organize_skips_seeding_and_multi_part(tmp_path):
@@ -235,7 +235,8 @@ def test_organize_splits_movie_collections_into_one_folder_per_title(tmp_path):
         / "Jay and Silent Bob Strike Back (2001) [1080p].mkv"
     ).exists()
     assert not duo.exists()
-    assert (pack / "Goblet.Of.Fire.2005.1080p" / "sample.mkv").exists()
+    assert not pack.exists()
+    assert (root / ".release" / pack.name / "Goblet.Of.Fire.2005.1080p" / "sample.mkv").exists()
 
     ml.undo_batch(batch, tmp_path / "j.jsonl")
     assert (duo / "Jay and Silent Bob Reboot 2019 1080p BluRay HEVC x265 5.1 BONE.mkv").exists()
@@ -508,3 +509,53 @@ def test_apply_continues_after_a_failed_rename(tmp_path, monkeypatch, capsys):
     assert done == 1
     assert (root / "movies" / "Hot Rod (2007)" / "Hot Rod (2007) [1080p].mkv").exists()
     assert "rename failed" in capsys.readouterr().err
+
+
+def test_show_companions_extras_and_duplicates(tmp_path):
+    root = tmp_path / "watch"
+    entry = root / "Futurama S01-S07 (1999-) + 4 Movies (2007-2009)"
+    release = entry / "Futurama.S07.720p"
+    _touch(release / "Futurama.S07E01.mkv")
+    _touch(release / "Futurama.S07E01.recovered.mkv")
+    _touch(release / "Futurama.S07E02.mkv")
+    _touch(release / "Subs" / "Futurama.S07E01.srt")
+    _touch(release / "RARBG.txt")
+    _touch(entry / "Futurama S07X01 Simpsorama (The Simpsons S26E06).mp4")
+
+    plan = ml.plan_library(root, prober=_prober, tracked=set())[0]
+    ml.apply_plans([plan], tmp_path / "j")
+
+    show = root / "shows" / "Futurama (1999)"
+    assert (show / "Season 07" / "Futurama S07E01 [1080p].srt").exists()
+    assert (show / "Extras" / "Futurama S07X01 Simpsorama (The Simpsons S26E06).mp4").exists()
+    assert not (show / "Season 26").exists()
+    assert (show / ".release" / "Futurama.S07.720p" / "RARBG.txt").exists()
+    assert (show / ".release" / "Futurama.S07.720p" / "Futurama.S07E01.recovered.mkv").exists()
+    assert not (show / "Futurama.S07.720p").exists()
+
+
+def test_movie_keeps_external_audio_tracks(tmp_path):
+    root = tmp_path / "watch"
+    pack = root / "Harry.Potter.Complete.Collection.2001-2011.1080p"
+    _touch(pack / "Goblet.Of.Fire.2005.1080p" / "Goblet.Of.Fire.2005.mkv", 900)
+    _touch(pack / "Goblet.Of.Fire.2005.1080p" / "External AC3" / "AC3.ac3")
+    _touch(pack / "Chamber.Of.Secrets.2002.1080p" / "Chamber.Of.Secrets.2002.mkv", 900)
+
+    ml.apply_plans(ml.plan_library(root, prober=_prober, tracked=set()), tmp_path / "j")
+
+    goblet = root / "movies" / "Goblet Of Fire (2005)"
+    assert (goblet / "Goblet Of Fire (2005) [1080p].ac3").exists()
+    assert not pack.exists()
+
+
+def test_scan_ignores_release_clutter_and_extras(tmp_path):
+    root = tmp_path / "watch"
+    folder = root / "movies" / "Seven (1995)"
+    _touch(folder / "Seven (1995) [1080p].mkv")
+    _touch(folder / ".release" / "sample-copy.mkv")
+    _touch(folder / "Extras" / "Making of.mkv")
+    conn = ml.connect(tmp_path / "lib.sqlite")
+
+    ml.scan_library(root, conn, prober=_prober)
+
+    assert ml.search_catalog(conn)[0]["file_count"] == 1

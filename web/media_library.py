@@ -64,6 +64,8 @@ SHOWS = "shows"
 
 VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".m4v", ".mov", ".wmv", ".mpg", ".mpeg", ".ts", ".webm"}
 SUBTITLE_EXTS = {".srt", ".sub", ".idx", ".ass", ".ssa", ".vtt"}
+AUDIO_EXTS = {".ac3", ".eac3", ".dts", ".dtshd", ".aac", ".mka", ".flac"}
+COMPANION_EXTS = SUBTITLE_EXTS | AUDIO_EXTS
 
 # ---------------------------------------------------------------------------
 # Release-name parsing
@@ -686,20 +688,57 @@ class EntryPlan:
     prune: Path | None = None
 
 
-def _video_files(path: Path) -> list[Path]:
+# Folders media servers treat as bonus material; the organizer leaves them as they are.
+EXTRAS_DIRS = {
+    "extras",
+    "featurettes",
+    "behind the scenes",
+    "deleted scenes",
+    "interviews",
+    "scenes",
+    "shorts",
+    "trailers",
+    "specials",
+    "other",
+}
+# Hidden per-title folder for release clutter (ads, samples, duplicate copies).
+RELEASE_DIR = ".release"
+_EXTRA_CODE_RE = re.compile(r"\bS\d{1,2}X\d{1,3}\b", re.I)
+
+
+def _is_hidden(path: Path, base: Path) -> bool:
+    return any(part.startswith(".") for part in path.relative_to(base).parts)
+
+
+def _in_extras(path: Path, base: Path) -> bool:
+    parts = path.relative_to(base).parts[:-1]
+    return any(p.lower() in EXTRAS_DIRS or p.lower().endswith(" extras") for p in parts)
+
+
+def _files(path: Path) -> list[Path]:
     if path.is_file():
-        return [path] if path.suffix.lower() in VIDEO_EXTS else []
-    return sorted(
+        return [path]
+    return sorted(f for f in path.rglob("*") if f.is_file() and not _is_hidden(f, path))
+
+
+def _video_files(path: Path, *, include_extras: bool = False) -> list[Path]:
+    """Feature videos under ``path``: no samples, hidden folders or (by default) extras."""
+    return [
         f
-        for f in path.rglob("*")
-        if f.is_file() and f.suffix.lower() in VIDEO_EXTS and "sample" not in f.name.lower()
-    )
+        for f in _files(path)
+        if f.suffix.lower() in VIDEO_EXTS
+        and "sample" not in f.name.lower()
+        and (include_extras or path.is_file() or not _in_extras(f, path))
+    ]
 
 
-def _subtitle_files(path: Path) -> list[Path]:
+def _companion_files(path: Path) -> list[Path]:
+    """Subtitles and external audio tracks that belong next to a video."""
     if path.is_file():
         return []
-    return sorted(f for f in path.rglob("*") if f.is_file() and f.suffix.lower() in SUBTITLE_EXTS)
+    return [
+        f for f in _files(path) if f.suffix.lower() in COMPANION_EXTS and not _in_extras(f, path)
+    ]
 
 
 def _quality_suffix(info: StreamInfo) -> str:
@@ -710,26 +749,44 @@ def _edition_suffix(edition: str | None) -> str:
     return f" {{edition-{edition}}}" if edition else ""
 
 
-def _subtitle_moves(subs: list[Path], base: Path, video_stem: str) -> list[Move]:
+def _companion_moves(companions: list[Path], base: Path, video_stem: str) -> list[Move]:
     moves: list[Move] = []
     used: set[str] = set()
-    for sub in subs:
+    for companion in companions:
         parts = [video_stem]
-        lang = subtitle_language(sub.name)
+        lang = subtitle_language(companion.name)
         if lang:
             parts.append(lang)
-        lowered = sub.name.lower()
+        lowered = companion.name.lower()
         if "forced" in lowered:
             parts.append("forced")
         elif "sdh" in lowered:
             parts.append("sdh")
         name = ".".join(parts)
+        suffix = companion.suffix.lower()
         candidate, n = name, 2
-        while f"{candidate}{sub.suffix.lower()}" in used:
+        while f"{candidate}{suffix}" in used:
             candidate = f"{name}.{n}"
             n += 1
-        used.add(f"{candidate}{sub.suffix.lower()}")
-        moves.append(Move(sub, base / f"{candidate}{sub.suffix.lower()}"))
+        used.add(f"{candidate}{suffix}")
+        moves.append(Move(companion, base / f"{candidate}{suffix}"))
+    return moves
+
+
+def _leftover_moves(
+    entry: Path, current: Path, moved: set[Path], release: Path, *, keep_extras: bool = True
+) -> list[Move]:
+    """Park files the plan does not place (ads, samples, duplicates) in a hidden folder.
+
+    ``entry`` is the original location, ``current`` where those files sit once
+    the plan's earlier moves ran, and ``release`` the hidden destination.
+    """
+    moves = []
+    for f in _files(entry):
+        if f in moved or (keep_extras and _in_extras(f, entry)):
+            continue
+        rel = f.relative_to(entry)
+        moves.append(Move(current / rel, release / rel))
     return moves
 
 
@@ -757,18 +814,18 @@ def plan_movie(
     plan.moves.append(
         Move(folder / main.relative_to(entry), folder / f"{stem}{main.suffix.lower()}")
     )
+    companions = _companion_files(entry)
     plan.moves.extend(
-        Move(folder / s.relative_to(entry), m.dst)
-        for s, m in zip(
-            _subtitle_files(entry),
-            _subtitle_moves(_subtitle_files(entry), folder, stem),
-            strict=True,
-        )
+        Move(folder / c.relative_to(entry), m.dst)
+        for c, m in zip(companions, _companion_moves(companions, folder, stem), strict=True)
     )
+    plan.moves.extend(_leftover_moves(entry, folder, {main, *companions}, folder / RELEASE_DIR))
     return plan
 
 
 def _episode_of(path: Path, entry: Path) -> tuple[int, int, int | None] | None:
+    if _EXTRA_CODE_RE.search(path.name):
+        return None  # "S07X01 Simpsorama (The Simpsons S26E06)" is a bonus, not S26E06
     parsed = parse_release_name(path.name)
     if parsed.episode is not None and parsed.season is not None:
         return parsed.season, parsed.episode, parsed.episode_end
@@ -798,8 +855,19 @@ def plan_show(
     plan.moves.append(Move(entry, folder))
     plan.prune = folder
     show = safe_component(title)
-    unmatched = 0
+
+    def rebase(p: Path) -> Path:
+        return folder / p.relative_to(entry)
+
+    companions_by_code: dict[tuple[int, int], list[Path]] = {}
+    for companion in _companion_files(entry):
+        code = _episode_of(companion, entry)
+        if code:
+            companions_by_code.setdefault(code[:2], []).append(companion)
+
+    placed: set[Path] = set()
     targets: set[Path] = set()
+    extras = 0
     for video in _video_files(entry):
         found = _episode_of(video, entry)
         feature = None if found else _SHOW_MOVIE_RE.search(_spaced(video.stem))
@@ -807,24 +875,29 @@ def plan_show(
             # Feature films shipped inside a show pack (e.g. "S05M01 Bender's Big Score").
             parsed = parse_release_name(feature.group("rest"))
             meta = lookup(f"{title} {parsed.title}", parsed.year, MOVIES)
+            companions = [
+                c for c in _companion_files(video.parent) if c.stem.startswith(video.stem)
+            ]
             plan.moves.extend(
                 _movie_moves(
                     video,
-                    folder / video.relative_to(entry),
+                    rebase(video),
                     root,
                     meta.title or f"{title} - {parsed.title}",
                     parsed.year or meta.year,
                     parsed.edition,
                     prober,
-                    subtitles=[
-                        s for s in _subtitle_files(video.parent) if s.stem.startswith(video.stem)
-                    ],
-                    rebase=lambda p: folder / p.relative_to(entry),
+                    companions=companions,
+                    rebase=rebase,
                 )
             )
+            placed.update([video, *companions])
             continue
         if not found:
-            unmatched += 1
+            # Bonus videos without an episode code become extras of the show.
+            plan.moves.append(Move(rebase(video), folder / "Extras" / video.name))
+            placed.add(video)
+            extras += 1
             continue
         season, ep, ep_end = found
         code = f"S{season:02d}E{ep:02d}" + (f"-E{ep_end:02d}" if ep_end else "")
@@ -832,21 +905,19 @@ def plan_show(
         stem = f"{show} {code}{_quality_suffix(prober(video))}"
         dst = season_dir / f"{stem}{video.suffix.lower()}"
         if dst in targets:
-            unmatched += 1
-            continue
+            continue  # duplicate copy of an episode; parked with the release clutter
         targets.add(dst)
-        plan.moves.append(Move(folder / video.relative_to(entry), dst))
-        siblings = [
-            s
-            for s in _subtitle_files(video.parent)
-            if s.parent == video.parent and s.stem.startswith(video.stem)
-        ]
+        plan.moves.append(Move(rebase(video), dst))
+        placed.add(video)
+        companions = [c for c in companions_by_code.pop((season, ep), []) if c not in placed]
         plan.moves.extend(
-            Move(folder / s.relative_to(entry), m.dst)
-            for s, m in zip(siblings, _subtitle_moves(siblings, season_dir, stem), strict=True)
+            Move(rebase(c), m.dst)
+            for c, m in zip(companions, _companion_moves(companions, season_dir, stem), strict=True)
         )
-    if unmatched:
-        plan.note = f"{unmatched} video file(s) without an SxxEyy code left where they are"
+        placed.update(companions)
+    plan.moves.extend(_leftover_moves(entry, folder, placed, folder / RELEASE_DIR))
+    if extras:
+        plan.note = f"{extras} video(s) without an episode code filed under Extras"
     return plan
 
 
@@ -859,16 +930,16 @@ def _movie_moves(
     edition: str | None,
     prober,
     *,
-    subtitles: list[Path],
+    companions: list[Path],
     rebase: Callable[[Path], Path] = lambda p: p,
 ) -> list[Move]:
-    """Moves that file one feature video (and its subtitles) as its own movie folder."""
+    """Moves that file one feature video (and its companions) as its own movie folder."""
     folder = root / MOVIES / title_folder(title, year)
     stem = f"{title_folder(title, year)}{_edition_suffix(edition)}{_quality_suffix(prober(video))}"
     moves = [Move(current, folder / f"{stem}{video.suffix.lower()}")]
     moves.extend(
-        Move(rebase(sub), m.dst)
-        for sub, m in zip(subtitles, _subtitle_moves(subtitles, folder, stem), strict=True)
+        Move(rebase(c), m.dst)
+        for c, m in zip(companions, _companion_moves(companions, folder, stem), strict=True)
     )
     return moves
 
@@ -887,6 +958,7 @@ def plan_collection(
     largest = max(sizes.values())
     features = [v for v in videos if sizes[v] >= largest * 0.25]
     plans: list[EntryPlan] = []
+    placed: set[Path] = set()
     for video in features:
         own_dir = video.parent != entry and sum(f.parent == video.parent for f in features) == 1
         source_name = video.parent.name if own_dir else video.name
@@ -897,16 +969,22 @@ def plan_collection(
         title = meta.title or parsed.title
         year = parsed.year or meta.year
         if own_dir:
-            subtitles = _subtitle_files(video.parent)
+            companions = _companion_files(video.parent)
         else:
-            subtitles = [s for s in _subtitle_files(entry) if s.stem.startswith(video.stem)]
+            companions = [c for c in _companion_files(entry) if c.stem.startswith(video.stem)]
         plan = EntryPlan(video, MOVIES, title, year, prune=entry)
         plan.moves = _movie_moves(
-            video, video, root, title, year, parsed.edition, prober, subtitles=subtitles
+            video, video, root, title, year, parsed.edition, prober, companions=companions
         )
+        placed.update([video, *companions])
         if not meta.sources:
             plan.note = "no metadata match; parsed name used"
         plans.append(plan)
+    leftovers = _leftover_moves(
+        entry, entry, placed, root / RELEASE_DIR / entry.name, keep_extras=False
+    )
+    if leftovers:
+        plans.append(EntryPlan(entry, "release", entry.name, None, leftovers, prune=entry))
     return plans
 
 
@@ -1054,12 +1132,18 @@ def undo_batch(batch: str, journal: Path = RENAME_JOURNAL) -> int:
         if line.strip() and json.loads(line).get("batch") == batch
     ]
     undone = 0
+    vacated: set[Path] = set()
     for item in reversed(entries):
         src, dst = Path(item["src"]), Path(item["dst"])
         if os.path.lexists(dst) and not os.path.lexists(src):
             src.parent.mkdir(parents=True, exist_ok=True)
             os.rename(dst, src)
+            vacated.update(list(dst.parents)[:3])
             undone += 1
+    # Remove folders the batch created and left empty, deepest first.
+    for directory in sorted(vacated, key=lambda d: len(d.parts), reverse=True):
+        with contextlib.suppress(OSError):
+            directory.rmdir()
     return undone
 
 

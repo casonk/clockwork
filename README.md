@@ -125,9 +125,14 @@ python3 web/media_library.py search --director fincher --year-from 1990
   unreachable, anything owned by the `transmission` user is skipped instead.
 - Every title gets its own folder. Multi-movie packs are split into one
   folder per film, and feature films inside a show pack (`S05M01 ...`) are
-  filed under `movies/`. Multi-part movies (CD1/CD2), extras and episodes
-  without an `SxxEyy` or `Season N Episode N` code stay where they are and are
-  reported. Existing targets are never overwritten.
+  filed under `movies/`. Subtitles and external audio tracks (`.ac3`, `.dts`,
+  ...) follow their video. Show videos without an episode code (including
+  `SxxXyy` bonus codes) go to the show's `Extras/` folder.
+- Release clutter (ads, `.txt`/`.nfo`/`.jpg`, samples, duplicate episode
+  copies) is never deleted: it moves to a hidden `.release/` folder inside the
+  title (or `watch/.release/<pack>/` for split packs). Multi-part movies
+  (CD1/CD2) are skipped and reported. Existing targets are never overwritten,
+  and `undo` also removes the folders a batch created.
 - Shows without a director list their creators in the director field.
 - The catalog (`config/media-library.sqlite`) and rename journal
   (`config/media-library-renames.jsonl`) are local and gitignored.
