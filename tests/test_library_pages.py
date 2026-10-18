@@ -117,7 +117,10 @@ def test_show_page_groups_episodes_by_season(client):
 
 def test_paths_outside_or_hidden_are_refused(client):
     assert client.get("/library/title/../../etc").status_code == 404
-    assert client.get("/library/media/movies/Thriller/Seven (1995)/.release/RARBG.txt").status_code == 404
+    assert (
+        client.get("/library/media/movies/Thriller/Seven (1995)/.release/RARBG.txt").status_code
+        == 404
+    )
     assert client.get("/library/browse/nope").status_code == 404
     assert client.get("/library/media/movies").status_code == 404
 
@@ -134,7 +137,9 @@ def test_media_supports_range_requests_and_downloads(client):
 
 
 def test_subtitles_are_served_as_webvtt(client):
-    resp = client.get("/library/subtitle/movies/Thriller/Seven (1995)/Seven_1995_1080p_David_Fincher.en.srt")
+    resp = client.get(
+        "/library/subtitle/movies/Thriller/Seven (1995)/Seven_1995_1080p_David_Fincher.en.srt"
+    )
 
     assert resp.mimetype == "text/vtt"
     assert resp.get_data(as_text=True) == (
@@ -174,7 +179,9 @@ def test_change_genre_moves_folder_and_keeps_catalog(client, library):
 
     assert resp.status_code == 302
     assert "/library/title/movies/Crime/Seven" in resp.headers["Location"]
-    assert (library / "movies" / "Crime" / "Seven (1995)" / "Seven_1995_1080p_David_Fincher.mp4").exists()
+    assert (
+        library / "movies" / "Crime" / "Seven (1995)" / "Seven_1995_1080p_David_Fincher.mp4"
+    ).exists()
     assert not (library / "movies" / "Thriller").exists()
     conn = ml.connect(ml.CATALOG_DB)
     row = ml.search_catalog(conn, category="Crime")[0]
@@ -208,7 +215,13 @@ def test_manage_page_lists_attention_and_starts_sync(client, monkeypatch):
 
     resp = client.post("/library/manage/sync", data={"csrf_token": _csrf(client)})
     assert resp.status_code == 302
-    assert ["systemctl", "--user", "start", "--no-block", "clockwork-media-library.service"] in calls
+    assert [
+        "systemctl",
+        "--user",
+        "start",
+        "--no-block",
+        "clockwork-media-library.service",
+    ] in calls
 
 
 def test_search_api_links_titles(client):
