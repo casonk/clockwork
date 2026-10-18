@@ -766,15 +766,16 @@ class GenreClassifier:
             if row:
                 return json.loads(row["data"])["genre"]
         choices = [g for g in GENRE_FOLDERS if g != "Other"]
+        film = f'the movie "{title}"' + (f" ({year})" if year else "")
+        if meta.directors:
+            film += f", directed by {meta.directors[0]}"
+        if meta.cast:
+            film += ", starring " + ", ".join(meta.cast[:3])
         prompt = (
-            f'Pick the single primary genre of the movie "{title}"'
-            f"{f' ({year})' if year else ''}"
-            f"{f', directed by {meta.directors[0]}' if meta.directors else ''}"
-            f"{f', starring {", ".join(meta.cast[:3])}' if meta.cast else ''}, "
-            "for filing it in a home media library. "
-            f"Wikidata genre tags (unordered, noisy): {', '.join(tags) or 'none'}. "
+            f"Pick the single primary genre of {film}, for filing it in a home media library. "
+            "Wikidata genre tags (unordered, noisy): " + (", ".join(tags) or "none") + ". "
             "Documentary means non-fiction only; a dramatized true story is not one. "
-            f"Answer with exactly one of: {', '.join(choices)}. Reply with the genre only."
+            "Answer with exactly one of: " + ", ".join(choices) + ". Reply with the genre only."
         )
         try:
             answer = self.ask(prompt).strip().strip(".").lower()
