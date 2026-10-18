@@ -100,10 +100,21 @@ run as root.
 Jellyfin/Plex layout and builds a searchable metadata catalog:
 
 ```text
-watch/movies/Napoleon Dynamite (2004)/Napoleon Dynamite (2004) [1080p].mp4
-watch/movies/Napoleon Dynamite (2004)/Napoleon Dynamite (2004) [1080p].en.srt
+watch/movies/Comedy/Napoleon Dynamite (2004)/Napoleon Dynamite (2004) [1080p].mp4
+watch/movies/Comedy/Napoleon Dynamite (2004)/Napoleon Dynamite (2004) [1080p].en.srt
 watch/shows/Breaking Bad (2008)/Season 01/Breaking Bad S01E01 [1080p].mkv
 ```
+
+Movies sit in one genre folder each (Action, Adventure, Animation, Comedy,
+Crime, Documentary, Drama, Family, Fantasy, Horror, Musical, Mystery, Romance,
+Sci-Fi, Thriller, War, Western, Other). Wikidata genre tags are unordered and
+noisy, so a local Ollama model (`CLOCKWORK_GENRE_MODEL`, default `qwen3:14b`,
+at `CREW_CHIEF_URL`) picks the primary genre from the title, year, director,
+lead cast and tags; nothing is sent beyond the local model. Documentary and
+animation tags decide directly, and a keyword fallback applies when the model
+is unreachable. Titles already inside a genre folder are never moved again,
+so moving a folder by hand (e.g. in File Browser) overrides the choice. Shows
+stay under `shows/`.
 
 ```bash
 python3 web/media_library.py organize            # dry run: print the rename plan
@@ -138,7 +149,7 @@ python3 web/media_library.py search --director fincher --year-from 1990
   (`config/media-library-renames.jsonl`) are local and gitignored.
 
 The `/library` page searches the catalog by text, director, actor, genre,
-type, quality, codec and year range; `GET /api/library` returns the same data
+genre folder, type, quality, codec and year range; `GET /api/library` returns the same data
 as JSON. `examples/clockwork/media-library.toml` runs `sync` every 30 minutes.
 
 ## mTLS and Caddy
