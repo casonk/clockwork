@@ -65,6 +65,7 @@
     <label>Director<input type="text" name="director" list="director-list" placeholder="Any"></label>
     <label>Actor<input type="text" name="actor" placeholder="Any"></label>
     <label>Genre<select name="genre" id="genre-select"><option value="">Any</option></select></label>
+    <label>Folder<select name="category" id="category-select"><option value="">All folders</option></select></label>
     <label>Type<select name="kind"><option value="">Movies &amp; shows</option><option value="movies">Movies</option><option value="shows">Shows</option></select></label>
     <label>Quality<select name="quality" id="quality-select"><option value="">Any</option></select></label>
     <label>Codec<select name="codec" id="codec-select"><option value="">Any</option></select></label>
@@ -104,6 +105,7 @@
     if (facetsLoaded || !facets) return;
     facetsLoaded = true;
     fillSelect(document.getElementById("genre-select"), facets.genres || []);
+    fillSelect(document.getElementById("category-select"), facets.categories || []);
     fillSelect(document.getElementById("quality-select"), facets.qualities || []);
     fillSelect(document.getElementById("codec-select"), facets.codecs || []);
     const list = document.getElementById("director-list");
@@ -144,6 +146,13 @@
     head.appendChild(el("span", "card-title", item.title));
     if (item.year) head.appendChild(el("span", "card-year", "(" + item.year + ")"));
     if (item.kind === "shows") head.appendChild(el("span", "badge kind", "show"));
+    if (item.category) {
+      const folder = el("button", "badge kind chip-link", item.category);
+      folder.type = "button";
+      folder.title = "Show everything in this folder";
+      folder.addEventListener("click", function () { filterBy("category", item.category); });
+      head.appendChild(folder);
+    }
     if (item.quality) head.appendChild(el("span", "badge quality", item.quality));
     if (item.edition) head.appendChild(el("span", "badge", item.edition));
     if (item.video_codec) head.appendChild(el("span", "badge", item.video_codec));

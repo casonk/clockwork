@@ -3576,7 +3576,7 @@ def _int_arg(name: str) -> int | None:
 def library_search():
     """Search the media catalog built by ``web/media_library.py scan``.
 
-    Query params: q, director, actor, genre, kind (movies|shows), quality,
+    Query params: q, director, actor, genre, category (genre folder), kind (movies|shows), quality,
     codec, year_from, year_to, sort (title|year|added|size|rating).
     Response: {"available": bool, "count": int, "items": [...], "facets": {...}}
     """
@@ -3591,6 +3591,7 @@ def library_search():
             actor=request.args.get("actor", "").strip(),
             genre=request.args.get("genre", "").strip(),
             kind=request.args.get("kind", "").strip(),
+            category=request.args.get("category", "").strip(),
             quality=request.args.get("quality", "").strip(),
             codec=request.args.get("codec", "").strip(),
             year_from=_int_arg("year_from"),
@@ -3949,8 +3950,10 @@ def api_tradility_analysis():
 
 
 def _watch_scan_dirs() -> list[Path]:
-    # The organizer files titles under movies/ and shows/; new downloads land at the top.
-    library = [WATCH_DIR, WATCH_DIR / media_library.MOVIES, WATCH_DIR / media_library.SHOWS]
+    # The organizer files titles under movies/<Genre>/ and shows/; new downloads land at the top.
+    movies = WATCH_DIR / media_library.MOVIES
+    genres = [movies / g for g in media_library.GENRE_FOLDERS if (movies / g).is_dir()]
+    library = [WATCH_DIR, movies, *genres, WATCH_DIR / media_library.SHOWS]
     return library + [d for d in _EXTRA_WATCH_DIRS if d not in library]
 
 
@@ -3997,6 +4000,11 @@ def watch_check():
                 if scan_dir == WATCH_DIR and entry.name in (
                     media_library.MOVIES,
                     media_library.SHOWS,
+                ):
+                    continue
+                if (
+                    scan_dir == WATCH_DIR / media_library.MOVIES
+                    and entry.name in media_library.GENRE_FOLDERS
                 ):
                     continue
                 entries.append((entry.name, _normalize_media_title(entry.name)))

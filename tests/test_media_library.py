@@ -125,7 +125,7 @@ def test_organize_movie_folder_renames_video_and_subtitles_and_can_undo(tmp_path
     journal = tmp_path / "journal.jsonl"
     batch, done = ml.apply_plans(plans, journal)
 
-    folder = root / "movies" / "The Dark Knight (2008)"
+    folder = root / "movies" / "Other" / "The Dark Knight (2008)"
     assert done == 4
     assert (folder / "The Dark Knight (2008) [1080p].mp4").stat().st_size == 1000
     assert (folder / "The Dark Knight (2008) [1080p].en.srt").exists()
@@ -146,7 +146,11 @@ def test_organize_single_file_movie_keeps_edition(tmp_path):
     ml.apply_plans(plans, tmp_path / "j.jsonl")
 
     assert (
-        root / "movies" / "Goodfellas (1990)" / "Goodfellas (1990) {edition-Remastered} [1080p].mkv"
+        root
+        / "movies"
+        / "Other"
+        / "Goodfellas (1990)"
+        / "Goodfellas (1990) {edition-Remastered} [1080p].mkv"
     ).exists()
 
 
@@ -216,7 +220,7 @@ def test_organize_splits_movie_collections_into_one_folder_per_title(tmp_path):
     plans = ml.plan_library(root, providers=[provider], prober=_prober, tracked=set())
     batch, _done = ml.apply_plans(plans, tmp_path / "j.jsonl")
 
-    movies = root / "movies"
+    movies = root / "movies" / "Other"
     chamber = movies / "Harry Potter and the Chamber of Secrets (2002)"
     assert (
         chamber / "Harry Potter and the Chamber of Secrets (2002) {edition-Extended} [1080p].mkv"
@@ -268,7 +272,7 @@ def test_show_pack_files_feature_films_as_movies(tmp_path):
     assert (
         root / "shows" / "Futurama (1999)" / "Season 01" / "Futurama S01E02 [1080p].mp4"
     ).exists()
-    film = root / "movies" / "Futurama - Bender's Big Score (2007)"
+    film = root / "movies" / "Other" / "Futurama - Bender's Big Score (2007)"
     assert (film / "Futurama - Bender's Big Score (2007) [1080p].mp4").exists()
     assert not (root / "shows" / "Futurama (1999)" / "Futurama S05 (360p re-dvdrip)").exists()
 
@@ -276,7 +280,7 @@ def test_show_pack_files_feature_films_as_movies(tmp_path):
 def test_apply_never_overwrites_existing_target(tmp_path):
     root = tmp_path / "watch"
     _touch(root / "Hot Rod 2007 1080p BluRay.mkv")
-    _touch(root / "movies" / "Hot Rod (2007)" / "Hot Rod (2007) [1080p].mkv", 99)
+    _touch(root / "movies" / "Other" / "Hot Rod (2007)" / "Hot Rod (2007) [1080p].mkv", 99)
 
     _batch, done = ml.apply_plans(
         ml.plan_library(root, prober=_prober, tracked=set()), tmp_path / "j"
@@ -507,7 +511,7 @@ def test_apply_continues_after_a_failed_rename(tmp_path, monkeypatch, capsys):
     )
 
     assert done == 1
-    assert (root / "movies" / "Hot Rod (2007)" / "Hot Rod (2007) [1080p].mkv").exists()
+    assert (root / "movies" / "Other" / "Hot Rod (2007)" / "Hot Rod (2007) [1080p].mkv").exists()
     assert "rename failed" in capsys.readouterr().err
 
 
@@ -543,7 +547,7 @@ def test_movie_keeps_external_audio_tracks(tmp_path):
 
     ml.apply_plans(ml.plan_library(root, prober=_prober, tracked=set()), tmp_path / "j")
 
-    goblet = root / "movies" / "Goblet Of Fire (2005)"
+    goblet = root / "movies" / "Other" / "Goblet Of Fire (2005)"
     assert (goblet / "Goblet Of Fire (2005) [1080p].ac3").exists()
     assert not pack.exists()
 
@@ -559,3 +563,82 @@ def test_scan_ignores_release_clutter_and_extras(tmp_path):
     ml.scan_library(root, conn, prober=_prober)
 
     assert ml.search_catalog(conn)[0]["file_count"] == 1
+
+
+def test_heuristic_genre_prefers_specific_genres():
+    assert ml.heuristic_genre(["drama", "documentary"]) == "Documentary"
+    assert ml.heuristic_genre(["comedy", "science fiction", "teen"]) == "Sci-Fi"
+    assert ml.heuristic_genre(["drama", "period drama", "crime", "gangster"]) == "Crime"
+    assert ml.heuristic_genre(["warrior epic"]) == "Other"
+    assert ml.heuristic_genre([]) == "Other"
+
+
+def test_genre_classifier_asks_model_validates_and_caches(tmp_path):
+    conn = ml.connect(tmp_path / "lib.sqlite")
+    prompts = []
+
+    def ask(prompt):
+        prompts.append(prompt)
+        return "Mystery."
+
+    classify = ml.GenreClassifier(conn, ask=ask)
+    meta = ml.Metadata(genres=["drama", "film noir", "horror"], directors=["Christopher Nolan"])
+
+    assert classify("Memento", 2000, meta) == "Mystery"
+    assert classify("Memento", 2000, meta) == "Mystery"
+    assert len(prompts) == 1
+    assert "Christopher Nolan" in prompts[0] and "film noir" in prompts[0]
+
+    assert ml.GenreClassifier(conn, ask=lambda _p: "Noir")("Other Film", 1999, meta) == "Horror"
+    documentary = ml.Metadata(genres=["documentary"])
+    assert ml.GenreClassifier(conn, ask=lambda _p: 1 / 0)("Doc", 2025, documentary) == "Documentary"
+
+    def down(_prompt):
+        raise OSError("connection refused")
+
+    crime = ml.Metadata(genres=["crime thriller"])
+    assert ml.GenreClassifier(None, ask=down)("Crime 101", 2026, crime) == "Crime"
+
+
+def test_organize_files_movies_into_genre_folders_and_respects_manual_moves(tmp_path):
+    root = tmp_path / "watch"
+    _touch(root / "Hot Rod 2007 1080p BluRay.mkv")
+    _touch(root / "movies" / "Seven (1995)" / "Seven (1995) [1080p].mkv")
+    _touch(root / "movies" / "Romance" / "Memento (2000)" / "Memento (2000) [1080p].mkv")
+    provider = FakeProvider(
+        {
+            "Hot Rod": ml.Metadata(title="Hot Rod", year=2007, genres=["comedy"], sources=["fake"]),
+            "Seven": ml.Metadata(
+                title="Seven", year=1995, genres=["crime thriller"], sources=["fake"]
+            ),
+        }
+    )
+
+    plans = ml.plan_library(root, providers=[provider], prober=_prober, tracked=set())
+    ml.apply_plans(plans, tmp_path / "j")
+
+    assert (root / "movies" / "Comedy" / "Hot Rod (2007)" / "Hot Rod (2007) [1080p].mkv").exists()
+    assert (root / "movies" / "Crime" / "Seven (1995)" / "Seven (1995) [1080p].mkv").exists()
+    assert (root / "movies" / "Romance" / "Memento (2000)").exists()
+    assert ("Memento", 2000, "movies") not in provider.calls
+
+    conn = ml.connect(tmp_path / "lib.sqlite")
+    ml.scan_library(root, conn, prober=_prober)
+    assert [r["title"] for r in ml.search_catalog(conn, category="Crime")] == ["Seven"]
+    assert ml.catalog_facets(conn)["categories"] == ["Comedy", "Crime", "Romance"]
+
+
+def test_connect_adds_category_column_to_old_catalogs(tmp_path):
+    import sqlite3
+
+    db = tmp_path / "old.sqlite"
+    old = sqlite3.connect(db)
+    old.execute(
+        "CREATE TABLE titles (folder TEXT PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL)"
+    )
+    old.commit()
+    old.close()
+
+    conn = ml.connect(db)
+
+    assert "category" in {row["name"] for row in conn.execute("PRAGMA table_info(titles)")}

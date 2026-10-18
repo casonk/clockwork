@@ -57,6 +57,8 @@ TRANSMISSION_ROOT_ALIASES = tuple(
 )
 TRANSMISSION_USER = os.environ.get("CLOCKWORK_MEDIA_TRANSMISSION_USER", "transmission")
 TMDB_API_KEY = os.environ.get("CLOCKWORK_TMDB_API_KEY", "").strip()
+OLLAMA_URL = os.environ.get("CREW_CHIEF_URL", "http://localhost:11434")
+GENRE_MODEL = os.environ.get("CLOCKWORK_GENRE_MODEL", "qwen3:14b")
 USER_AGENT = "clockwork-media-library/0.1 (https://github.com/casonk/clockwork)"
 
 MOVIES = "movies"
@@ -665,6 +667,142 @@ def lookup_metadata(
 
 
 # ---------------------------------------------------------------------------
+# Genre folders for movies
+# ---------------------------------------------------------------------------
+
+GENRE_FOLDERS = (
+    "Action",
+    "Adventure",
+    "Animation",
+    "Comedy",
+    "Crime",
+    "Documentary",
+    "Drama",
+    "Family",
+    "Fantasy",
+    "Horror",
+    "Musical",
+    "Mystery",
+    "Romance",
+    "Sci-Fi",
+    "Thriller",
+    "War",
+    "Western",
+    "Other",
+)
+# Keyword fallback when no model is reachable, most specific genre first.
+_GENRE_KEYWORDS = (
+    ("Documentary", ("documentary",)),
+    ("Animation", ("animated", "animation", "anime")),
+    ("Horror", ("horror", "slasher", "zombie")),
+    ("Sci-Fi", ("science fiction", "sci-fi", "cyberpunk", "dystopian", "space opera")),
+    ("Western", ("western",)),
+    ("War", ("war film", "war")),
+    ("Musical", ("musical",)),
+    ("Fantasy", ("fantasy",)),
+    ("Crime", ("crime", "gangster", "heist", "mafia", "noir")),
+    ("Thriller", ("thriller", "suspense")),
+    ("Mystery", ("mystery", "detective")),
+    ("Action", ("action", "martial arts", "superhero", "disaster")),
+    ("Adventure", ("adventure",)),
+    ("Comedy", ("comedy", "satire", "parody", "sitcom")),
+    ("Romance", ("romance", "romantic")),
+    ("Family", ("family", "children")),
+    ("Drama", ("drama", "biographical", "historical")),
+)
+
+
+def heuristic_genre(tags: Iterable[str]) -> str:
+    lowered = [t.lower() for t in tags]
+    for genre, words in _GENRE_KEYWORDS:
+        if any(re.search(rf"\b{re.escape(w)}\b", tag) for tag in lowered for w in words):
+            return genre
+    return "Other"
+
+
+def _ask_ollama(prompt: str) -> str:
+    body = json.dumps(
+        {
+            "model": GENRE_MODEL,
+            "prompt": prompt,
+            "stream": False,
+            "think": False,
+            "options": {"temperature": 0},
+        }
+    ).encode()
+    request = urllib.request.Request(
+        f"{OLLAMA_URL}/api/generate", body, {"Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(request, timeout=120) as response:
+        return json.loads(response.read().decode("utf-8")).get("response", "")
+
+
+class GenreClassifier:
+    """Choose one genre folder per movie.
+
+    Wikidata genre tags are unordered and noisy (Memento is tagged horror), so
+    a local Ollama model picks the primary genre with the tags as hints. Only
+    the title, year, director and tags go to the local model. Documentary and
+    animation tags decide directly; without a model the keyword fallback
+    applies. Answers are cached in the catalog's lookup table.
+    """
+
+    def __init__(
+        self,
+        cache: sqlite3.Connection | None = None,
+        ask: Callable[[str], str] | None = _ask_ollama,
+    ) -> None:
+        self.cache = cache
+        self.ask = ask
+
+    def __call__(self, title: str, year: int | None, meta: Metadata) -> str:
+        tags = list(meta.genres)
+        fixed = heuristic_genre(tags)
+        if fixed in ("Documentary", "Animation") or self.ask is None:
+            return fixed
+        key = json.dumps(["genre", _norm(title), year])
+        if self.cache is not None:
+            row = self.cache.execute("SELECT data FROM lookups WHERE key = ?", (key,)).fetchone()
+            if row:
+                return json.loads(row["data"])["genre"]
+        choices = [g for g in GENRE_FOLDERS if g != "Other"]
+        film = f'the movie "{title}"' + (f" ({year})" if year else "")
+        if meta.directors:
+            film += f", directed by {meta.directors[0]}"
+        if meta.cast:
+            film += ", starring " + ", ".join(meta.cast[:3])
+        prompt = (
+            f"Pick the single primary genre of {film}, for filing it in a home media library. "
+            "Wikidata genre tags (unordered, noisy): " + (", ".join(tags) or "none") + ". "
+            "Documentary means non-fiction only; a dramatized true story is not one. "
+            "Answer with exactly one of: " + ", ".join(choices) + ". Reply with the genre only."
+        )
+        try:
+            answer = self.ask(prompt).strip().strip(".").lower()
+        except Exception as exc:  # noqa: BLE001 - fall back when the model is unavailable
+            print(f"genre model unavailable for {title!r}: {exc}", file=sys.stderr)
+            return fixed
+        genre = next((g for g in choices if g.lower() == answer), None)
+        if genre is None:
+            return fixed
+        if self.cache is not None:
+            self.cache.execute(
+                "INSERT OR REPLACE INTO lookups (key, data, at) VALUES (?, ?, ?)",
+                (key, json.dumps({"genre": genre}), time.time()),
+            )
+            self.cache.commit()
+        return genre
+
+
+def _keyword_genre(_title: str, _year: int | None, meta: Metadata) -> str:
+    return heuristic_genre(meta.genres)
+
+
+def movie_dir(root: Path, genre: str, title: str, year: int | None) -> Path:
+    return root / MOVIES / genre / title_folder(title, year)
+
+
+# ---------------------------------------------------------------------------
 # Organize: plan and apply renames
 # ---------------------------------------------------------------------------
 
@@ -791,7 +929,13 @@ def _leftover_moves(
 
 
 def plan_movie(
-    entry: Path, root: Path, title: str, year: int | None, edition: str | None, prober
+    entry: Path,
+    root: Path,
+    title: str,
+    year: int | None,
+    edition: str | None,
+    prober,
+    genre: str = "Other",
 ) -> EntryPlan:
     plan = EntryPlan(entry, MOVIES, title, year)
     videos = _video_files(entry)
@@ -804,7 +948,7 @@ def plan_movie(
     if rivals:
         plan.skipped = "several full-length videos (multi-part or collection); review by hand"
         return plan
-    folder = root / MOVIES / title_folder(title, year)
+    folder = movie_dir(root, genre, title, year)
     stem = f"{title_folder(title, year)}{_edition_suffix(edition)}{_quality_suffix(prober(main))}"
     if entry.is_file():
         plan.moves.append(Move(entry, folder / f"{stem}{entry.suffix.lower()}"))
@@ -846,6 +990,7 @@ def plan_show(
     year: int | None,
     prober,
     lookup: Callable[[str, int | None, str], Metadata] = _no_lookup,
+    genre_of: Callable[[str, int | None, Metadata], str] = _keyword_genre,
 ) -> EntryPlan:
     plan = EntryPlan(entry, SHOWS, title, year)
     if entry.is_file():
@@ -875,6 +1020,8 @@ def plan_show(
             # Feature films shipped inside a show pack (e.g. "S05M01 Bender's Big Score").
             parsed = parse_release_name(feature.group("rest"))
             meta = lookup(f"{title} {parsed.title}", parsed.year, MOVIES)
+            film_title = meta.title or f"{title} - {parsed.title}"
+            film_year = parsed.year or meta.year
             companions = [
                 c for c in _companion_files(video.parent) if c.stem.startswith(video.stem)
             ]
@@ -883,11 +1030,12 @@ def plan_show(
                     video,
                     rebase(video),
                     root,
-                    meta.title or f"{title} - {parsed.title}",
-                    parsed.year or meta.year,
+                    film_title,
+                    film_year,
                     parsed.edition,
                     prober,
                     companions=companions,
+                    genre=genre_of(film_title, film_year, meta),
                     rebase=rebase,
                 )
             )
@@ -931,10 +1079,11 @@ def _movie_moves(
     prober,
     *,
     companions: list[Path],
+    genre: str = "Other",
     rebase: Callable[[Path], Path] = lambda p: p,
 ) -> list[Move]:
     """Moves that file one feature video (and its companions) as its own movie folder."""
-    folder = root / MOVIES / title_folder(title, year)
+    folder = movie_dir(root, genre, title, year)
     stem = f"{title_folder(title, year)}{_edition_suffix(edition)}{_quality_suffix(prober(video))}"
     moves = [Move(current, folder / f"{stem}{video.suffix.lower()}")]
     moves.extend(
@@ -949,6 +1098,7 @@ def plan_collection(
     root: Path,
     prober,
     lookup: Callable[[str, int | None, str], Metadata] = _no_lookup,
+    genre_of: Callable[[str, int | None, Metadata], str] = _keyword_genre,
 ) -> list[EntryPlan]:
     """Split a multi-movie pack so every film gets its own movies/ folder."""
     videos = _video_files(entry)
@@ -974,7 +1124,15 @@ def plan_collection(
             companions = [c for c in _companion_files(entry) if c.stem.startswith(video.stem)]
         plan = EntryPlan(video, MOVIES, title, year, prune=entry)
         plan.moves = _movie_moves(
-            video, video, root, title, year, parsed.edition, prober, companions=companions
+            video,
+            video,
+            root,
+            title,
+            year,
+            parsed.edition,
+            prober,
+            companions=companions,
+            genre=genre_of(title, year, meta),
         )
         placed.update([video, *companions])
         if not meta.sources:
@@ -1021,10 +1179,20 @@ def plan_library(
     tracked: set[str] | None = None,
     tracked_error: str | None = None,
     cache: sqlite3.Connection | None = None,
+    genre_of: Callable[[str, int | None, Metadata], str] = _keyword_genre,
 ) -> list[EntryPlan]:
-    """Plan renames for every unsorted top-level entry of the library root."""
+    """Plan renames for every unsorted top-level entry of the library root.
+
+    Movies already filed directly under movies/ (before genre folders) are
+    moved into their genre folder. Titles inside a genre folder are never
+    moved again, so moving one by hand overrides the chosen genre.
+    """
     providers = list(providers)
-    plans: list[EntryPlan] = []
+
+    def lookup(title: str, year: int | None, kind: str) -> Metadata:
+        return lookup_metadata(title, year, kind, providers, cache)
+
+    plans: list[EntryPlan] = _plan_genre_folders(root, lookup, genre_of)
     for entry in sorted(root.iterdir(), key=lambda p: p.name.lower()):
         if entry.name.startswith(".") or entry.name in (MOVIES, SHOWS):
             continue
@@ -1047,14 +1215,10 @@ def plan_library(
             continue
         if entry.is_file() and entry.suffix.lower() not in VIDEO_EXTS:
             continue
-
-        def lookup(title: str, year: int | None, kind: str) -> Metadata:
-            return lookup_metadata(title, year, kind, providers, cache)
-
         if parsed.kind == "collection" and entry.is_dir():
             episodes = sum(1 for v in _video_files(entry) if _episode_of(v, entry))
             if episodes < 2:
-                plans.extend(plan_collection(entry, root, prober, lookup))
+                plans.extend(plan_collection(entry, root, prober, lookup, genre_of))
                 continue
         kind = SHOWS if parsed.kind == "collection" else parsed.kind
         if kind == MOVIES and entry.is_dir():
@@ -1068,12 +1232,39 @@ def plan_library(
         if meta.kind in (MOVIES, SHOWS) and meta.kind != kind and not parsed.season:
             kind = meta.kind
         if kind == SHOWS:
-            plan = plan_show(entry, root, title, year, prober, lookup)
+            plan = plan_show(entry, root, title, year, prober, lookup, genre_of)
         else:
-            plan = plan_movie(entry, root, title, year, parsed.edition, prober)
+            genre = genre_of(title, year, meta)
+            plan = plan_movie(entry, root, title, year, parsed.edition, prober, genre)
         if not meta.sources:
             plan.note = "; ".join(filter(None, [plan.note, "no metadata match; parsed name used"]))
         plans.append(plan)
+    return plans
+
+
+_FOLDER_RE = re.compile(r"^(?P<title>.+?)(?: \((?P<year>\d{4})\))?$")
+
+
+def _plan_genre_folders(
+    root: Path,
+    lookup: Callable[[str, int | None, str], Metadata],
+    genre_of: Callable[[str, int | None, Metadata], str],
+) -> list[EntryPlan]:
+    """Move titles sitting directly in movies/ into their genre folder."""
+    base = root / MOVIES
+    if not base.is_dir():
+        return []
+    plans = []
+    for folder in sorted(base.iterdir()):
+        if not folder.is_dir() or folder.name.startswith(".") or folder.name in GENRE_FOLDERS:
+            continue
+        match = _FOLDER_RE.match(folder.name)
+        title = match.group("title") if match else folder.name
+        year = int(match.group("year")) if match and match.group("year") else None
+        genre = genre_of(title, year, lookup(title, year, MOVIES))
+        plans.append(
+            EntryPlan(folder, MOVIES, title, year, [Move(folder, base / genre / folder.name)])
+        )
     return plans
 
 
@@ -1177,7 +1368,8 @@ CREATE TABLE IF NOT EXISTS titles (
     size_bytes INTEGER NOT NULL DEFAULT 0,
     file_count INTEGER NOT NULL DEFAULT 0,
     metadata_checked_at REAL,
-    scanned_at REAL
+    scanned_at REAL,
+    category TEXT
 );
 CREATE TABLE IF NOT EXISTS files (
     path TEXT PRIMARY KEY,
@@ -1213,20 +1405,30 @@ def connect(db_path: Path = CATALOG_DB) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA)
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(titles)")}
+    if "category" not in columns:  # catalogs built before genre folders
+        conn.execute("ALTER TABLE titles ADD COLUMN category TEXT")
     return conn
 
 
-_FOLDER_RE = re.compile(r"^(?P<title>.+?)(?: \((?P<year>\d{4})\))?$")
 METADATA_RETRY_SECONDS = 7 * 24 * 3600
 
 
-def _title_dirs(root: Path) -> Iterable[tuple[str, Path]]:
+def _title_dirs(root: Path) -> Iterable[tuple[str, Path, str | None]]:
+    """Yield (kind, title folder, genre folder) for movies/<Genre>/<Title> and shows/<Title>."""
     for kind in (MOVIES, SHOWS):
         base = root / kind
-        if base.is_dir():
-            for entry in sorted(base.iterdir()):
-                if entry.is_dir() and not entry.name.startswith("."):
-                    yield kind, entry
+        if not base.is_dir():
+            continue
+        for entry in sorted(base.iterdir()):
+            if not entry.is_dir() or entry.name.startswith("."):
+                continue
+            if kind == MOVIES and entry.name in GENRE_FOLDERS:
+                for title_dir in sorted(entry.iterdir()):
+                    if title_dir.is_dir() and not title_dir.name.startswith("."):
+                        yield kind, title_dir, entry.name
+            else:
+                yield kind, entry, None
 
 
 def scan_library(
@@ -1242,7 +1444,7 @@ def scan_library(
     providers = list(providers)
     stats = {"titles": 0, "probed": 0, "looked_up": 0, "removed": 0}
     seen: set[str] = set()
-    for kind, folder in _title_dirs(root):
+    for kind, folder, category in _title_dirs(root):
         key = str(folder)
         seen.add(key)
         stats["titles"] += 1
@@ -1256,6 +1458,7 @@ def scan_library(
                 (key, kind, title, year),
             )
             row = conn.execute("SELECT * FROM titles WHERE folder = ?", (key,)).fetchone()
+        conn.execute("UPDATE titles SET category = ? WHERE folder = ?", (category, key))
         stats["probed"] += _scan_files(conn, key, folder, kind, prober)
         checked = row["metadata_checked_at"]
         stale = checked is None or (
@@ -1380,6 +1583,7 @@ def search_catalog(
     director: str = "",
     actor: str = "",
     genre: str = "",
+    category: str = "",
     kind: str = "",
     quality: str = "",
     codec: str = "",
@@ -1412,6 +1616,9 @@ def search_catalog(
     if kind:
         clauses.append("kind = ?")
         params.append(kind)
+    if category:
+        clauses.append("category = ?")
+        params.append(category)
     if quality:
         clauses.append("quality = ?")
         params.append(quality)
@@ -1434,7 +1641,10 @@ def search_catalog(
 
 
 def catalog_facets(conn: sqlite3.Connection) -> dict[str, list[str]]:
-    rows = conn.execute("SELECT directors, genres, quality, video_codec FROM titles").fetchall()
+    rows = conn.execute(
+        "SELECT directors, genres, quality, video_codec, category FROM titles"
+    ).fetchall()
+    categories = {row["category"] for row in rows if row["category"]}
     directors: set[str] = set()
     genres: set[str] = set()
     qualities: set[str] = set()
@@ -1451,6 +1661,7 @@ def catalog_facets(conn: sqlite3.Connection) -> dict[str, list[str]]:
         "genres": sorted(genres),
         "qualities": sorted(qualities, key=lambda q: -_QUALITY_RANK.get(q, 0)),
         "codecs": sorted(codecs),
+        "categories": [g for g in GENRE_FOLDERS if g in categories],
     }
 
 
@@ -1494,6 +1705,7 @@ def main(argv: list[str] | None = None) -> int:
     search.add_argument("q", nargs="?", default="")
     search.add_argument("--director", default="")
     search.add_argument("--genre", default="")
+    search.add_argument("--folder", default="", help="genre folder, e.g. Sci-Fi")
     search.add_argument("--quality", default="")
     search.add_argument("--year-from", type=int)
     search.add_argument("--year-to", type=int)
@@ -1502,12 +1714,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in ("organize", "sync"):
         offline = getattr(args, "offline", False)
         tracked, error = tracked_names(args.root)
+        cache = connect(args.db)
         plans = plan_library(
             args.root,
             providers=[] if offline else default_providers(),
             tracked=None if error else tracked,
             tracked_error=error,
-            cache=connect(args.db),
+            cache=cache,
+            genre_of=GenreClassifier(cache, ask=None if offline else _ask_ollama),
         )
         only = set(getattr(args, "only", []) or [])
         if only:
@@ -1540,6 +1754,7 @@ def main(argv: list[str] | None = None) -> int:
             q=args.q,
             director=args.director,
             genre=args.genre,
+            category=args.folder,
             quality=args.quality,
             year_from=args.year_from,
             year_to=args.year_to,
