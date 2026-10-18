@@ -1,0 +1,20 @@
+[[jobs]]
+name = "clockwork-upscale"
+description = "Experimental AI super-resolution of the watch library (Real-ESRGAN on the GPU)"
+scope = "user"
+service_type = "simple"
+working_directory = "%h/git/util-repos/clockwork"
+# Lowest CPU and IO priority so the web UI and streaming stay responsive.
+exec_start = "/usr/bin/nice -n 19 /usr/bin/ionice -c 3 %h/.local/share/clockwork/upscale-venv/bin/python %h/git/util-repos/clockwork/web/upscale.py run"
+# Optional: CLOCKWORK_UPSCALE_MIN_FREE_GB, CLOCKWORK_UPSCALE_DENOISE overrides.
+environment_files = ["-%h/.config/clockwork/upscale.env"]
+after = ["network-online.target"]
+restart = "on-failure"
+restart_sec = "60"
+standard_output = "journal"
+standard_error = "journal"
+service_install_wanted_by = ["default.target"]
+
+[jobs.environment]
+CLOCKWORK_WATCH_DIR = "%h/watch"
+CLOCKWORK_UPSCALE_MIN_FREE_GB = "1000"

@@ -180,8 +180,8 @@ Library pages (`web/library_pages.py`):
   browsers without Media Source Extensions fall back to native HLS.
   A Quality menu offers Original (direct play when possible, otherwise the
   source resolution at up to 12 Mb/s, 16 Mb/s for 1440p and 30 Mb/s for 4K
-  sources) and every lower step of 1440p, 1080p (8 Mb/s), 720p (4 Mb/s) and
-  480p (1.5 Mb/s). Switching continues from the same moment, stops the
+  sources) and every lower step of 1440p, 1080p (8 Mb/s), 720p (4 Mb/s),
+  480p (1.5 Mb/s) and 360p (0.8 Mb/s). Switching continues from the same moment, stops the
   previous quality's transcoder, and is remembered per browser.
 - `/library/browse/`: the folder tree as it is on disk, hidden `.release/`
   folders excluded, with play and download links.
@@ -189,6 +189,48 @@ Library pages (`web/library_pages.py`):
   `clockwork-media-library.service`), see its recent log and timer state,
   the items needing attention (still seeding, duplicate copies, no metadata),
   and the recent rename batches with the undo command.
+
+### AI super-resolution (experimental)
+
+`web/upscale.py` renders an AI-upscaled copy of every library video ahead of
+time with Real-ESRGAN on the GPU: sources up to 576 lines become 1080p, 720p
+and 1080p sources become 4K (the model runs at 4x, then the frame is resized to
+the exact target). Animation (the Animation genre folder or "animated" genres)
+uses `realesr-animevideov3`; live action blends `realesr-general-x4v3` with its
+weak-denoise twin (`CLOCKWORK_UPSCALE_DENOISE`, default 0.5) so film grain and
+skin texture survive. The queue runs lowest resolution first, newest downloads
+first within that.
+
+Renders are HEVC (BT.709) with the audio re-encoded to AAC, under the hidden
+`<watch>/.upscaled/` tree mirroring the library, so names and folders stay as
+they are. They show up as "✨ AI 1080p/4K (experimental)" in the player's
+Quality menu and stream through the same on-demand converter. The worker stops
+starting new renders when free space on the library disk would fall below
+`CLOCKWORK_UPSCALE_MIN_FREE_GB` (default 1000) and rechecks hourly; failures
+are listed in `config/media-library-upscale-failed.json` and skipped.
+
+Measured on an RTX 3090: 360p animation about 85 fps end to end (3x real
+time), 1080p live action to 4K about 6 fps (a quarter of real time).
+
+Setup, outside the repo:
+
+```bash
+python3 -m venv ~/.local/share/clockwork/upscale-venv
+~/.local/share/clockwork/upscale-venv/bin/pip install torch spandrel numpy
+mkdir -p ~/.cache/clockwork/upscale-models && cd ~/.cache/clockwork/upscale-models
+for m in realesr-animevideov3 realesr-general-x4v3 realesr-general-wdn-x4v3; do
+  curl -LO "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/$m.pth"
+done
+sha256sum -c <<'SUMS'
+b8a8376811077954d82ca3fcf476f1ac3da3e8a68a4f4d71363008000a18b75d  realesr-animevideov3.pth
+8dc7edb9ac80ccdc30c3a5dca6616509367f05fbc184ad95b731f05bece96292  realesr-general-x4v3.pth
+1641f8c4464b9f097c9fdda5589273713f67cf59f3d909e0bd688f0cee269dca  realesr-general-wdn-x4v3.pth
+SUMS
+```
+
+`examples/clockwork/upscale.toml` runs `upscale.py run` as an always-on user
+service at `nice 19` / idle IO; the Manage page shows its progress and starts or
+stops it. `python3 web/upscale.py queue` lists what is left.
 
 Paths are resolved inside `CLOCKWORK_WATCH_DIR` only; anything outside it or
 hidden returns 404.

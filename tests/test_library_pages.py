@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -294,4 +295,81 @@ def test_search_api_links_titles(client):
 def test_srt_to_vtt_strips_bom():
     assert pages.srt_to_vtt("﻿1\n00:00:01,000 --> 00:00:02,000\nHi\n").startswith(
         "WEBVTT\n\n1\n00:00:01.000"
+    )
+
+
+def test_ai_render_appears_in_quality_menu_and_streams(
+    client, library, probed, tmp_path, monkeypatch
+):
+    upscale = pages.upscale
+    source = (
+        library / "shows" / "Breaking Bad (2008)" / "Season 01" / "Breaking_Bad_S01E01_1080p.mkv"
+    )
+    rel = "/shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E01_1080p.mkv"
+
+    html = client.get("/library/play" + rel).get_data(as_text=True)
+    assert "AI 4K" not in html
+    assert client.get("/library/stream" + rel + "/index.m3u8?v=ai-4k").status_code == 404
+
+    _touch(upscale.output_path(library, source, 2160))
+    html = client.get("/library/play" + rel).get_data(as_text=True)
+    assert 'value="ai-4k">✨ AI 4K (experimental)' in html
+    assert 'value="360p">360p' in html
+
+    sources = []
+
+    class FakeManager:
+        def session(self, src, quality=None):
+            sources.append(src)
+            return probed.Session("k", src, tmp_path, probed.probe_media(src))
+
+    monkeypatch.setattr(probed, "manager", lambda: FakeManager())
+    playlist = client.get("/library/stream" + rel + "/index.m3u8?q=original&v=ai-4k")
+    assert "seg/0.ts?q=original&v=ai-4k" in playlist.get_data(as_text=True)
+    assert sources[-1] == upscale.output_path(library, source, 2160)
+    assert client.get("/library/stream" + rel + "/index.m3u8?v=ai-8k").status_code == 404
+
+
+def test_manage_page_shows_ai_status_and_controls_the_service(client, monkeypatch, tmp_path):
+    upscale = pages.upscale
+    status = tmp_path / "upscale-status.json"
+    upscale.write_status(
+        {
+            "state": "rendering",
+            "title": "Futurama",
+            "file": "Futurama_S03E01_SD.mp4",
+            "target": "1080p",
+            "model": "realesr-animevideov3",
+            "frames": 500,
+            "total_frames": 2000,
+            "fps": 85.0,
+            "eta_seconds": 1200,
+            "queued": 436,
+            "free_gb": 5700,
+            "min_free_gb": 1000,
+        },
+        status,
+    )
+    monkeypatch.setattr(upscale, "STATUS_FILE", status)
+    monkeypatch.setattr(upscale, "read_status", lambda path=status: json.loads(status.read_text()))
+    calls = []
+
+    def fake_run(cmd, **_kwargs):
+        calls.append(cmd)
+        out = "ActiveState=active\nLoadState=loaded\n" if "show" in cmd else ""
+        return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
+
+    monkeypatch.setattr(pages.subprocess, "run", fake_run)
+
+    html = client.get("/library/manage").get_data(as_text=True)
+    assert "AI super-resolution" in html and "Futurama" in html
+    assert "25.0%" in html and "85.0 fps" in html and "436 queued" in html
+    assert "⏸ Stop" in html
+
+    resp = client.post("/library/manage/upscale/stop", data={"csrf_token": _csrf(client)})
+    assert resp.status_code == 302
+    assert ["systemctl", "--user", "stop", "--no-block", "clockwork-upscale.service"] in calls
+    assert (
+        client.post("/library/manage/upscale/rm", data={"csrf_token": _csrf(client)}).status_code
+        == 404
     )
