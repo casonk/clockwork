@@ -29,6 +29,7 @@ from clockwork.render import _LAUNCHD_ENV_LOADER, render_launchd_plist, resolve_
 
 try:
     from web import media_library
+    from web.library_pages import library_pages
     from web.security import same_origin_host, validate_remote_bind
     from web.status_helpers import (
         build_cron_status,
@@ -39,6 +40,7 @@ try:
     )
 except ModuleNotFoundError:
     import media_library
+    from library_pages import library_pages
     from security import same_origin_host, validate_remote_bind
     from status_helpers import (
         build_cron_status,
@@ -224,6 +226,7 @@ def _request_host_candidates() -> set[str]:
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("CLOCKWORK_WEB_SECRET") or secrets.token_hex(32)
+app.register_blueprint(library_pages)
 
 
 def _csrf_token() -> str:
@@ -3601,8 +3604,11 @@ def library_search():
         facets = media_library.catalog_facets(conn)
     finally:
         conn.close()
+    root = media_library.LIBRARY_ROOT
     for item in items:
-        item["folder_name"] = Path(item.pop("folder")).name
+        folder = Path(item.pop("folder"))
+        item["folder_name"] = folder.name
+        item["path"] = str(folder.relative_to(root)) if folder.is_relative_to(root) else None
     return jsonify({"available": True, "count": len(items), "items": items, "facets": facets})
 
 

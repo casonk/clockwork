@@ -32,7 +32,8 @@
     .results { display:flex; flex-direction:column; gap:8px; }
     .card { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px 14px; }
     .card-head { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
-    .card-title { font-weight:700; font-size:15px; }
+    .card-title { font-weight:700; font-size:15px; color:var(--text); text-decoration:none; }
+    a.card-title:hover { color:var(--accent); }
     .card-year { color:var(--muted); }
     .badge { font-size:11px; padding:1px 7px; border-radius:99px; border:1px solid var(--border); background:var(--surface2); color:var(--muted); white-space:nowrap; }
     .badge.quality { color:var(--green); border-color:var(--green-dim); background:var(--green-dim); }
@@ -57,7 +58,11 @@
       <div class="subtitle">Search the watch folder by title, director, cast, year, genre or quality</div>
     </div>
   </div>
-  <a class="action-btn" href="/to-watch">📺 To Watch</a>
+  <nav style="display:flex; gap:6px; flex-wrap:wrap">
+    <a class="action-btn" href="/library/browse/">📁 Browse</a>
+    <a class="action-btn" href="/library/manage">🛠 Manage</a>
+    <a class="action-btn" href="/to-watch">📺 To Watch</a>
+  </nav>
 </header>
 <main>
   <form class="filters" id="filters" autocomplete="off">
@@ -143,7 +148,13 @@
   function card(item) {
     const node = el("article", "card");
     const head = el("div", "card-head");
-    head.appendChild(el("span", "card-title", item.title));
+    if (item.path) {
+      const link = el("a", "card-title", item.title);
+      link.href = "/library/title/" + item.path.split("/").map(encodeURIComponent).join("/");
+      head.appendChild(link);
+    } else {
+      head.appendChild(el("span", "card-title", item.title));
+    }
     if (item.year) head.appendChild(el("span", "card-year", "(" + item.year + ")"));
     if (item.kind === "shows") head.appendChild(el("span", "badge kind", "show"));
     if (item.category) {

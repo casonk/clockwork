@@ -1,0 +1,88 @@
+{% extends "library-base.html" %}
+{% set tab = "title" %}
+{% block title %}{{ title }}{% endblock %}
+{% block heading %}{{ title }}{% if year %} <span class="muted">({{ year }})</span>{% endif %}{% endblock %}
+{% block subheading %}{% if kind == "shows" %}TV show{% else %}Movie{% endif %}{% if genre %} · {{ genre }}{% endif %}{% endblock %}
+{% macro file_row(item) %}
+  <tr>
+    <td>
+      {% if item.season is not none and item.episode is not none %}<b>S{{ "%02d"|format(item.season) }}E{{ "%02d"|format(item.episode) }}</b><br>{% endif %}
+      <span class="small">{{ item.name }}</span>
+      {% if item.companions %}
+        <div class="small muted">
+          {% for c in item.companions %}{% if not loop.first %} · {% endif %}{{ "🔊" if c.kind == "audio" else "💬" }} {{ c.label }}{% endfor %}
+        </div>
+      {% endif %}
+    </td>
+    <td class="hide-sm small">
+      {% if item.quality %}<span class="badge quality">{{ item.quality }}</span>{% endif %}
+      {% if item.video_codec %}<span class="badge">{{ item.video_codec }}</span>{% endif %}
+      {% if item.audio_codec %}<span class="badge">{{ item.audio_codec }}{% if item.channels %} {{ item.channels }}ch{% endif %}</span>{% endif %}
+      {% if item.duration_min %}<span class="badge">{{ item.duration_min }} min</span>{% endif %}
+    </td>
+    <td class="small" style="white-space:nowrap">{{ item.size }}</td>
+    <td style="white-space:nowrap">
+      <a class="btn primary" href="{{ url_for('library_pages.play_page', rel=item.rel) }}" title="{% if not item.playable %}This format may not play in the browser{% endif %}">▶ Play</a>
+      <a class="btn" href="{{ url_for('library_pages.media_file', rel=item.rel, download=1) }}" title="Download">⬇</a>
+    </td>
+  </tr>
+{% endmacro %}
+{% block content %}
+<div class="crumbs">
+  {% for c in breadcrumbs %}{% if not loop.first %} / {% endif %}<a href="{{ url_for('library_pages.browse', rel=c.rel) if c.rel else url_for('library_pages.browse') }}">{{ c.name }}</a>{% endfor %}
+</div>
+
+<div class="panel">
+  <div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px">
+    {% if meta.quality %}<span class="badge quality">{{ meta.quality }}</span>{% endif %}
+    {% if meta.edition %}<span class="badge">{{ meta.edition }}</span>{% endif %}
+    {% if meta.runtime_min %}<span class="badge">{{ meta.runtime_min }} min</span>{% endif %}
+    {% if meta.rating %}<span class="badge">★ {{ "%.1f"|format(meta.rating) }}</span>{% endif %}
+    {% if meta.size_bytes %}<span class="badge">{{ "%.1f"|format(meta.size_bytes / 1073741824) }} GB</span>{% endif %}
+  </div>
+  {% if meta.directors %}<p><span class="muted">{{ "Created by" if kind == "shows" else "Directed by" }}</span>
+    {% for d in meta.directors %}{% if not loop.first %}, {% endif %}<a href="/library?director={{ d|urlencode }}">{{ d }}</a>{% endfor %}</p>{% endif %}
+  {% if meta.cast_members %}<p><span class="muted">Cast</span>
+    {% for a in meta.cast_members[:8] %}{% if not loop.first %}, {% endif %}<a href="/library?actor={{ a|urlencode }}">{{ a }}</a>{% endfor %}</p>{% endif %}
+  {% if meta.genres %}<p><span class="muted">Genres</span> {{ meta.genres[:6]|join(", ") }}</p>{% endif %}
+  {% if meta.countries or meta.languages %}<p class="small muted">{{ (meta.countries + meta.languages)|join(" · ") }}</p>{% endif %}
+  {% if meta.plot %}<p style="margin-top:8px">{{ meta.plot }}</p>{% endif %}
+  <p class="small" style="margin-top:8px">
+    {% if meta.imdb_id %}<a href="https://www.imdb.com/title/{{ meta.imdb_id|urlencode }}/" target="_blank" rel="noopener noreferrer">IMDb</a>{% endif %}
+    {% if meta.wikidata_id %} · <a href="https://www.wikidata.org/wiki/{{ meta.wikidata_id|urlencode }}" target="_blank" rel="noopener noreferrer">Wikidata</a>{% endif %}
+    {% if not meta.sources or meta.sources == "[]" %}<span class="muted">No online metadata found yet.</span>{% endif %}
+  </p>
+</div>
+
+{% if kind == "movies" %}
+<div class="panel">
+  <form method="post" action="{{ url_for('library_pages.change_genre', rel=rel) }}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <span class="muted small">Genre folder</span>
+    <select name="genre">
+      {% for g in genres %}<option value="{{ g }}" {% if g == genre %}selected{% endif %}>{{ g }}</option>{% endfor %}
+    </select>
+    <button class="btn" type="submit">Move</button>
+    <span class="small muted">Sync never moves it back.</span>
+  </form>
+</div>
+{% endif %}
+
+{% if kind == "shows" %}
+  {% for season, items in seasons %}
+    <h2>{% if season %}Season {{ season }}{% else %}Other{% endif %} <span class="muted">· {{ items|length }} episodes</span></h2>
+    <div class="panel scroll"><table>{% for item in items %}{{ file_row(item) }}{% endfor %}</table></div>
+  {% endfor %}
+{% else %}
+  <h2>Files</h2>
+  <div class="panel scroll"><table>{% for item in files %}{{ file_row(item) }}{% else %}<tr><td class="muted">No video files.</td></tr>{% endfor %}</table></div>
+{% endif %}
+
+{% if extras %}
+  <h2>Extras <span class="muted">· {{ extras|length }}</span></h2>
+  <div class="panel scroll"><table>
+    {% for e in extras %}<tr><td class="small">{{ e.name }}</td><td class="small">{{ e.size }}</td>
+      <td style="white-space:nowrap"><a class="btn primary" href="{{ url_for('library_pages.play_page', rel=e.rel) }}">▶ Play</a></td></tr>{% endfor %}
+  </table></div>
+{% endif %}
+{% endblock %}

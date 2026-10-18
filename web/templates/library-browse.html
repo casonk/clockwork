@@ -1,0 +1,33 @@
+{% extends "library-base.html" %}
+{% set tab = "browse" %}
+{% block title %}Browse{% endblock %}
+{% block heading %}📁 Browse{% endblock %}
+{% block subheading %}Folders as they are on disk{% endblock %}
+{% block content %}
+<div class="crumbs">
+  {% for c in breadcrumbs %}{% if not loop.first %} / {% endif %}<a href="{{ url_for('library_pages.browse', rel=c.rel) if c.rel else url_for('library_pages.browse') }}">{{ c.name }}</a>{% endfor %}
+  {% if is_title %} · <a class="btn primary" href="{{ url_for('library_pages.title_page', rel=rel) }}">Details</a>{% endif %}
+</div>
+<div class="panel scroll">
+  <table>
+    {% for d in dirs %}
+      <tr>
+        <td>📁 <a href="{{ url_for('library_pages.browse', rel=d.rel) }}">{{ d.name }}</a></td>
+        <td class="small muted" style="white-space:nowrap">{{ d.count }} item{{ "" if d.count == 1 else "s" }}</td>
+        <td style="white-space:nowrap">{% if d.is_title %}<a class="btn" href="{{ url_for('library_pages.title_page', rel=d.rel) }}">Details</a>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    {% for f in files %}
+      <tr>
+        <td class="small">{{ "🎞" if f.video else "📄" }} {{ f.name }}</td>
+        <td class="small muted" style="white-space:nowrap">{{ f.size }}</td>
+        <td style="white-space:nowrap">
+          {% if f.video %}<a class="btn primary" href="{{ url_for('library_pages.play_page', rel=f.rel) }}">▶</a>{% endif %}
+          <a class="btn" href="{{ url_for('library_pages.media_file', rel=f.rel, download=1) }}" title="Download">⬇</a>
+        </td>
+      </tr>
+    {% endfor %}
+    {% if not dirs and not files %}<tr><td class="muted">Empty folder.</td></tr>{% endif %}
+  </table>
+</div>
+{% endblock %}

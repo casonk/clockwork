@@ -548,8 +548,12 @@ class WikidataProvider:
             wikidata_id=qid,
             imdb_id=(values.get("imdb") or [None])[0],
             tmdb_id=tmdb,
-            # Shows rarely carry a director; their creators fill the same role.
-            directors=values.get("director") or values.get("creator", []),
+            # A series lists every episode's director; its creators are the people to show.
+            directors=(
+                values.get("creator") or values.get("director", [])
+                if chosen.get("kind") == SHOWS
+                else values.get("director") or values.get("creator", [])
+            ),
             cast=values.get("cast", [])[:12],
             genres=[g.removesuffix(" film") for g in values.get("genre", [])],
             countries=values.get("country", []),
@@ -1786,6 +1790,118 @@ def catalog_facets(conn: sqlite3.Connection) -> dict[str, list[str]]:
         "codecs": sorted(codecs),
         "categories": [g for g in GENRE_FOLDERS if g in categories],
     }
+
+
+# ---------------------------------------------------------------------------
+# Management helpers for the web pages
+# ---------------------------------------------------------------------------
+
+
+def move_to_genre(
+    root: Path,
+    folder: Path,
+    genre: str,
+    conn: sqlite3.Connection | None = None,
+    journal: Path | None = None,
+) -> Path:
+    """Move a movie folder into another genre folder, journaled like any rename.
+
+    The catalog rows follow the folder so its metadata and probes are kept.
+    """
+    if genre not in GENRE_FOLDERS:
+        raise ValueError(f"unknown genre folder: {genre}")
+    base = root / MOVIES
+    if folder.parent.parent != base or folder.parent.name not in GENRE_FOLDERS:
+        raise ValueError(f"not a movie title folder: {folder}")
+    target = base / genre / folder.name
+    if target == folder:
+        return folder
+    if os.path.lexists(target):
+        raise FileExistsError(f"{target} already exists")
+    apply_plans(
+        [EntryPlan(folder, MOVIES, folder.name, None, [Move(folder, target)], prune=folder.parent)],
+        journal or RENAME_JOURNAL,
+    )
+    if conn is not None:
+        old, new = str(folder), str(target)
+        # files.folder references titles.folder; check the pair at commit, not per statement.
+        conn.execute("PRAGMA defer_foreign_keys = ON")
+        conn.execute(
+            "UPDATE titles SET folder = ?, category = ? WHERE folder = ?", (new, genre, old)
+        )
+        conn.execute(
+            "UPDATE files SET folder = ?, path = ? || substr(path, ?) WHERE folder = ?",
+            (new, new, len(old) + 1, old),
+        )
+        conn.commit()
+    return target
+
+
+def recent_batches(journal: Path | None = None, limit: int = 10) -> list[dict[str, Any]]:
+    """Newest rename batches with their size, time and a few example targets."""
+    journal = journal or RENAME_JOURNAL
+    if not journal.exists():
+        return []
+    batches: dict[str, dict[str, Any]] = {}
+    for line in journal.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        item = json.loads(line)
+        batch = batches.setdefault(
+            item["batch"], {"batch": item["batch"], "count": 0, "at": item["at"], "examples": []}
+        )
+        batch["count"] += 1
+        batch["at"] = max(batch["at"], item["at"])
+        if len(batch["examples"]) < 3:
+            batch["examples"].append(Path(item["dst"]).name)
+    return sorted(batches.values(), key=lambda b: b["at"], reverse=True)[:limit]
+
+
+def needs_attention(
+    root: Path, conn: sqlite3.Connection | None, tracked: set[str] | None = None
+) -> list[dict[str, str]]:
+    """Things the organizer left for a person: unsorted entries, duplicates, no metadata."""
+    items: list[dict[str, str]] = []
+    if root.is_dir():
+        for entry in sorted(root.iterdir()):
+            if entry.name.startswith(".") or entry.name in (MOVIES, SHOWS):
+                continue
+            reason = (
+                "still seeding in Transmission; filed once the torrent is removed"
+                if tracked and entry.name in tracked
+                else "not organized yet; the next sync files it"
+            )
+            items.append({"title": entry.name, "path": entry.name, "reason": reason})
+    for kind, folder, _category in _title_dirs(root):
+        if kind != MOVIES:
+            continue
+        videos = [v for v in _video_files(folder) if v.parent == folder]
+        sizes = sorted((v.stat().st_size for v in videos), reverse=True)
+        if len(sizes) > 1 and sizes[1] > sizes[0] * 0.4:
+            items.append(
+                {
+                    "title": folder.name,
+                    "path": str(folder.relative_to(root)),
+                    "reason": f"{len(videos)} full-length videos (duplicate copies or parts); "
+                    "delete the extra copy to have it renamed",
+                }
+            )
+    if conn is not None:
+        for row in conn.execute(
+            "SELECT folder, title FROM titles WHERE sources = '[]' ORDER BY title"
+        ):
+            items.append(
+                {
+                    "title": row["title"],
+                    "path": (
+                        str(Path(row["folder"]).relative_to(root))
+                        if Path(row["folder"]).is_relative_to(root)
+                        else row["folder"]
+                    ),
+                    "reason": "no Wikidata match yet; retried weekly",
+                }
+            )
+    return items
 
 
 # ---------------------------------------------------------------------------

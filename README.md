@@ -158,6 +158,26 @@ python3 web/media_library.py search --director fincher --year-from 1990
 - The catalog (`config/media-library.sqlite`) and rename journal
   (`config/media-library-renames.jsonl`) are local and gitignored.
 
+Library pages (`web/library_pages.py`):
+
+- `/library/title/<path>`: one page per movie or show with director/creator,
+  cast, genres, IMDb/Wikidata links, every file's quality, codecs, runtime,
+  subtitle and audio tracks, episodes grouped by season, extras, and a
+  genre-folder dropdown that moves a movie (journaled; sync keeps the choice).
+- `/library/play/<file>`: plays a video in the browser with its `.srt`
+  subtitles converted to WebVTT. Files are served with HTTP range support for
+  seeking; nothing is transcoded, so MKV/HEVC/AVI files show a warning and a
+  download link instead.
+- `/library/browse/`: the folder tree as it is on disk, hidden `.release/`
+  folders excluded, with play and download links.
+- `/library/manage`: start a sync (`systemctl --user start` of
+  `clockwork-media-library.service`), see its recent log and timer state,
+  the items needing attention (still seeding, duplicate copies, no metadata),
+  and the recent rename batches with the undo command.
+
+Paths are resolved inside `CLOCKWORK_WATCH_DIR` only; anything outside it or
+hidden returns 404.
+
 The `/library` page searches the catalog by text, director, actor, genre,
 genre folder, type, quality, codec and year range; `GET /api/library` returns the same data
 as JSON. `examples/clockwork/media-library.toml` runs `sync` every 30 minutes.
