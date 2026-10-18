@@ -27,8 +27,10 @@ from flask import (
 
 try:
     from web import media_library as ml
+    from web import streaming
 except ModuleNotFoundError:
     import media_library as ml
+    import streaming
 
 library_pages = Blueprint("library_pages", __name__)
 
@@ -240,6 +242,12 @@ def play_page(rel: str):
         for c in info["companions"]
         if c["kind"] == "subtitle" and c["name"].lower().endswith((".srt", ".vtt"))
     ]
+    media = streaming.probe_media(video)
+    direct = streaming.plays_directly(media)
+    embedded = [
+        {"index": index, "label": f"{lang} (embedded)", "lang": lang}
+        for index, lang in media.text_subtitles
+    ]
     title_dir = video.parent
     if re.fullmatch(r"Season \d{2}", title_dir.name):
         title_dir = title_dir.parent
@@ -247,9 +255,43 @@ def play_page(rel: str):
         "library-play.html",
         info=info,
         tracks=tracks,
+        embedded=embedded,
+        direct=direct,
+        media=media,
         title_rel=_rel(title_dir),
         title_name=title_dir.name,
     )
+
+
+def _stream_source(rel: str) -> Path:
+    video = _resolve(rel)
+    if not video.is_file() or video.suffix.lower() not in ml.VIDEO_EXTS:
+        abort(404)
+    return video
+
+
+@library_pages.get("/library/stream/<path:rel>/index.m3u8")
+def stream_playlist(rel: str):
+    session = streaming.manager().session(_stream_source(rel))
+    playlist = streaming.vod_playlist(session.info.duration, lambda i: f"seg/{i}.ts")
+    return Response(
+        playlist,
+        mimetype="application/vnd.apple.mpegurl",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@library_pages.get("/library/stream/<path:rel>/seg/<int:index>.ts")
+def stream_segment(rel: str, index: int):
+    segment = streaming.manager().segment(_stream_source(rel), index)
+    if segment is None:
+        abort(503, description="The segment could not be transcoded in time.")
+    return send_file(segment, mimetype="video/mp2t", max_age=3600)
+
+
+@library_pages.get("/library/stream/<path:rel>/sub/<int:index>.vtt")
+def stream_subtitle(rel: str, index: int):
+    return Response(streaming.subtitle_vtt(_stream_source(rel), index), mimetype="text/vtt")
 
 
 @library_pages.get("/library/media/<path:rel>")
