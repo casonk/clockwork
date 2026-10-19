@@ -59,6 +59,13 @@ FAILED_FILE = Path(
         "CLOCKWORK_UPSCALE_FAILED", ml.BASE_DIR / "config" / "media-library-upscale-failed.json"
     )
 )
+# Videos someone asked for from the player, rendered before the rest of the queue.
+PRIORITY_FILE = Path(
+    os.environ.get(
+        "CLOCKWORK_UPSCALE_PRIORITY",
+        ml.BASE_DIR / "config" / "media-library-upscale-priority.json",
+    )
+)
 MIN_FREE_GB = float(os.environ.get("CLOCKWORK_UPSCALE_MIN_FREE_GB", "1000"))
 SERVICE = "clockwork-upscale"
 
@@ -119,9 +126,15 @@ def _is_animation(row: Any) -> bool:
     return row["category"] == "Animation" or "anim" in genres
 
 
-def plan_jobs(root: Path, conn, failed: Iterable[str] = ()) -> list[Job]:
-    """Every catalogued video still lacking its AI version, best value first."""
+def plan_jobs(
+    root: Path, conn, failed: Iterable[str] = (), priority: Iterable[str] = ()
+) -> list[Job]:
+    """Every catalogued video still lacking its AI version, best value first.
+
+    Videos in ``priority`` (requested on demand) come first, in request order.
+    """
     failed = set(failed)
+    requested = {path: index for index, path in enumerate(priority)}
     rows = conn.execute("""SELECT f.path, f.height, f.duration_s, t.title, t.genres, t.category,
                   t.downloaded_at
            FROM files f JOIN titles t ON t.folder = f.folder
@@ -140,6 +153,7 @@ def plan_jobs(root: Path, conn, failed: Iterable[str] = ()) -> list[Job]:
             continue
         jobs.append(
             (
+                requested.get(str(source), len(requested)),
                 row["height"],
                 -(row["downloaded_at"] or 0),
                 str(source),
@@ -154,7 +168,7 @@ def plan_jobs(root: Path, conn, failed: Iterable[str] = ()) -> list[Job]:
                 ),
             )
         )
-    return [job for *_key, job in sorted(jobs, key=lambda item: item[:3])]
+    return [job for *_key, job in sorted(jobs, key=lambda item: item[:4])]
 
 
 def free_bytes(path: Path) -> int:
@@ -179,18 +193,102 @@ def write_status(status: dict[str, Any], path: Path = STATUS_FILE) -> None:
     tmp.replace(path)
 
 
-def load_failed(path: Path = FAILED_FILE) -> dict[str, str]:
+def load_failed(path: Path | None = None) -> dict[str, str]:
     try:
+        path = path or FAILED_FILE
         return json.loads(path.read_text())
     except (OSError, ValueError):
         return {}
 
 
-def record_failure(source: Path, reason: str, path: Path = FAILED_FILE) -> None:
+def record_failure(source: Path, reason: str, path: Path | None = None) -> None:
+    path = path or FAILED_FILE
     failed = load_failed(path)
     failed[str(source)] = reason
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(failed, indent=2))
+
+
+def load_priority(path: Path | None = None) -> list[str]:
+    try:
+        path = path or PRIORITY_FILE
+        return [str(item) for item in json.loads(path.read_text())]
+    except (OSError, ValueError, TypeError):
+        return []
+
+
+def _save_priority(items: list[str], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(items, indent=2))
+    tmp.replace(path)
+
+
+def request_render(source: Path, path: Path | None = None, failed_path: Path | None = None) -> int:
+    """Move a video to the front of the render queue; returns its place (0 = next).
+
+    A video that failed before is retried.
+    """
+    path, failed_path = path or PRIORITY_FILE, failed_path or FAILED_FILE
+    failed = load_failed(failed_path)
+    if failed.pop(str(source), None) is not None:
+        failed_path.write_text(json.dumps(failed, indent=2))
+    items = load_priority(path)
+    if str(source) not in items:
+        items.append(str(source))
+        _save_priority(items, path)
+    return items.index(str(source))
+
+
+def drop_request(source: Path, path: Path | None = None) -> None:
+    path = path or PRIORITY_FILE
+    items = load_priority(path)
+    if str(source) in items:
+        items.remove(str(source))
+        _save_priority(items, path)
+
+
+def render_state(
+    root: Path,
+    source: Path,
+    source_height: int | None,
+    status: dict[str, Any] | None = None,
+    priority: list[str] | None = None,
+    failed: dict[str, str] | None = None,
+) -> dict[str, Any] | None:
+    """Where a video's AI version stands, for the player and title pages.
+
+    ``state`` is ready, rendering, queued (with ``position`` among on-demand
+    requests), failed or none; None when the source is already 1440p or above.
+    """
+    target = target_height(source_height)
+    if target is None:
+        return None
+    label = "AI 4K" if target == 2160 else f"AI {target}p"
+    state: dict[str, Any] = {"target": target, "label": label, "state": "none"}
+    try:
+        rendered = output_path(root, source, target)
+    except ValueError:
+        return None  # outside the library root
+    if rendered.is_file():
+        return {**state, "state": "ready"}
+    status = read_status() if status is None else status
+    if status.get("source") == str(source) and status.get("state") in ("rendering", "cooling"):
+        total = status.get("total_frames") or 0
+        return {
+            **state,
+            "state": "rendering",
+            "percent": round(100 * status.get("frames", 0) / total, 1) if total else None,
+            "eta_seconds": status.get("eta_seconds"),
+            "cooling": status.get("state") == "cooling",
+        }
+    priority = load_priority() if priority is None else priority
+    if str(source) in priority:
+        return {**state, "state": "queued", "position": priority.index(str(source))}
+    failed = load_failed() if failed is None else failed
+    if str(source) in failed:
+        return {**state, "state": "failed", "reason": failed[str(source)]}
+    return state
 
 
 def probe_video(source: Path) -> tuple[int, int, Fraction, float]:
@@ -470,6 +568,7 @@ def progress_reporter(job: Job, base: dict[str, Any]) -> Callable[[int, float], 
                 "state": "rendering",
                 "title": job.title,
                 "file": job.source.name,
+                "source": str(job.source),
                 "target": "4K" if job.target_height == 2160 else f"{job.target_height}p",
                 "model": job.model.removesuffix(".pth"),
                 "frames": frames,
@@ -480,6 +579,25 @@ def progress_reporter(job: Job, base: dict[str, Any]) -> Callable[[int, float], 
         )
 
     return progress
+
+
+def wait_for_request(
+    seconds: float, should_stop: Callable[[], bool], path: Path | None = None
+) -> None:
+    """Sleep up to ``seconds``, waking early when a render is requested."""
+    path = path or PRIORITY_FILE
+
+    def stamp() -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    before, deadline = stamp(), time.time() + seconds
+    while time.time() < deadline and not should_stop():
+        time.sleep(min(10.0, max(deadline - time.time(), 0.0)))
+        if stamp() != before:
+            return
 
 
 def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
@@ -493,7 +611,7 @@ def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
     finished = 0
     while not renderer.stopping:
         conn = ml.connect(db)
-        jobs = plan_jobs(root, conn, load_failed())
+        jobs = plan_jobs(root, conn, load_failed(), load_priority())
         conn.close()
         base = {"state": "idle", "queued": len(jobs), "finished": finished}
         base["free_gb"] = round(free_bytes(root) / 1024**3)
@@ -502,21 +620,29 @@ def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
             write_status({**base, "state": "done"})
             if once:
                 return 0
-            time.sleep(3600)
+            wait_for_request(3600, lambda: renderer.stopping)
             continue
         job = jobs[0]
         if not has_room(root, job, min_free_gb):
             write_status({**base, "state": "disk-floor", "next": job.title})
             if once:
                 return 0
-            time.sleep(3600)
+            wait_for_request(3600, lambda: renderer.stopping)
             continue
         progress = progress_reporter(job, {**base, "duty": renderer.throttle.duty})
 
         def cooling(
             temps: dict[str, float | None], job: Job = job, base: dict[str, Any] = base
         ) -> None:
-            write_status({**base, "state": "cooling", "title": job.title, **temps})
+            write_status(
+                {
+                    **base,
+                    "state": "cooling",
+                    "title": job.title,
+                    "source": str(job.source),
+                    **temps,
+                }
+            )
 
         renderer.throttle.on_cooling = cooling
         try:
@@ -527,6 +653,7 @@ def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the queue
             print(f"upscale failed for {job.source}: {exc}", file=sys.stderr)
             record_failure(job.source, str(exc))
+        drop_request(job.source)
         if once:
             break
     write_status({"state": "stopped", "finished": finished})
@@ -545,7 +672,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "queue":
         conn = ml.connect(args.db)
-        jobs = plan_jobs(args.root, conn, load_failed())
+        jobs = plan_jobs(args.root, conn, load_failed(), load_priority())
         hours = sum(j.duration for j in jobs) / 3600
         size = sum(j.estimated_bytes for j in jobs) / 1024**4
         print(f"{len(jobs)} videos, {hours:.0f} h of video, about {size:.1f} TiB of output")

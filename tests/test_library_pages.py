@@ -308,7 +308,7 @@ def test_ai_render_appears_in_quality_menu_and_streams(
     rel = "/shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E01_1080p.mkv"
 
     html = client.get("/library/play" + rel).get_data(as_text=True)
-    assert "AI 4K" not in html
+    assert 'value="ai-4k"' not in html
     assert client.get("/library/stream" + rel + "/index.m3u8?v=ai-4k").status_code == 404
 
     _touch(upscale.output_path(library, source, 2160))
@@ -385,3 +385,53 @@ def test_manage_page_explains_cooling(client, monkeypatch, tmp_path):
     html = client.get("/library/manage").get_data(as_text=True)
     assert "Cooling down before continuing Futurama" in html
     assert "GPU 73 °C, CPU 61 °C" in html
+
+
+@pytest.fixture()
+def ai_files(tmp_path, monkeypatch):
+    upscale = pages.upscale
+    monkeypatch.setattr(upscale, "PRIORITY_FILE", tmp_path / "priority.json")
+    monkeypatch.setattr(upscale, "FAILED_FILE", tmp_path / "failed.json")
+    monkeypatch.setattr(upscale, "read_status", lambda path=None: {})
+    monkeypatch.setattr(pages, "_systemctl_show", lambda unit, *props: {"ActiveState": "active"})
+    return upscale
+
+
+def test_player_lists_versions_and_queues_an_ai_render(client, library, probed, ai_files):
+    rel = "/shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E01_1080p.mkv"
+    html = client.get("/library/play" + rel).get_data(as_text=True)
+    assert "Versions" in html and "converted to H.264 live" in html
+    assert "720p · 480p · 360p" in html and "not rendered yet" in html and "✨ Generate" in html
+
+    resp = client.post("/library/play" + rel + "/upscale", data={"csrf_token": _csrf(client)})
+    assert resp.status_code == 302
+    source = str(library / rel.lstrip("/"))
+    assert ai_files.load_priority(ai_files.PRIORITY_FILE) == [source]
+    html = client.get("/library/play" + rel).get_data(as_text=True)
+    assert "AI 4K queued: it renders next" in html and "queued, next" in html
+
+
+def test_player_links_previous_and_next_episode(client, probed, ai_files):
+    first = client.get(
+        "/library/play/shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E01_1080p.mkv"
+    ).get_data(as_text=True)
+    assert 'data-next="/library/play/shows/Breaking' in first and "S01E02 ⏭" in first
+    assert "data-previous" not in first and 'id="autoplay"' in first
+    second = client.get(
+        "/library/play/shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E02_1080p.mkv"
+    ).get_data(as_text=True)
+    assert "⏮ S01E01" in second and "data-next=" not in second
+
+
+def test_title_page_queues_ai_renders_for_every_episode(client, library, probed, ai_files):
+    rel = "/library/title/shows/Breaking Bad (2008)"
+    assert "Generate AI versions" in client.get(rel).get_data(as_text=True)
+
+    client.post(rel + "/upscale", data={"csrf_token": _csrf(client)})
+    queued = ai_files.load_priority(ai_files.PRIORITY_FILE)
+    assert [Path(p).name for p in queued] == [
+        "Breaking_Bad_S01E01_1080p.mkv",
+        "Breaking_Bad_S01E02_1080p.mkv",
+    ]
+    html = client.get(rel).get_data(as_text=True)
+    assert "✨ queued" in html and "Generate AI versions" not in html
