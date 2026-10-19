@@ -221,3 +221,64 @@ def test_cpu_temperature_reads_the_package_sensor(tmp_path):
     (tmp_path / "hwmon5" / "temp1_input").write_text("64000\n")
     assert upscale.cpu_temperature(tmp_path) == 64.0
     assert upscale.cpu_temperature(tmp_path / "missing") is None
+
+
+def test_requested_videos_jump_the_queue_in_request_order(tmp_path):
+    root, conn = _catalog(tmp_path)
+    priority = tmp_path / "priority.json"
+    failed = tmp_path / "failed.json"
+    hot_rod = root / "movies/Comedy/Hot Rod (2007)/Hot_Rod.mkv"
+    network = root / "movies/Drama/Network (1976)/Network.mkv"
+    upscale.record_failure(network, "ffmpeg failed", failed)
+
+    assert upscale.request_render(hot_rod, priority, failed) == 0
+    assert upscale.request_render(network, priority, failed) == 1
+    assert upscale.request_render(hot_rod, priority, failed) == 0  # no duplicate
+    assert upscale.load_failed(failed) == {}  # a requested failure is retried
+
+    jobs = upscale.plan_jobs(root, conn, priority=upscale.load_priority(priority))
+    assert [j.title for j in jobs] == ["Hot Rod", "Network", "Futurama", "Old"]
+
+    upscale.drop_request(hot_rod, priority)
+    assert upscale.load_priority(priority) == [str(network)]
+
+
+def test_render_state_reports_each_stage(tmp_path):
+    root = tmp_path / "watch"
+    source = _touch(root / "shows" / "Futurama (1999)" / "Futurama_S01E01_SD.mkv")
+
+    def state(**kwargs):
+        snapshot = {"status": {}, "priority": [], "failed": {}, **kwargs}
+        return upscale.render_state(root, source, 480, **snapshot)
+
+    assert upscale.render_state(root, source, 2160, {}, [], {}) is None
+    assert state() == {"target": 1080, "label": "AI 1080p", "state": "none"}
+    assert state(priority=["other", str(source)])["position"] == 1
+    assert state(failed={str(source): "boom"})["reason"] == "boom"
+    rendering = state(
+        status={
+            "state": "rendering",
+            "source": str(source),
+            "frames": 250,
+            "total_frames": 1000,
+            "eta_seconds": 4000,
+        }
+    )
+    assert (rendering["state"], rendering["percent"]) == ("rendering", 25.0)
+    _touch(upscale.output_path(root, source, 1080))
+    assert state(priority=[str(source)])["state"] == "ready"
+
+
+def test_idle_worker_wakes_when_a_render_is_requested(tmp_path, monkeypatch):
+    priority = tmp_path / "priority.json"
+    clock = [0.0]
+    monkeypatch.setattr(upscale.time, "time", lambda: clock[0])
+
+    def sleep(seconds):
+        clock[0] += seconds
+        if clock[0] >= 20:
+            priority.write_text("[]")
+
+    monkeypatch.setattr(upscale.time, "sleep", sleep)
+    upscale.wait_for_request(3600, lambda: False, priority)
+    assert clock[0] < 60

@@ -7,6 +7,10 @@
 <style>
   .player { width:100%; max-height:75vh; background:#000; border-radius:8px; display:block; }
   #stream-status:empty { display:none; }
+  .nav-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+  .nav-row .spacer { flex:1; }
+  .versions td { padding:6px 8px; vertical-align:middle; }
+  .versions form { display:inline; }
 </style>
 {% if not direct or qualities|length > 1 %}
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.20/dist/hls.min.js" integrity="sha384-V5ruNBgmYcC3SJRUQeNykAAAgde5gOFq/Hu0CZj7bygDP0yRIhkvX8+w0u/7mRvr" crossorigin="anonymous"></script>
@@ -14,6 +18,8 @@
 {% endblock %}
 {% block content %}
 <video id="player" class="player" controls preload="metadata" playsinline
+  {% if following %}data-next="{{ url_for('library_pages.play_page', rel=following.rel) }}" data-next-label="{{ following.label }}"{% endif %}
+  {% if previous %}data-previous="{{ url_for('library_pages.play_page', rel=previous.rel) }}"{% endif %}
   data-hls="{{ url_for('library_pages.stream_playlist', rel=info.rel) }}"
   {% if direct %}data-direct="{{ url_for('library_pages.media_file', rel=info.rel) }}"{% endif %}>
   {% for t in tracks %}
@@ -25,6 +31,15 @@
            src="{{ url_for('library_pages.stream_subtitle', rel=info.rel, index=t.index) }}" {% if loop.first and not tracks %}default{% endif %}>
   {% endfor %}
 </video>
+<div class="nav-row">
+  {% if previous %}<a class="btn" href="{{ url_for('library_pages.play_page', rel=previous.rel) }}" title="{{ previous.name }} (Shift+P)">⏮ {{ previous.label }}</a>{% endif %}
+  <span class="spacer"></span>
+  {% if following %}
+  <label class="small muted" style="display:inline-flex; gap:5px; align-items:center" title="Play the next one when this ends">
+    <input type="checkbox" id="autoplay" checked> Autoplay</label>
+  <a class="btn" href="{{ url_for('library_pages.play_page', rel=following.rel) }}" title="{{ following.name }} (Shift+N)">{{ following.label }} ⏭</a>
+  {% endif %}
+</div>
 <div id="stream-status" class="flash" style="margin-top:10px"></div>
 <div class="panel" style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center">
   <label class="small muted" style="display:inline-flex; gap:6px; align-items:center">Quality
@@ -40,6 +55,51 @@
   <span class="badge">{{ info.size }}</span>
   <a class="btn" href="{{ url_for('library_pages.media_file', rel=info.rel, download=1) }}">⬇ Download</a>
   <a class="btn" href="{{ url_for('library_pages.title_page', rel=title_rel) }}">← Back to title</a>
+</div>
+<div class="panel" style="margin-top:12px">
+  <div class="small muted" style="margin-bottom:6px">Versions</div>
+  <table class="versions small">
+    <tr>
+      <td><b>Original</b></td>
+      <td>{% if media.height %}{{ media.height }}p {% endif %}{{ media.video_codec or "" }}</td>
+      <td class="muted">{% if direct %}plays directly{% else %}converted to H.264 live while you watch{% endif %}</td>
+      <td><button class="btn" type="button" data-watch="original">▶ Watch</button></td>
+    </tr>
+    {% if live %}
+    <tr>
+      <td><b>Lower quality</b></td>
+      <td>{% for q in live %}{% if not loop.first %} · {% endif %}{{ q.name }}{% endfor %}</td>
+      <td class="muted">made on the fly when picked, nothing stored</td>
+      <td></td>
+    </tr>
+    {% endif %}
+    <tr>
+      <td><b>✨ AI</b></td>
+      {% if ai is none %}
+      <td>—</td><td class="muted">not needed: the original is already high resolution</td><td></td>
+      {% elif ai.state == "ready" %}
+      <td>{{ ai.label }}</td><td><span class="badge quality">ready</span></td>
+      <td><button class="btn" type="button" data-watch="{{ 'ai-4k' if ai.target == 2160 else 'ai-1080p' }}">▶ Watch</button></td>
+      {% elif ai.state == "rendering" %}
+      <td>{{ ai.label }}</td>
+      <td><span class="badge kind">rendering{% if ai.percent is not none %} {{ ai.percent }}%{% endif %}</span>
+        {% if ai.cooling %}<span class="muted">paused to cool down</span>{% elif ai.eta %}<span class="muted">about {{ ai.eta }} left</span>{% endif %}</td>
+      <td></td>
+      {% elif ai.state == "queued" %}
+      <td>{{ ai.label }}</td>
+      <td><span class="badge kind">queued{% if ai.position == 0 %}, next{% else %}, #{{ ai.position + 1 }}{% endif %}</span>
+        <span class="muted">starts after the current render</span></td>
+      <td></td>
+      {% else %}
+      <td>{{ ai.label }}</td>
+      <td>{% if ai.state == "failed" %}<span class="badge warn" title="{{ ai.reason }}">last attempt failed</span>{% else %}<span class="muted">not rendered yet</span>{% endif %}</td>
+      <td><form method="post" action="{{ url_for('library_pages.request_upscale', rel=info.rel) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="btn primary" type="submit" title="Render this one before the rest of the library (throttled, can take hours)">{% if ai.state == "failed" %}↻ Retry{% else %}✨ Generate{% endif %}</button>
+      </form></td>
+      {% endif %}
+    </tr>
+  </table>
 </div>
 <script>
 (function () {
@@ -130,6 +190,50 @@
     });
   }
 
+  const autoplay = document.getElementById("autoplay");
+  const autoplayKey = "clockwork-library-autoplay";
+  let countdown = null;
+
+  function go(url, play) {
+    if (url) window.location.href = url + (play ? "?autoplay=1" : "");
+  }
+
+  if (autoplay) {
+    try { autoplay.checked = localStorage.getItem(autoplayKey) !== "0"; } catch (_err) { /* private mode */ }
+    autoplay.addEventListener("change", function () {
+      try { localStorage.setItem(autoplayKey, autoplay.checked ? "1" : "0"); } catch (_err) { /* private mode */ }
+      if (!autoplay.checked && countdown) { clearInterval(countdown); countdown = null; show(""); }
+    });
+  }
+
+  video.addEventListener("ended", function () {
+    if (!video.dataset.next || !autoplay || !autoplay.checked) return;
+    let left = 8;
+    const tick = function () {
+      if (left <= 0) { clearInterval(countdown); go(video.dataset.next, true); return; }
+      show("Next: " + video.dataset.nextLabel + " in " + left + " s. Untick Autoplay to stay.");
+      left -= 1;
+    };
+    tick();
+    countdown = setInterval(tick, 1000);
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if (!event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.target.closest("input, select, textarea")) return;
+    if (event.key === "N") go(video.dataset.next, !video.paused);
+    else if (event.key === "P") go(video.dataset.previous, !video.paused);
+  });
+
+  document.querySelectorAll("[data-watch]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      select.value = button.dataset.watch;
+      select.dispatchEvent(new Event("change"));
+      video.play().catch(function () {});
+      video.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  });
+
   video.addEventListener("waiting", function () { if (hls) show("Converting… playback resumes in a moment."); });
   video.addEventListener("playing", function () { show(""); });
   select.addEventListener("change", function () {
@@ -142,6 +246,9 @@
     select.value = saved;
   }
   load(select.value);
+  if (new URLSearchParams(window.location.search).get("autoplay") === "1") {
+    video.play().catch(function () { show("Press play to continue."); });
+  }
 })();
 </script>
 {% endblock %}
