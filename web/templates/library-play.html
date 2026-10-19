@@ -83,15 +83,15 @@
       <td>{{ ai.label }}</td>
       <td><span class="badge kind">rendering{% if ai.percent is not none %} {{ ai.percent }}%{% endif %}</span>
         {% if ai.cooling %}<span class="muted">paused to cool down</span>{% elif ai.eta %}<span class="muted">about {{ ai.eta }} left</span>{% endif %}</td>
-      <td></td>
+      <td>{% if ai.partial_seconds %}<button class="btn" type="button" data-watch="{{ ai.variant }}" title="Plays what is rendered so far; reload the page later for more">▶ Watch first {{ ai.partial_clock }}</button>{% endif %}</td>
       {% elif ai.state == "queued" %}
       <td>{{ ai.label }}</td>
       <td><span class="badge kind">queued{% if ai.position == 0 %}, next{% else %}, #{{ ai.position + 1 }}{% endif %}</span>
-        <span class="muted">starts after the current render</span></td>
-      <td></td>
+        <span class="muted">{% if ai.partial_seconds %}first {{ ai.partial_clock }} already rendered{% else %}starts after the current render{% endif %}</span></td>
+      <td>{% if ai.partial_seconds %}<button class="btn" type="button" data-watch="{{ ai.variant }}">▶ Watch</button>{% endif %}</td>
       {% else %}
       <td>{{ ai.label }}</td>
-      <td>{% if ai.state == "failed" %}<span class="badge warn" title="{{ ai.reason }}">last attempt failed</span>{% else %}<span class="muted">not rendered yet</span>{% endif %}</td>
+      <td>{% if ai.state == "failed" %}<span class="badge warn" title="{{ ai.reason }}">last attempt failed</span>{% elif ai.partial_seconds %}<span class="muted">first {{ ai.partial_clock }} rendered</span> <button class="btn" type="button" data-watch="{{ ai.variant }}">▶ Watch</button>{% else %}<span class="muted">not rendered yet</span>{% endif %}</td>
       <td><form method="post" action="{{ url_for('library_pages.request_upscale', rel=info.rel) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button class="btn primary" type="submit" title="Render this one before the rest of the library (throttled, can take hours)">{% if ai.state == "failed" %}↻ Retry{% else %}✨ Generate{% endif %}</button>

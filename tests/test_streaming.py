@@ -316,3 +316,47 @@ def test_each_quality_gets_its_own_session_and_switching_stops_the_old_one(harne
     assert len(manager.sessions) == 2
     assert not processes[0].alive and processes[1].alive
     assert "scale=-2:'min(480,ih)'" in processes[1].command[processes[1].command.index("-vf") + 1]
+
+
+def _partial(tmp_path: Path, chunks: int) -> Path:
+    listing = tmp_path / "chunks.ffconcat"
+    lines = [
+        "ffconcat version 1.0",
+        "# clockwork-audio: /library/show.avi",
+        "# clockwork-height: 1080",
+    ]
+    for n in range(chunks):
+        lines += [f"file '{n:06d}.mkv'", "duration 12.000000"]
+    listing.write_text("\n".join(lines) + "\n")
+    return listing
+
+
+def test_a_render_in_progress_streams_its_chunks_with_the_original_audio(tmp_path):
+    listing = _partial(tmp_path, 3)
+    info = streaming.probe_media(listing)
+    assert (info.duration, info.height, info.video_codec) == (36.0, 1080, "hevc")
+    assert not streaming.plays_directly(info)
+
+    command = streaming.transcode_command(listing, tmp_path, 2, "h264_nvenc")
+    inputs = [command[i + 1] for i, arg in enumerate(command) if arg == "-i"]
+    assert inputs == [str(listing), "/library/show.avi"]
+    assert command[command.index("-f") + 1] == "concat"
+    assert command.count("-ss") == 2 and command[command.index("-ss") + 1] == "12"
+    assert "1:a:0?" in command
+    assert command[command.index("-t") + 1] == "24.000"  # audio stops where the render does
+
+
+def test_a_growing_render_keeps_its_session_and_learns_the_new_length(tmp_path):
+    import os
+
+    listing = _partial(tmp_path, 2)
+    manager = streaming.StreamManager(tmp_path / "cache", encoder=lambda: "libx264")
+    first = manager.session(listing)
+    (first.directory / "seg_0.ts").write_bytes(b"x")
+    assert first.info.duration == 24.0
+
+    _partial(tmp_path, 4)
+    os.utime(listing, (first.source_mtime + 5, first.source_mtime + 5))
+    again = manager.session(listing)
+    assert again is first and again.info.duration == 48.0
+    assert (again.directory / "seg_0.ts").exists()  # earlier segments stay valid

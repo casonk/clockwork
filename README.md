@@ -209,8 +209,22 @@ starting new renders when free space on the library disk would fall below
 `CLOCKWORK_UPSCALE_MIN_FREE_GB` (default 1000) and rechecks hourly; failures
 are listed in `config/media-library-upscale-failed.json` and skipped.
 
+Rendering is chunked. One decoder streams the whole video, and the output is
+encoded in chunks of whole 6-second streaming segments, each sized for about
+`CLOCKWORK_UPSCALE_CHUNK_WORK_SECONDS` (60) of GPU work, into
+`<render>.chunks/` with a manifest. A stop, restart or reboot loses at most the
+chunk in progress, and the next run resumes there. The resume point is found
+by the content of the last frames, because timestamp seeking lands a frame
+early or late depending on the container. Interrupted renders continue before
+new ones start. While a render is in progress, the player already offers the
+finished part ("✨ AI 4K (rendering: first 25:00)"); reload later for more.
+The finished chunks are joined and the audio encoded once from the source,
+because encoding it per chunk would add up to drift.
+
 The worker is throttled so it does not run the machine hot or loud: it works
-only `CLOCKWORK_UPSCALE_DUTY` of the time (default 0.35) and rests the rest,
+only `CLOCKWORK_UPSCALE_DUTY` of the time (default 0.35) and rests the rest
+between chunks, with the encoder closed so the GPU drops from ~120 W (P2, held
+by an open NVENC session) to ~20 W (P8) within about 30 seconds,
 pauses when the GPU reaches `CLOCKWORK_UPSCALE_MAX_GPU_C` (72) or the CPU
 package `CLOCKWORK_UPSCALE_MAX_CPU_C` (78, a median over a few seconds since
 Intel package readings spike) until both are 6 C cooler, and limits ffmpeg and

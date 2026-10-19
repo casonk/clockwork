@@ -9,7 +9,15 @@ else realesr-general-x4v3.
 
 Outputs are HEVC with the source audio as AAC, under a hidden
 ``<library>/.upscaled/`` tree that mirrors the library, so organizing and
-naming are unaffected; the player streams them through web/streaming.py. The
+naming are unaffected; the player streams them through web/streaming.py.
+
+Rendering is chunked: one decoder streams the whole video, and the output is
+encoded in chunks of whole 6-second streaming segments, sized for about a
+minute of GPU work each, into ``<output>.chunks/`` with a manifest. Between
+chunks the encoder is closed and the worker rests, so the GPU really idles
+(an open NVENC session keeps it at ~120 W); a stop or restart loses at most
+the chunk in progress, and the next run resumes from the manifest. The
+finished chunks are joined and the audio encoded once from the source. The
 worker stops starting new renders once free space on the library disk would
 drop below CLOCKWORK_UPSCALE_MIN_FREE_GB, and checks again hourly.
 
@@ -24,12 +32,15 @@ the web app can read status and outputs.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import math
 import os
 import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -75,6 +86,17 @@ LIVE_ACTION_MODEL = "realesr-general-x4v3.pth"
 # and skin texture that the full-strength model smooths into a waxy look.
 LIVE_ACTION_WEAK_DENOISE = "realesr-general-wdn-x4v3.pth"
 DENOISE = float(os.environ.get("CLOCKWORK_UPSCALE_DENOISE", "0.5"))
+# Chunks are whole streaming segments (web/streaming.py SEGMENT_SECONDS), sized
+# so one takes about CHUNK_WORK_SECONDS of GPU work, between these bounds.
+SEGMENT_SECONDS = 6
+CHUNK_WORK_SECONDS = float(os.environ.get("CLOCKWORK_UPSCALE_CHUNK_WORK_SECONDS", "60"))
+MIN_CHUNK_SECONDS, MAX_CHUNK_SECONDS, FIRST_CHUNK_SECONDS = 6, 120, 12
+MANIFEST = "manifest.json"
+# Resuming: seek this far before the next frame, then find it by the content of
+# the frames before it. Timestamp seeking alone lands a frame early or late
+# depending on the container.
+RESUME_LOOKBACK_SECONDS = 20
+TAIL_FRAMES = 4
 # Output bitrate assumptions for the disk check, in megabits per second.
 ESTIMATED_MBPS = {1080: 6.0, 2160: 20.0}
 
@@ -109,6 +131,135 @@ def output_path(root: Path, source: Path, height: int) -> Path:
     rel = source.relative_to(root)
     label = "4k" if height == 2160 else f"{height}p"
     return root / UPSCALED_DIR / rel.parent / f"{rel.stem}.ai-{label}.mkv"
+
+
+def chunk_dir(output: Path) -> Path:
+    return output.with_name(output.name + ".chunks")
+
+
+def load_manifest(directory: Path, job: Job, rate: Fraction) -> dict[str, Any]:
+    """The finished chunks of an interrupted render, or a fresh manifest.
+
+    Chunks made with another model, target or frame rate are thrown away.
+    """
+    fresh = {
+        "version": 1,
+        "source": str(job.source),
+        "target": job.target_height,
+        "model": job.model,
+        "rate": f"{rate.numerator}/{rate.denominator}",
+        "chunks": [],
+    }
+    try:
+        manifest = json.loads((directory / MANIFEST).read_text())
+    except (OSError, ValueError):
+        manifest = None
+    if manifest and all(manifest.get(k) == v for k, v in fresh.items() if k != "chunks"):
+        chunks = [c for c in manifest.get("chunks", []) if (directory / c["file"]).is_file()]
+        if len(chunks) == len(manifest.get("chunks", [])):
+            return manifest
+    shutil.rmtree(directory, ignore_errors=True)
+    return fresh
+
+
+def save_manifest(directory: Path, manifest: dict[str, Any]) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    tmp = directory / (MANIFEST + ".tmp")
+    tmp.write_text(json.dumps(manifest, indent=1))
+    tmp.replace(directory / MANIFEST)
+
+
+def next_chunk_end(start_s: float, rate: Fraction, fps: float | None) -> float:
+    """End (source seconds) of the next chunk: whole segments, ~CHUNK_WORK_SECONDS of work."""
+    if fps:
+        seconds = CHUNK_WORK_SECONDS * fps / float(rate)
+        seconds = math.floor(seconds / SEGMENT_SECONDS) * SEGMENT_SECONDS
+    else:
+        seconds = FIRST_CHUNK_SECONDS
+    return start_s + min(max(seconds, MIN_CHUNK_SECONDS), MAX_CHUNK_SECONDS)
+
+
+def frame_index(seconds: float, rate: Fraction) -> int:
+    return round(Fraction(seconds).limit_denominator(1000) * rate)
+
+
+CONCAT_LIST = "chunks.ffconcat"
+
+
+def concat_list(directory: Path, manifest: dict[str, Any], rate: Fraction) -> Path:
+    """ffconcat list of the chunks with exact durations, so timestamps never drift.
+
+    Rewritten after every chunk: the player streams a render in progress from
+    it (web/streaming.py reads the clockwork-* comments for the audio source).
+    """
+    lines = [
+        "ffconcat version 1.0",
+        f"# clockwork-audio: {manifest['source']}",
+        f"# clockwork-height: {manifest['target']}",
+    ]
+    if manifest["chunks"] and "end_s" in manifest["chunks"][-1]:
+        # Chunks end on whole streaming segments; the summed frame durations can
+        # be off by part of a frame, which would leave a tiny last segment.
+        lines.append(f"# clockwork-seconds: {manifest['chunks'][-1]['end_s']:.6f}")
+    for chunk in manifest["chunks"]:
+        lines.append(f"file '{chunk['file']}'")
+        lines.append(f"duration {chunk['frames'] / float(rate):.6f}")
+    path = directory / CONCAT_LIST
+    tmp = directory / (CONCAT_LIST + ".tmp")
+    tmp.write_text("\n".join(lines) + "\n")
+    tmp.replace(path)
+    return path
+
+
+def partial_render(root: Path, source: Path, height: int) -> tuple[Path, float] | None:
+    """The concat list of a render in progress and how many seconds it covers."""
+    try:
+        directory = chunk_dir(output_path(root, source, height))
+    except ValueError:
+        return None
+    listing = directory / CONCAT_LIST
+    try:
+        text = listing.read_text()
+    except OSError:
+        return None
+    seconds = sum(
+        float(line.split()[1]) for line in text.splitlines() if line.startswith("duration ")
+    )
+    for line in text.splitlines():
+        if line.startswith("# clockwork-seconds: "):
+            seconds = float(line.split(": ", 1)[1])
+    return (listing, seconds) if seconds > 0 else None
+
+
+def frame_hash(frame: bytes) -> str:
+    return hashlib.blake2b(frame, digest_size=16).hexdigest()
+
+
+def read_frames(stream, frame_bytes: int):
+    """Raw frames from a decoder pipe, one bytes object each, until it ends."""
+    while True:
+        frame = stream.read(frame_bytes)
+        if len(frame) < frame_bytes:
+            return
+        yield frame
+
+
+def locate_resume(frames, tail: list[str], expected: int, slack: int) -> int | None:
+    """How many frames to skip so the next one follows ``tail`` (hashes of the
+    last frames already rendered), scanning up to ``expected + slack`` frames.
+
+    None when the tail is not found exactly once (e.g. a still scene), so the
+    caller falls back to counting frames from the start.
+    """
+    window: list[str] = []
+    matches = []
+    for index, frame in enumerate(frames):
+        if index > expected + slack:
+            break
+        window = (window + [frame_hash(frame)])[-len(tail) :]
+        if window == tail:
+            matches.append(index + 1)
+    return matches[0] if len(matches) == 1 else None
 
 
 def upscaled_versions(root: Path, source: Path) -> list[tuple[str, Path]]:
@@ -154,6 +305,8 @@ def plan_jobs(
         jobs.append(
             (
                 requested.get(str(source), len(requested)),
+                # A render that was interrupted resumes before new ones start.
+                0 if chunk_dir(output).is_dir() else 1,
                 row["height"],
                 -(row["downloaded_at"] or 0),
                 str(source),
@@ -168,7 +321,7 @@ def plan_jobs(
                 ),
             )
         )
-    return [job for *_key, job in sorted(jobs, key=lambda item: item[:4])]
+    return [job for *_key, job in sorted(jobs, key=lambda item: item[:5])]
 
 
 def free_bytes(path: Path) -> int:
@@ -326,35 +479,48 @@ def output_size(width: int, height: int, target: int) -> tuple[int, int]:
     return out_w, target
 
 
-def decode_command(source: Path) -> list[str]:
+def decode_command(source: Path, seek: float = 0.0) -> list[str]:
+    """Raw RGB frames; with ``seek``, from about that time (not frame-exact)."""
     return [
         # CPU decoding keeps up with the model and accepts streams NVDEC rejects.
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
-        "-threads", str(THREADS), "-i", str(source),
+        "-threads", str(THREADS), *(["-ss", f"{seek:.6f}"] if seek else []), "-i", str(source),
         "-map", "0:v:0", "-fps_mode", "passthrough",
+        # Keep the source time base: rounded to the frame rate, passthrough
+        # timestamps collide and ffmpeg logs an error for every few frames.
+        "-enc_time_base:v", "demux",
         "-f", "rawvideo", "-pix_fmt", "rgb24", "-",
     ]  # fmt: skip
 
 
-def encode_command(
-    source: Path, output: Path, width: int, height: int, rate: Fraction, start: float = 0.0
-) -> list[str]:
+def chunk_command(output: Path, width: int, height: int, rate: Fraction) -> list[str]:
+    """Encode one chunk of upscaled frames (video only) with its own NVENC session."""
     return [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
         "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}",
-        "-framerate", f"{rate.numerator}/{rate.denominator}",
-        # Keep the source's video start so the copied audio stays in sync.
-        "-itsoffset", f"{start:.6f}", "-i", "-",
-        "-i", str(source),
-        "-map", "0:v:0", "-map", "1:a?",
+        "-framerate", f"{rate.numerator}/{rate.denominator}", "-i", "-",
         # HD output: convert and tag as BT.709, which players assume for HD anyway.
         "-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
         "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
         "-color_range", "tv",
         "-c:v", "hevc_nvenc", "-preset", "p5", "-cq", "22", "-tag:v", "hvc1",
         "-threads", str(THREADS), "-filter_threads", "1",
+        "-f", "matroska", str(output),
+    ]  # fmt: skip
+
+
+def join_command(source: Path, chunks: Path, output: Path, start: float = 0.0) -> list[str]:
+    """Join the chunks (copied) and encode the source audio once."""
+    return [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-nostdin",
+        # Keep the source's video start so the audio stays in sync.
+        "-itsoffset", f"{start:.6f}", "-f", "concat", "-safe", "0", "-i", str(chunks),
+        "-i", str(source),
+        "-map", "0:v:0", "-map", "1:a?", "-c:v", "copy",
         # Re-encoded rather than copied: copied packets keep edit-list offsets
         # (hidden pre-roll) that would shift the new video against the audio.
+        # Encoded once for the whole film, not per chunk, so encoder padding
+        # cannot add up to drift at chunk boundaries.
         "-c:a", "aac", "-b:a", "320k", "-map_metadata", "1",
         "-metadata:s:v:0", "comment=AI upscaled (Real-ESRGAN, clockwork experimental)",
         "-f", "matroska", str(output),
@@ -432,12 +598,14 @@ class Throttle:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
         check_every: float = 10.0,
+        stopped: Callable[[], bool] = lambda: False,
     ) -> None:
         self.duty = min(max(duty, 0.05), 1.0)
         self.max_gpu, self.max_cpu = max_gpu, max_cpu
         self.gpu, self.cpu = gpu, cpu
         self.sleep, self.clock = sleep, clock
         self.check_every = check_every
+        self.stopped = stopped
         self.last_check = float("-inf")
         self.cooling = False
         self.temps: dict[str, float | None] = {}
@@ -450,20 +618,30 @@ class Throttle:
             cpu is not None and cpu >= self.max_cpu - margin
         )
 
-    def after_batch(self, worked_seconds: float) -> None:
+    def rest(self, worked_seconds: float) -> None:
+        """Rest so work takes only ``duty`` of wall time, then check temperatures."""
         if self.duty < 1:
             self.sleep(worked_seconds * (1 - self.duty) / self.duty)
+        self.guard()
+
+    def guard(self) -> float:
+        """Pause while too hot (checked every few seconds); returns seconds spent cooling."""
         if self.clock() - self.last_check < self.check_every:
-            return
+            return 0.0
         self.last_check = self.clock()
         if not self._hot(0):
-            return
+            return 0.0
+        began = self.clock()
         self.cooling = True
-        while self._hot(COOL_MARGIN_C):
+        while not self.stopped() and self._hot(COOL_MARGIN_C):
             self.on_cooling(self.temps)
             self.sleep(30)
         self.cooling = False
         self.last_check = self.clock()
+        return self.clock() - began
+
+    def after_batch(self, worked_seconds: float) -> None:
+        self.rest(worked_seconds)
 
 
 class Renderer:
@@ -477,8 +655,9 @@ class Renderer:
         self.loader = spandrel.ModelLoader()
         self.model_dir = model_dir
         self.models: dict[str, Any] = {}
-        self.stopping = False
-        self.throttle = Throttle()
+        self.stop_event = threading.Event()
+        # Rests and cooling pauses end at once when the service is stopped.
+        self.throttle = Throttle(sleep=self.stop_event.wait, stopped=self.stop_event.is_set)
         torch.set_num_threads(THREADS)
 
     def model(self, name: str):
@@ -501,29 +680,140 @@ class Renderer:
         strong, weak = params(LIVE_ACTION_MODEL), params(LIVE_ACTION_WEAK_DENOISE)
         return {k: strength * strong[k] + (1 - strength) * weak[k] for k in strong}
 
+    @property
+    def stopping(self) -> bool:
+        return self.stop_event.is_set()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+
     def render(self, job: Job, progress: Callable[[int, float], None]) -> None:
-        torch = self.torch
         width, height, rate, start = probe_video(job.source)
         out_w, out_h = output_size(width, height, job.target_height)
+        directory = chunk_dir(job.output)
+        manifest = load_manifest(directory, job, rate)
+        save_manifest(directory, manifest)
+        chunk_start = manifest["chunks"][-1]["end_s"] if manifest["chunks"] else 0.0
+        done = sum(chunk["frames"] for chunk in manifest["chunks"])
+        resumed, started = done, time.time()
+        frame_bytes = width * height * 3
+        tail = manifest["chunks"][-1].get("tail") if manifest["chunks"] else None
+        decoder = self._open_decoder(job.source, done, rate, frame_bytes, tail)
+        fps = None
+        try:
+            while True:
+                chunk_end = next_chunk_end(chunk_start, rate, fps)
+                want = frame_index(chunk_end, rate) - frame_index(chunk_start, rate)
+                name = f"{len(manifest['chunks']):06d}.mkv"
+                got, worked, tail = self._render_chunk(
+                    decoder, directory / name, (width, height), (out_w, out_h), rate, job,
+                    want, lambda count, before=done: progress(
+                        before + count,
+                        (before + count - resumed) / max(time.time() - started, 1e-6),
+                    ),
+                )  # fmt: skip
+                if got:
+                    done += got
+                    end_s = chunk_end if got == want else chunk_start + got / float(rate)
+                    manifest["chunks"].append(
+                        {
+                            "file": name,
+                            "start_s": chunk_start,
+                            "end_s": end_s,
+                            "frames": got,
+                            "tail": tail,
+                        }
+                    )
+                    save_manifest(directory, manifest)
+                    concat_list(directory, manifest, rate)
+                    fps = got / max(worked, 1e-6)
+                if got < want:
+                    break  # end of the video
+                chunk_start = chunk_end
+                # The encoder is closed: the GPU drops to idle while resting.
+                self.throttle.rest(worked)
+                if self.stopping:
+                    raise InterruptedError("stopped")
+            if decoder.wait() != 0:
+                raise RuntimeError("ffmpeg decode failed")
+            if not manifest["chunks"]:
+                raise RuntimeError("no frames decoded")
+            partial = job.output.with_name(job.output.name + ".part")
+            joined = subprocess.run(
+                join_command(job.source, concat_list(directory, manifest, rate), partial, start),
+                check=False,
+            )
+            if joined.returncode != 0:
+                partial.unlink(missing_ok=True)
+                raise RuntimeError("ffmpeg join failed")
+            partial.replace(job.output)
+            shutil.rmtree(directory, ignore_errors=True)
+        finally:
+            if decoder.poll() is None:
+                decoder.kill()
+
+    def _open_decoder(
+        self, source: Path, done: int, rate: Fraction, frame_bytes: int, tail: list[str] | None
+    ) -> subprocess.Popen:
+        """A decoder whose next frame is frame number ``done`` of the source, exactly."""
+
+        def start(seek: float = 0.0) -> subprocess.Popen:
+            return subprocess.Popen(decode_command(source, seek), stdout=subprocess.PIPE)
+
+        def skipped(decoder: subprocess.Popen, count: int) -> subprocess.Popen:
+            for _ in zip(range(count), read_frames(decoder.stdout, frame_bytes), strict=False):
+                pass
+            return decoder
+
+        resume_at = done / float(rate)
+        if done and tail and resume_at > RESUME_LOOKBACK_SECONDS:
+            seek = resume_at - RESUME_LOOKBACK_SECONDS
+            scan = start(seek)
+            try:
+                skip = locate_resume(
+                    read_frames(scan.stdout, frame_bytes),
+                    tail,
+                    expected=round(RESUME_LOOKBACK_SECONDS * float(rate)),
+                    slack=round(2 * float(rate)) + 8,
+                )
+            finally:
+                scan.kill()
+                scan.wait()
+            if skip is not None:
+                # The same seek decodes the same frames, so skipping is exact.
+                return skipped(start(seek), skip)
+            print(f"resume point not found by content in {source}; counting from the start")
+        return skipped(start(), done)
+
+    def _render_chunk(self, decoder, path, size, out_size, rate, job, want, progress):
+        """Upscale up to ``want`` frames into one chunk file.
+
+        Returns (frames, work seconds, hashes of the last source frames).
+        """
+        torch = self.torch
+        (width, height), (out_w, out_h) = size, out_size
         frame_bytes = width * height * 3
         batch = 8 if height <= 576 else 1
         net = self.model(job.model)
-        job.output.parent.mkdir(parents=True, exist_ok=True)
-        partial = job.output.with_name(job.output.name + ".part")
-        decoder = subprocess.Popen(decode_command(job.source), stdout=subprocess.PIPE)
+        partial = path.with_name(path.name + ".part")
         encoder = subprocess.Popen(
-            encode_command(job.source, partial, out_w, out_h, rate, start), stdin=subprocess.PIPE
+            chunk_command(partial, out_w, out_h, rate), stdin=subprocess.PIPE
         )
-        done = 0
-        started = time.time()
+        got, worked = 0, 0.0
+        tail: list[str] = []
         try:
             with torch.inference_mode():
-                while not self.stopping:
+                while got < want and not self.stopping:
                     batch_started = time.time()
-                    raw = decoder.stdout.read(frame_bytes * batch)
+                    raw = decoder.stdout.read(frame_bytes * min(batch, want - got))
                     count = len(raw) // frame_bytes
                     if count == 0:
                         break
+                    # Fingerprint the last frames of the chunk for an exact resume.
+                    for index in range(count):
+                        if got + index >= want - TAIL_FRAMES:
+                            frame = raw[index * frame_bytes : (index + 1) * frame_bytes]
+                            tail.append(frame_hash(frame))
                     frames = torch.frombuffer(
                         bytearray(raw[: count * frame_bytes]), dtype=torch.uint8
                     ).view(count, height, width, 3)
@@ -535,19 +825,21 @@ class Renderer:
                         ).clamp_(0, 1)
                     out = y.mul(255).round_().to(torch.uint8).permute(0, 2, 3, 1).contiguous()
                     encoder.stdin.write(out.cpu().numpy().tobytes())
-                    done += count
-                    progress(done, done / max(time.time() - started, 1e-6))
-                    self.throttle.after_batch(time.time() - batch_started)
+                    got += count
+                    progress(got)
+                    cooled = self.throttle.guard()
+                    worked += time.time() - batch_started - cooled
             encoder.stdin.close()
             if self.stopping:
                 raise InterruptedError("stopped")
-            if encoder.wait() != 0 or decoder.wait() != 0:
-                raise RuntimeError("ffmpeg failed")
-            partial.replace(job.output)
+            if encoder.wait() != 0:
+                raise RuntimeError("ffmpeg encode failed")
+            if got:
+                partial.replace(path)
+            return got, worked, tail[-TAIL_FRAMES:]
         finally:
-            for process in (decoder, encoder):
-                if process.poll() is None:
-                    process.kill()
+            if encoder.poll() is None:
+                encoder.kill()
             partial.unlink(missing_ok=True)
 
 
@@ -604,7 +896,7 @@ def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
     renderer = Renderer()
 
     def stop(_signum, _frame):
-        renderer.stopping = True
+        renderer.stop()
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)

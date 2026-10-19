@@ -60,9 +60,45 @@ class MediaInfo:
     height: int | None = None
 
 
+PARTIAL_SUFFIX = ".ffconcat"
+
+
+def partial_header(path: Path) -> dict[str, str]:
+    """``# clockwork-<key>: value`` comments of an AI render in progress (web/upscale.py)."""
+    header = {}
+    for line in path.read_text().splitlines():
+        if line.startswith("# clockwork-") and ": " in line:
+            key, value = line[len("# clockwork-") :].split(": ", 1)
+            header[key] = value
+    return header
+
+
+def probe_partial(path: Path) -> MediaInfo:
+    """A render in progress: HEVC chunks so far, audio from the original file."""
+    text = path.read_text()
+    header = partial_header(path)
+    duration = (
+        float(header["seconds"])
+        if "seconds" in header
+        else sum(
+            float(line.split()[1]) for line in text.splitlines() if line.startswith("duration ")
+        )
+    )
+    return MediaInfo(
+        duration=duration,
+        container=PARTIAL_SUFFIX,
+        video_codec="hevc",
+        pixel_format="yuv420p",
+        audio_codec="aac",
+        height=int(header.get("height", 0)) or None,
+    )
+
+
 def probe_media(
     path: Path, runner: Callable[..., subprocess.CompletedProcess] = subprocess.run
 ) -> MediaInfo:
+    if path.suffix == PARTIAL_SUFFIX:
+        return probe_partial(path)
     result = runner(
         [
             "ffprobe",
@@ -242,11 +278,21 @@ def transcode_command(
     filters = "format=yuv420p"
     if quality.height:
         filters += f",scale=-2:'min({quality.height},ih)'"
+    if source.suffix == PARTIAL_SUFFIX:
+        # A render in progress: video from its chunks, audio from the original,
+        # cut where the rendered part ends (the original audio runs on).
+        rendered = probe_partial(source).duration
+        inputs = [
+            "-ss", str(start), "-f", "concat", "-safe", "0", "-i", str(source),
+            "-ss", str(start), "-i", partial_header(source)["audio"],
+            "-map", "0:v:0", "-map", "1:a:0?", "-t", f"{max(rendered - start, 0.1):.3f}",
+        ]  # fmt: skip
+    else:
+        inputs = ["-ss", str(start), "-i", str(source), "-map", "0:v:0", "-map", "0:a:0?"]
     return [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
         *decode,
-        "-ss", str(start), "-i", str(source),
-        "-map", "0:v:0", "-map", "0:a:0?",
+        *inputs,
         "-vf", filters,
         *video,
         "-force_key_frames", keyframes,
@@ -271,6 +317,7 @@ class Session:
     run_start: int = 0
     last_index: int = 0
     paused: bool = False
+    source_mtime: float = 0.0
     last_access: float = field(default_factory=time.time)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -337,17 +384,28 @@ class StreamManager:
     def session(self, source: Path, quality: str | None = None) -> Session:
         chosen = profile(quality)
         stat = source.stat()
-        identity = f"{source}|{stat.st_size}|{stat.st_mtime}|{chosen.name}"
+        partial = source.suffix == PARTIAL_SUFFIX
+        # A render in progress only grows: earlier segments stay valid, so its
+        # session survives new chunks and just learns the longer duration.
+        identity = (
+            f"{source}|{chosen.name}"
+            if partial
+            else f"{source}|{stat.st_size}|{stat.st_mtime}|{chosen.name}"
+        )
         key = hashlib.sha256(identity.encode()).hexdigest()[:24]
         with self.lock:
             self._reap()
             session = self.sessions.get(key)
+            if session is not None and partial and stat.st_mtime != session.source_mtime:
+                session.info = self.probe(source)
+                session.source_mtime = stat.st_mtime
             if session is None:
                 directory = self.cache_dir / key
                 shutil.rmtree(directory, ignore_errors=True)
                 directory.mkdir(parents=True, exist_ok=True)
                 info = self.probe(source)
                 session = Session(key, source, directory, info, for_source(chosen, info))
+                session.source_mtime = stat.st_mtime
                 self.sessions[key] = session
                 self._enforce_limit(keep=key)
                 # A viewer switching quality leaves the old profile's transcoder

@@ -183,8 +183,23 @@ def _ai_snapshot() -> dict:
     }
 
 
+def _clock(seconds: float) -> str:
+    minutes, secs = divmod(int(seconds), 60)
+    return (
+        f"{minutes // 60}:{minutes % 60:02d}:{secs:02d}"
+        if minutes >= 60
+        else f"{minutes}:{secs:02d}"
+    )
+
+
 def _ai_state(info: dict, height: int | None, snapshot: dict) -> dict | None:
     state = upscale.render_state(_root(), Path(info["source"]), height, **snapshot)
+    if state and state["state"] != "ready":
+        partial = upscale.partial_render(_root(), Path(info["source"]), state["target"])
+        if partial:
+            # Chunks rendered so far can be watched while the rest renders.
+            state["partial_seconds"] = partial[1]
+            state["partial_clock"] = _clock(partial[1])
     if state and state.get("eta_seconds"):
         minutes = round(state["eta_seconds"] / 60)
         state["eta"] = (
@@ -362,6 +377,17 @@ def play_page(rel: str):
         qualities.insert(0, {"name": variant, "label": f"✨ {label} (experimental)", "kbps": None})
     previous, following = _neighbours(video)
     ai = _ai_state(info, media.height or info["height"], _ai_snapshot())
+    if ai and ai.get("partial_seconds"):
+        variant = "ai-4k" if ai["target"] == 2160 else "ai-1080p"
+        ai["variant"] = variant
+        qualities.insert(
+            0,
+            {
+                "name": variant,
+                "label": f"✨ {ai['label']} (rendering: first {ai['partial_clock']})",
+                "kbps": None,
+            },
+        )
     return render_template(
         "library-play.html",
         info=info,
@@ -427,9 +453,13 @@ def _stream_source(rel: str) -> Path:
     variant = _variant_arg()
     if variant:
         rendered = upscale.output_path(_root(), _root() / _rel(video), AI_VARIANTS[variant])
-        if not rendered.is_file():
+        if rendered.is_file():
+            return rendered
+        # Still rendering: stream the chunks finished so far.
+        partial = upscale.partial_render(_root(), _root() / _rel(video), AI_VARIANTS[variant])
+        if partial is None:
             abort(404)
-        return rendered
+        return partial[0]
     return video
 
 
@@ -618,7 +648,12 @@ def manage_page():
     )
     timer = _systemctl_show(f"{SYNC_UNIT}.timer", "ActiveState", "NextElapseUSecRealtime")
     upscale_root = _root() / upscale.UPSCALED_DIR
-    rendered = list(upscale_root.rglob("*.mkv")) if upscale_root.is_dir() else []
+    # Finished renders only: a render in progress keeps its chunks in *.chunks/.
+    rendered = (
+        [p for p in upscale_root.rglob("*.mkv") if not p.parent.name.endswith(".chunks")]
+        if upscale_root.is_dir()
+        else []
+    )
     ai = {
         "status": upscale.read_status(),
         "service": _systemctl_show(f"{upscale.SERVICE}.service", "ActiveState", "LoadState"),
