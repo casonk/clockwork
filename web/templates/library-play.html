@@ -35,8 +35,7 @@
   {% if previous %}<a class="btn" href="{{ url_for('library_pages.play_page', rel=previous.rel) }}" title="{{ previous.name }} (Shift+P)">⏮ {{ previous.label }}</a>{% endif %}
   <span class="spacer"></span>
   {% if following %}
-  <label class="small muted" style="display:inline-flex; gap:5px; align-items:center" title="Play the next one when this ends">
-    <input type="checkbox" id="autoplay" checked> Autoplay</label>
+  <button class="btn" type="button" id="autoplay" aria-pressed="true" title="Play the next one when this ends">⏵ Autoplay: on</button>
   <a class="btn" href="{{ url_for('library_pages.play_page', rel=following.rel) }}" title="{{ following.name }} (Shift+N)">{{ following.label }} ⏭</a>
   {% endif %}
 </div>
@@ -198,20 +197,32 @@
     if (url) window.location.href = url + (play ? "?autoplay=1" : "");
   }
 
+  function autoplayOn() { return autoplay && autoplay.getAttribute("aria-pressed") === "true"; }
+
+  function setAutoplay(on) {
+    autoplay.setAttribute("aria-pressed", on ? "true" : "false");
+    autoplay.textContent = on ? "⏵ Autoplay: on" : "⏸ Autoplay: off";
+    autoplay.className = on ? "btn primary" : "btn";
+  }
+
   if (autoplay) {
-    try { autoplay.checked = localStorage.getItem(autoplayKey) !== "0"; } catch (_err) { /* private mode */ }
-    autoplay.addEventListener("change", function () {
-      try { localStorage.setItem(autoplayKey, autoplay.checked ? "1" : "0"); } catch (_err) { /* private mode */ }
-      if (!autoplay.checked && countdown) { clearInterval(countdown); countdown = null; show(""); }
+    let saved = null;
+    try { saved = localStorage.getItem(autoplayKey); } catch (_err) { /* private mode */ }
+    setAutoplay(saved !== "0");
+    autoplay.addEventListener("click", function () {
+      const on = !autoplayOn();
+      setAutoplay(on);
+      try { localStorage.setItem(autoplayKey, on ? "1" : "0"); } catch (_err) { /* private mode */ }
+      if (!on && countdown) { clearInterval(countdown); countdown = null; show(""); }
     });
   }
 
   video.addEventListener("ended", function () {
-    if (!video.dataset.next || !autoplay || !autoplay.checked) return;
+    if (!video.dataset.next || !autoplayOn()) return;
     let left = 8;
     const tick = function () {
       if (left <= 0) { clearInterval(countdown); go(video.dataset.next, true); return; }
-      show("Next: " + video.dataset.nextLabel + " in " + left + " s. Untick Autoplay to stay.");
+      show("Next: " + video.dataset.nextLabel + " in " + left + " s. Turn Autoplay off to stay.");
       left -= 1;
     };
     tick();

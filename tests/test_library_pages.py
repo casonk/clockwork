@@ -416,7 +416,7 @@ def test_player_links_previous_and_next_episode(client, probed, ai_files):
         "/library/play/shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E01_1080p.mkv"
     ).get_data(as_text=True)
     assert 'data-next="/library/play/shows/Breaking' in first and "S01E02 ⏭" in first
-    assert "data-previous" not in first and 'id="autoplay"' in first
+    assert "data-previous" not in first and 'id="autoplay"' in first and "Autoplay: on" in first
     second = client.get(
         "/library/play/shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E02_1080p.mkv"
     ).get_data(as_text=True)
