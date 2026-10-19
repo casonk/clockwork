@@ -127,6 +127,9 @@ def _file_info(conn, video: Path) -> dict:
     return {
         "name": video.name,
         "rel": _rel(video),
+        # The path the catalog (and so the AI render queue) knows this file by.
+        "source": info.get("path") or str(_root() / _rel(video)),
+        "height": info.get("height"),
         "size": _format_size(video.stat().st_size),
         "quality": info.get("quality"),
         "video_codec": codec,
@@ -138,6 +141,56 @@ def _file_info(conn, video: Path) -> dict:
         "playable": playable,
         "companions": _companions(video),
     }
+
+
+def _title_dir(video: Path) -> Path:
+    folder = video.parent
+    while folder != _root().resolve() and (
+        re.fullmatch(r"Season \d{2}", folder.name)
+        or folder.name.lower() in ml.EXTRAS_DIRS
+        or folder.name.lower().endswith(" extras")
+    ):
+        folder = folder.parent
+    return folder
+
+
+def _neighbours(video: Path) -> tuple[dict | None, dict | None]:
+    """The previous and next video of the same title (episodes in order), if any."""
+    title_dir = _title_dir(video)
+    videos = ml._video_files(title_dir)
+    if video not in videos:  # an extra: step through the other extras
+        videos = [v for v in ml._video_files(title_dir, include_extras=True) if v not in videos]
+    if video not in videos:
+        return None, None
+    index = videos.index(video)
+
+    def entry(path: Path) -> dict:
+        match = re.search(r"S(\d{2})E(\d{2,3})", path.name, re.IGNORECASE)
+        label = f"S{match.group(1)}E{match.group(2)}" if match else path.stem
+        return {"rel": _rel(path), "label": label, "name": path.name}
+
+    previous = entry(videos[index - 1]) if index > 0 else None
+    following = entry(videos[index + 1]) if index + 1 < len(videos) else None
+    return previous, following
+
+
+def _ai_snapshot() -> dict:
+    """Render-queue state read once per page: worker status, requests, failures."""
+    return {
+        "status": upscale.read_status(),
+        "priority": upscale.load_priority(),
+        "failed": upscale.load_failed(),
+    }
+
+
+def _ai_state(info: dict, height: int | None, snapshot: dict) -> dict | None:
+    state = upscale.render_state(_root(), Path(info["source"]), height, **snapshot)
+    if state and state.get("eta_seconds"):
+        minutes = round(state["eta_seconds"] / 60)
+        state["eta"] = (
+            f"{minutes // 60} h {minutes % 60} min" if minutes >= 60 else f"{minutes} min"
+        )
+    return state
 
 
 def _breadcrumbs(rel: str) -> list[dict[str, str]]:
@@ -170,6 +223,9 @@ def title_page(rel: str):
     finally:
         if conn is not None:
             conn.close()
+    snapshot = _ai_snapshot()
+    for item in files:
+        item["ai"] = _ai_state(item, item["height"], snapshot)
     match = re.match(r"^(?P<title>.+?)(?: \((?P<year>\d{4})\))?$", folder.name)
     kind = ml.SHOWS if _rel(folder).startswith(ml.SHOWS + "/") else ml.MOVIES
     seasons: dict[int, list[dict]] = {}
@@ -196,6 +252,7 @@ def title_page(rel: str):
         extras=extras,
         genre=genre,
         genres=ml.GENRE_FOLDERS,
+        ai_pending=sum(1 for f in files if f["ai"] and f["ai"]["state"] in ("none", "failed")),
         downloaded=(
             datetime.datetime.fromtimestamp(meta["downloaded_at"]).strftime("%Y-%m-%d")
             if meta.get("downloaded_at")
@@ -220,6 +277,43 @@ def change_genre(rel: str):
             conn.close()
     flash(f"Moved to {genre}.", "success")
     return redirect(url_for("library_pages.title_page", rel=_rel(target)))
+
+
+def _upscale_service_note() -> str:
+    state = _systemctl_show(f"{upscale.SERVICE}.service", "ActiveState").get("ActiveState")
+    if state == "active":
+        return ""
+    return " AI upscaling is stopped; start it on the Manage page to render."
+
+
+@library_pages.post("/library/title/<path:rel>/upscale")
+def request_title_upscale(rel: str):
+    folder = _resolve(rel)
+    if not folder.is_dir():
+        abort(404)
+    conn = _catalog()
+    try:
+        files = [_file_info(conn, v) for v in ml._video_files(folder)]
+    finally:
+        if conn is not None:
+            conn.close()
+    snapshot = _ai_snapshot()
+    files.sort(key=lambda f: (f["season"] or 0, f["episode"] or 0, f["name"]))
+    queued = 0
+    for item in files:
+        state = _ai_state(item, item["height"], snapshot)
+        if state and state["state"] in ("none", "failed"):
+            upscale.request_render(Path(item["source"]))
+            queued += 1
+    if queued:
+        flash(
+            f"Queued {queued} AI render{'s' if queued != 1 else ''} ahead of the rest of the"
+            " library." + _upscale_service_note(),
+            "success",
+        )
+    else:
+        flash("Nothing to render: every file is done, queued or already high resolution.")
+    return redirect(url_for("library_pages.title_page", rel=_rel(folder)))
 
 
 # ---------------------------------------------------------------------------
@@ -249,9 +343,7 @@ def play_page(rel: str):
         {"index": index, "label": f"{lang} (embedded)", "lang": lang}
         for index, lang in media.text_subtitles
     ]
-    title_dir = video.parent
-    if re.fullmatch(r"Season \d{2}", title_dir.name):
-        title_dir = title_dir.parent
+    title_dir = _title_dir(video)
     qualities = [
         {
             "name": p.name,
@@ -268,6 +360,8 @@ def play_page(rel: str):
     for label, _path in upscale.upscaled_versions(_root(), _root() / _rel(video)):
         variant = "ai-4k" if label == "AI 4K" else "ai-1080p"
         qualities.insert(0, {"name": variant, "label": f"✨ {label} (experimental)", "kbps": None})
+    previous, following = _neighbours(video)
+    ai = _ai_state(info, media.height or info["height"], _ai_snapshot())
     return render_template(
         "library-play.html",
         info=info,
@@ -278,7 +372,41 @@ def play_page(rel: str):
         qualities=qualities,
         title_rel=_rel(title_dir),
         title_name=title_dir.name,
+        previous=previous,
+        following=following,
+        ai=ai,
+        live=[q for q in qualities if not q["name"].startswith("ai-") and q["name"] != "original"],
     )
+
+
+@library_pages.post("/library/play/<path:rel>/upscale")
+def request_upscale(rel: str):
+    video = _resolve(rel)
+    if not video.is_file() or video.suffix.lower() not in ml.VIDEO_EXTS:
+        abort(404)
+    conn = _catalog()
+    try:
+        info = _file_info(conn, video)
+    finally:
+        if conn is not None:
+            conn.close()
+    height = info["height"] or streaming.probe_media(video).height
+    state = _ai_state(info, height, _ai_snapshot())
+    if state is None:
+        flash("This video is already high resolution; there is no AI version to make.")
+    elif state["state"] == "ready":
+        flash(f"{state['label']} is already available in the quality menu.", "success")
+    elif state["state"] == "rendering":
+        flash(f"{state['label']} is rendering now.", "success")
+    else:
+        position = upscale.request_render(Path(info["source"]))
+        ahead = "next" if position == 0 else f"after {position} other request(s)"
+        flash(
+            f"{state['label']} queued: it renders {ahead}, once the current render finishes."
+            + _upscale_service_note(),
+            "success",
+        )
+    return redirect(url_for("library_pages.play_page", rel=_rel(video)))
 
 
 AI_VARIANTS = {"ai-4k": 2160, "ai-1080p": 1080}

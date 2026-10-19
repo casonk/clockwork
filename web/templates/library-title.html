@@ -19,6 +19,12 @@
       {% if item.video_codec %}<span class="badge">{{ item.video_codec }}</span>{% endif %}
       {% if item.audio_codec %}<span class="badge">{{ item.audio_codec }}{% if item.channels %} {{ item.channels }}ch{% endif %}</span>{% endif %}
       {% if item.duration_min %}<span class="badge">{{ item.duration_min }} min</span>{% endif %}
+      {% if item.ai %}
+        {% if item.ai.state == "ready" %}<span class="badge quality">✨ {{ item.ai.label }}</span>
+        {% elif item.ai.state == "rendering" %}<span class="badge kind">✨ rendering{% if item.ai.percent is not none %} {{ item.ai.percent }}%{% endif %}</span>
+        {% elif item.ai.state == "queued" %}<span class="badge kind">✨ queued</span>
+        {% elif item.ai.state == "failed" %}<span class="badge warn" title="{{ item.ai.reason }}">✨ failed</span>{% endif %}
+      {% endif %}
     </td>
     <td class="small" style="white-space:nowrap">{{ item.size }}</td>
     <td style="white-space:nowrap">
@@ -65,6 +71,16 @@
     </select>
     <button class="btn" type="submit">Move</button>
     <span class="small muted">Sync never moves it back.</span>
+  </form>
+</div>
+{% endif %}
+
+{% if ai_pending %}
+<div class="panel">
+  <form method="post" action="{{ url_for('library_pages.request_title_upscale', rel=rel) }}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="btn primary" type="submit">✨ Generate AI versions ({{ ai_pending }})</button>
+    <span class="small muted">Renders {{ "these episodes" if kind == "shows" else "this title" }} before the rest of the library; throttled, so it can take hours.</span>
   </form>
 </div>
 {% endif %}
