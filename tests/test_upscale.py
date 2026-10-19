@@ -107,16 +107,92 @@ def test_output_sizes_keep_aspect_and_even_width():
     assert upscale.output_size(1920, 800, 2160) == (5184, 2160)
 
 
-def test_encode_command_tags_bt709_and_reencodes_audio(tmp_path):
-    command = upscale.encode_command(
-        Path("/in.mp4"), tmp_path / "out.mkv", 1440, 1080, Fraction(30000, 1001), 1.5
-    )
-    assert command[command.index("-framerate") + 1] == "30000/1001"
-    assert command[command.index("-itsoffset") + 1] == "1.500000"
-    assert command[command.index("-colorspace") + 1] == "bt709"
-    assert command[command.index("-c:a") + 1] == "aac"
-    assert command[command.index("-c:v") + 1] == "hevc_nvenc"
+def test_chunks_are_video_only_and_the_join_encodes_audio_once(tmp_path):
+    chunk = upscale.chunk_command(tmp_path / "000000.mkv.part", 1440, 1080, Fraction(30000, 1001))
+    assert chunk[chunk.index("-framerate") + 1] == "30000/1001"
+    assert chunk[chunk.index("-colorspace") + 1] == "bt709"
+    assert chunk[chunk.index("-c:v") + 1] == "hevc_nvenc"
+    assert "-c:a" not in chunk and "-map" not in chunk
+
+    join = upscale.join_command(Path("/in.mp4"), tmp_path / "chunks.ffconcat", tmp_path / "o", 1.5)
+    assert join[join.index("-itsoffset") + 1] == "1.500000"
+    assert join[join.index("-f") + 1] == "concat"
+    assert join[join.index("-c:v") + 1] == "copy" and join[join.index("-c:a") + 1] == "aac"
     assert "-hwaccel" not in upscale.decode_command(Path("/in.mp4"))
+
+
+def test_decoder_seeks_roughly_and_keeps_source_timestamps():
+    command = upscale.decode_command(Path("/in.mkv"), 42.5)
+    assert command[command.index("-ss") + 1] == "42.500000"
+    assert command.index("-ss") < command.index("-i")
+    assert command[command.index("-enc_time_base:v") + 1] == "demux"
+    assert "-ss" not in upscale.decode_command(Path("/in.mkv"))
+
+
+def test_resume_point_is_found_by_frame_content():
+    frames = [bytes([n]) * 4 for n in range(100)]
+    tail = [upscale.frame_hash(f) for f in frames[46:50]]  # frames 46-49 already rendered
+
+    assert upscale.locate_resume(iter(frames), tail, expected=48, slack=10) == 50
+    # Not within the scanned window, or not unique (a still scene): give up.
+    assert upscale.locate_resume(iter(frames), tail, expected=20, slack=10) is None
+    still = [b"\0" * 4] * 100
+    still_tail = [upscale.frame_hash(still[0])] * 4
+    assert upscale.locate_resume(iter(still), still_tail, expected=50, slack=10) is None
+
+    stream = __import__("io").BytesIO(b"".join(frames[:3]) + b"xx")
+    assert list(upscale.read_frames(stream, 4)) == frames[:3]  # partial frame dropped
+
+
+def test_chunks_are_whole_segments_sized_for_about_a_minute_of_work():
+    rate = Fraction(24000, 1001)
+    assert upscale.next_chunk_end(0, rate, None) == 12  # first chunk: speed unknown
+    assert upscale.next_chunk_end(12, rate, 18.0) == 12 + 42  # 45 s of video, whole segments
+    assert upscale.next_chunk_end(0, rate, 1.5) == 6  # slow 4K renders: one segment
+    assert upscale.next_chunk_end(0, rate, 500.0) == 120  # capped
+    # Boundaries come from absolute times, so chunk frame counts never drift.
+    assert upscale.frame_index(12, rate) == 288 and upscale.frame_index(54, rate) == 1295
+
+
+def _job(tmp_path, model=upscale.LIVE_ACTION_MODEL):
+    return upscale.Job(
+        tmp_path / "in.mkv", tmp_path / "out.ai-4k.mkv", 1080, 2160, model, 60.0, "T"
+    )
+
+
+def test_manifest_resumes_matching_chunks_and_discards_others(tmp_path):
+    rate = Fraction(24, 1)
+    job = _job(tmp_path)
+    directory = upscale.chunk_dir(job.output)
+    assert directory.name == "out.ai-4k.mkv.chunks"
+
+    manifest = upscale.load_manifest(directory, job, rate)
+    assert manifest["chunks"] == [] and manifest["rate"] == "24/1"
+    manifest["chunks"].append({"file": "000000.mkv", "start_s": 0, "end_s": 12, "frames": 288})
+    upscale.save_manifest(directory, manifest)
+    (directory / "000000.mkv").write_bytes(b"x")
+
+    assert upscale.load_manifest(directory, job, rate)["chunks"][0]["frames"] == 288
+    listing = upscale.concat_list(directory, manifest, rate).read_text()
+    assert "file '000000.mkv'\nduration 12.000000" in listing
+
+    other = _job(tmp_path, model=upscale.ANIMATION_MODEL)
+    assert upscale.load_manifest(directory, other, rate)["chunks"] == []
+    assert not directory.exists()  # stale chunks removed
+
+    upscale.save_manifest(directory, manifest)  # chunk file missing: start over
+    assert upscale.load_manifest(directory, job, rate)["chunks"] == []
+
+
+def test_interrupted_renders_resume_before_new_ones(tmp_path):
+    root, conn = _catalog(tmp_path)
+    jobs = upscale.plan_jobs(root, conn)
+    hot_rod = next(j for j in jobs if j.title == "Hot Rod")
+    upscale.chunk_dir(hot_rod.output).mkdir(parents=True)
+
+    assert [j.title for j in upscale.plan_jobs(root, conn)][0] == "Hot Rod"
+    requested = [str(jobs[1].source)]
+    assert upscale.plan_jobs(root, conn, priority=requested)[0].title == jobs[1].title
 
 
 def test_status_and_failures_round_trip(tmp_path, monkeypatch):
@@ -282,3 +358,14 @@ def test_idle_worker_wakes_when_a_render_is_requested(tmp_path, monkeypatch):
     monkeypatch.setattr(upscale.time, "sleep", sleep)
     upscale.wait_for_request(3600, lambda: False, priority)
     assert clock[0] < 60
+
+
+def test_cooling_ends_at_once_when_the_service_stops():
+    fake = FakeClock()
+    stop = []
+    throttle = upscale.Throttle(
+        1.0, 72, 78, gpu=lambda: 80.0, cpu=lambda: 60.0, sleep=lambda s: stop.append(s),
+        clock=fake.clock, stopped=lambda: bool(stop),
+    )  # fmt: skip
+    throttle.guard()
+    assert stop == [30]  # one pause, then it notices the stop instead of waiting to cool
