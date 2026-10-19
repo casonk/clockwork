@@ -435,3 +435,34 @@ def test_title_page_queues_ai_renders_for_every_episode(client, library, probed,
     ]
     html = client.get(rel).get_data(as_text=True)
     assert "✨ queued" in html and "Generate AI versions" not in html
+
+
+def test_a_render_in_progress_can_be_watched(client, library, probed, ai_files, monkeypatch):
+    from fractions import Fraction
+
+    upscale = pages.upscale
+    rel = "/shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E01_1080p.mkv"
+    source = library / rel.lstrip("/")
+    directory = upscale.chunk_dir(upscale.output_path(library, source, 2160))
+    directory.mkdir(parents=True)
+    # 60 s at 23.976 fps ends on frame 1439 (60.018 s); the header keeps it at 60.
+    chunk = {"file": "000000.mkv", "frames": 1439, "start_s": 0.0, "end_s": 60.0}
+    manifest = {"source": str(source), "target": 2160, "chunks": [chunk]}
+    upscale.concat_list(directory, manifest, Fraction(24000, 1001))
+
+    html = client.get("/library/play" + rel).get_data(as_text=True)
+    assert 'value="ai-4k">✨ AI 4K (rendering: first 1:00)' in html
+    assert "first 1:00 rendered" in html and 'data-watch="ai-4k"' in html
+
+    sources = []
+
+    class FakeManager:
+        def session(self, src, quality=None):
+            sources.append(src)
+            info = pages.streaming.probe_partial(src)
+            return pages.streaming.Session("k", src, library, info)
+
+    monkeypatch.setattr(pages.streaming, "manager", lambda: FakeManager())
+    playlist = client.get("/library/stream" + rel + "/index.m3u8?q=original&v=ai-4k")
+    assert playlist.status_code == 200 and sources[-1] == directory / "chunks.ffconcat"
+    assert playlist.get_data(as_text=True).count("seg/") == 10  # 60 s in 6 s segments
