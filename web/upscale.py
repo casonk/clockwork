@@ -388,15 +388,28 @@ def request_render(source: Path, path: Path | None = None, failed_path: Path | N
 
     A video that failed before is retried.
     """
+    return request_renders([source], path, failed_path)[0]
+
+
+def request_renders(
+    sources: Iterable[Path], path: Path | None = None, failed_path: Path | None = None
+) -> list[int]:
+    """Promote requested videos ahead of older requests, preserving their input order."""
     path, failed_path = path or PRIORITY_FILE, failed_path or FAILED_FILE
     failed = load_failed(failed_path)
-    if failed.pop(str(source), None) is not None:
+    requested = list(dict.fromkeys(map(str, sources)))
+    failed_changed = False
+    for source in requested:
+        if failed.pop(source, None) is not None:
+            failed_changed = True
+    if failed_changed:
         failed_path.write_text(json.dumps(failed, indent=2))
     items = load_priority(path)
-    if str(source) not in items:
-        items.append(str(source))
+    promoted = requested + [item for item in items if item not in requested]
+    if promoted != items:
+        items = promoted
         _save_priority(items, path)
-    return items.index(str(source))
+    return [items.index(source) for source in requested]
 
 
 def drop_request(source: Path, path: Path | None = None) -> None:

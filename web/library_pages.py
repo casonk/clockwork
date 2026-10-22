@@ -326,17 +326,18 @@ def request_title_upscale(rel: str):
             conn.close()
     snapshot = _ai_snapshot()
     files.sort(key=lambda f: (f["season"] or 0, f["episode"] or 0, f["name"]))
-    queued = 0
+    sources = []
     for item in files:
         state = _ai_state(item, item["height"], snapshot)
         if state and state["state"] in ("none", "failed"):
-            upscale.request_render(Path(item["source"]))
-            queued += 1
+            sources.append(Path(item["source"]))
+    queued = len(sources)
     if queued:
+        upscale.request_renders(sources)
         start_note = _start_upscale_service()
         flash(
-            f"Queued {queued} AI render{'s' if queued != 1 else ''} ahead of the rest of the"
-            " library." + start_note,
+            f"Queued {queued} AI render{'s' if queued != 1 else ''} ahead of other requests and"
+            " background library renders, in episode order." + start_note,
             "success",
         )
     else:
@@ -442,7 +443,8 @@ def request_upscale(rel: str):
         ahead = "next" if position == 0 else f"after {position} other request(s)"
         start_note = _start_upscale_service()
         flash(
-            f"{state['label']} queued: it renders {ahead}, once the current render finishes."
+            f"{state['label']} queued {ahead} of other requests and background renders; it starts"
+            " once the current render yields."
             + start_note,
             "success",
         )
