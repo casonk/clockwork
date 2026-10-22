@@ -176,9 +176,10 @@ def test_play_page_plays_mp4_directly_and_streams_mkv(client, probed):
     mkv = client.get(
         "/library/play/shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E01_1080p.mkv"
     ).get_data(as_text=True)
+    video_tag = mkv.split("<video", 1)[1].split(">", 1)[0]
     assert 'data-hls="/library/stream/shows/Breaking' in mkv
     assert "index.m3u8" in mkv and "hls.min.js" in mkv and 'integrity="sha384-' in mkv
-    assert "hevc 10-bit → h264" in mkv and "data-direct" not in mkv
+    assert "hevc 10-bit → h264" in mkv and "data-direct" not in video_tag
     assert 'value="original">Original (1080p)' in mkv and 'value="720p">720p · ~4.2 Mb/s' in mkv
     assert "/sub/0.vtt" in mkv and "eng (embedded)" in mkv
     assert "Breaking Bad (2008)" in mkv
@@ -416,8 +417,15 @@ def test_player_links_previous_and_next_episode(client, probed, ai_files):
     first = client.get(
         "/library/play/shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E01_1080p.mkv"
     ).get_data(as_text=True)
+    video_tag = first.split("<video", 1)[1].split(">", 1)[0]
     assert 'data-next="/library/play/shows/Breaking' in first and "S01E02 ⏭" in first
-    assert "data-previous" not in first and 'id="autoplay"' in first and "Autoplay: on" in first
+    assert "data-previous" not in video_tag and 'id="autoplay"' in first and "Autoplay: on" in first
+    assert 'new URLSearchParams(window.location.search).get("autoplay") === "1"' in first
+    assert 'video.addEventListener("canplay"' in first
+    assert 'video.addEventListener("dblclick"' in first
+    assert "video.requestFullscreen()" in first and "document.exitFullscreen()" in first
+    assert 'fetch(url, { headers: { Accept: "text/html" } })' in first
+    assert "window.history.pushState" in first
     second = client.get(
         "/library/play/shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E02_1080p.mkv"
     ).get_data(as_text=True)

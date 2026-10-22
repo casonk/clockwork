@@ -55,7 +55,7 @@
   <a class="btn" href="{{ url_for('library_pages.media_file', rel=info.rel, download=1) }}">⬇ Download</a>
   <a class="btn" href="{{ url_for('library_pages.title_page', rel=title_rel) }}">← Back to title</a>
 </div>
-<div class="panel" style="margin-top:12px">
+<div class="panel" id="versions" style="margin-top:12px">
   <div class="small muted" style="margin-bottom:6px">Versions</div>
   <table class="versions small">
     <tr>
@@ -106,10 +106,12 @@
   const status = document.getElementById("stream-status");
   const select = document.getElementById("quality");
   const badge = document.getElementById("mode-badge");
-  const hlsBase = video.dataset.hls;
-  const directSrc = video.dataset.direct;
   const storageKey = "clockwork-library-quality";
+  const autoplayKey = "clockwork-library-autoplay";
+  let autoStartPending = new URLSearchParams(window.location.search).get("autoplay") === "1";
+  video.autoplay = autoStartPending;
   let hls = null;
+  let countdown = null;
 
   function show(message, kind) {
     status.className = "flash " + (kind || "");
@@ -124,26 +126,42 @@
     try { localStorage.setItem(storageKey, value); } catch (_err) { /* private mode */ }
   }
 
-  function resumeAt(time, playing) {
-    if (!time) { if (playing) video.play().catch(function () {}); return; }
+  function resumeAt(time, playing, startPlayback) {
+    const play = function () {
+      video.play().catch(function () { show("Press play to continue."); });
+    };
+    const playWhenReady = function () {
+      if (video.readyState >= 3) play();
+      else video.addEventListener("canplay", play, { once: true });
+    };
+    if (!time) {
+      if (startPlayback) playWhenReady();
+      else if (playing) play();
+      return;
+    }
     const jump = function () {
       video.currentTime = time;
-      if (playing) video.play().catch(function () {});
+      if (startPlayback) playWhenReady();
+      else if (playing) play();
     };
     if (video.readyState >= 1) jump();
     else video.addEventListener("loadedmetadata", jump, { once: true });
   }
 
-  function load(quality) {
+  function load(quality, startPlayback) {
     const time = video.currentTime;
     const playing = !video.paused;
+    const hlsBase = video.dataset.hls;
+    const directSrc = video.dataset.direct;
+    startPlayback = Boolean(startPlayback);
+    video.autoplay = startPlayback;
     if (hls) { hls.destroy(); hls = null; }
     show("");
     if (quality === "original" && directSrc) {
       badge.textContent = "direct play";
       badge.className = "badge quality";
       video.src = directSrc;
-      resumeAt(time, playing);
+      resumeAt(time, playing, startPlayback);
       return;
     }
     const ai = quality.indexOf("ai-") === 0;
@@ -160,7 +178,7 @@
     if (!window.Hls || !window.Hls.isSupported()) {
       if (video.canPlayType("application/vnd.apple.mpegurl")) {
         video.src = source;
-        resumeAt(time, playing);
+        resumeAt(time, playing, startPlayback);
       } else {
         show("This browser cannot stream here. Use the download button and open the file in VLC.", "error");
       }
@@ -175,7 +193,7 @@
     window.libraryHls = hls;  // handy when debugging from the console
     hls.loadSource(source);
     hls.attachMedia(video);
-    if (playing) video.play().catch(function () {});
+    if (playing || startPlayback) resumeAt(time, playing, startPlayback);
     hls.on(window.Hls.Events.ERROR, function (_event, data) {
       if (!data.fatal) return;
       if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) {
@@ -189,39 +207,123 @@
     });
   }
 
-  const autoplay = document.getElementById("autoplay");
-  const autoplayKey = "clockwork-library-autoplay";
-  let countdown = null;
+  const navRow = document.querySelector(".nav-row");
 
-  function go(url, play) {
-    if (url) window.location.href = url + (play ? "?autoplay=1" : "");
+  function autoplayOn() {
+    const button = document.getElementById("autoplay");
+    return button && button.getAttribute("aria-pressed") === "true";
   }
-
-  function autoplayOn() { return autoplay && autoplay.getAttribute("aria-pressed") === "true"; }
 
   function setAutoplay(on) {
-    autoplay.setAttribute("aria-pressed", on ? "true" : "false");
-    autoplay.textContent = on ? "⏵ Autoplay: on" : "⏸ Autoplay: off";
-    autoplay.className = on ? "btn primary" : "btn";
+    const button = document.getElementById("autoplay");
+    if (!button) return;
+    button.setAttribute("aria-pressed", on ? "true" : "false");
+    button.textContent = on ? "⏵ Autoplay: on" : "⏸ Autoplay: off";
+    button.className = on ? "btn primary" : "btn";
   }
 
-  if (autoplay) {
+  function saveAutoplay(on) {
+    try { localStorage.setItem(autoplayKey, on ? "1" : "0"); } catch (_err) { /* private mode */ }
+  }
+
+  function restoreAutoplay() {
     let saved = null;
     try { saved = localStorage.getItem(autoplayKey); } catch (_err) { /* private mode */ }
     setAutoplay(saved !== "0");
-    autoplay.addEventListener("click", function () {
+  }
+
+  restoreAutoplay();
+  if (navRow) {
+    navRow.addEventListener("click", function (event) {
+      const button = event.target.closest && event.target.closest("#autoplay");
+      if (!button) return;
       const on = !autoplayOn();
       setAutoplay(on);
-      try { localStorage.setItem(autoplayKey, on ? "1" : "0"); } catch (_err) { /* private mode */ }
+      saveAutoplay(on);
       if (!on && countdown) { clearInterval(countdown); countdown = null; show(""); }
     });
   }
+
+  function replaceChildren(target, source) {
+    target.replaceChildren(...Array.from(source.childNodes, function (node) {
+      return node.cloneNode(true);
+    }));
+  }
+
+  async function go(url, play) {
+    if (!url) return;
+    if (!play) { window.location.href = url; return; }
+
+    const nextUrl = url + (url.indexOf("?") === -1 ? "?" : "&") + "autoplay=1";
+    try {
+      const response = await fetch(url, { headers: { Accept: "text/html" } });
+      if (!response.ok) throw new Error("Could not load the next video page");
+      const nextPage = new DOMParser().parseFromString(await response.text(), "text/html");
+      const nextVideo = nextPage.getElementById("player");
+      const nextQuality = nextPage.getElementById("quality");
+      if (!nextVideo || !nextQuality) throw new Error("Next video page is incomplete");
+
+      document.title = nextPage.title;
+      const heading = document.querySelector("header h1");
+      const nextHeading = nextPage.querySelector("header h1");
+      const subtitle = document.querySelector(".header-left .subtitle");
+      const nextSubtitle = nextPage.querySelector(".header-left .subtitle");
+      if (heading && nextHeading) heading.textContent = nextHeading.textContent;
+      if (subtitle && nextSubtitle) replaceChildren(subtitle, nextSubtitle);
+
+      ["data-next", "data-next-label", "data-previous", "data-hls", "data-direct"].forEach(function (name) {
+        if (nextVideo.hasAttribute(name)) video.setAttribute(name, nextVideo.getAttribute(name));
+        else video.removeAttribute(name);
+      });
+      replaceChildren(video, nextVideo);
+
+      const currentQuality = select.value;
+      select.innerHTML = nextQuality.innerHTML;
+      select.value = [...select.options].some(function (option) { return option.value === currentQuality; })
+        ? currentQuality : "original";
+      const nextBadge = nextPage.getElementById("mode-badge");
+      if (nextBadge) badge.dataset.converted = nextBadge.dataset.converted || "";
+
+      const currentVersions = document.getElementById("versions");
+      const nextVersions = nextPage.getElementById("versions");
+      if (currentVersions && nextVersions) currentVersions.replaceWith(nextVersions.cloneNode(true));
+      const nextNavRow = nextPage.querySelector(".nav-row");
+      if (navRow && nextNavRow) replaceChildren(navRow, nextNavRow);
+      restoreAutoplay();
+
+      window.history.pushState({ autoplay: true }, "", nextUrl);
+      video.pause();
+      video.currentTime = 0;
+      autoStartPending = true;
+      video.autoplay = true;
+      load(select.value, true);
+    } catch (_error) {
+      window.location.href = nextUrl;
+    }
+  }
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement === video) {
+      Promise.resolve(document.exitFullscreen()).catch(function () {});
+    } else if (video.webkitDisplayingFullscreen && video.webkitExitFullscreen) {
+      video.webkitExitFullscreen();
+    } else if (!document.fullscreenElement && video.requestFullscreen) {
+      Promise.resolve(video.requestFullscreen()).catch(function () {});
+    } else if (!document.fullscreenElement && video.webkitEnterFullscreen) {
+      video.webkitEnterFullscreen();
+    }
+  }
+
+  video.addEventListener("dblclick", function (event) {
+    event.preventDefault();
+    toggleFullscreen();
+  });
 
   video.addEventListener("ended", function () {
     if (!video.dataset.next || !autoplayOn()) return;
     let left = 8;
     const tick = function () {
-      if (left <= 0) { clearInterval(countdown); go(video.dataset.next, true); return; }
+      if (left <= 0) { clearInterval(countdown); countdown = null; go(video.dataset.next, true); return; }
       show("Next: " + video.dataset.nextLabel + " in " + left + " s. Turn Autoplay off to stay.");
       left -= 1;
     };
@@ -236,17 +338,22 @@
     else if (event.key === "P") go(video.dataset.previous, !video.paused);
   });
 
-  document.querySelectorAll("[data-watch]").forEach(function (button) {
-    button.addEventListener("click", function () {
-      select.value = button.dataset.watch;
-      select.dispatchEvent(new Event("change"));
-      video.play().catch(function () {});
-      video.scrollIntoView({ behavior: "smooth", block: "center" });
-    });
+  document.addEventListener("click", function (event) {
+    const button = event.target.closest && event.target.closest("[data-watch]");
+    if (!button) return;
+    select.value = button.dataset.watch;
+    select.dispatchEvent(new Event("change"));
+    video.play().catch(function () {});
+    video.scrollIntoView({ behavior: "smooth", block: "center" });
   });
 
   video.addEventListener("waiting", function () { if (hls) show("Converting… playback resumes in a moment."); });
-  video.addEventListener("playing", function () { show(""); });
+  video.addEventListener("playing", function () {
+    autoStartPending = false;
+    video.autoplay = false;
+    show("");
+  });
+  window.addEventListener("popstate", function () { window.location.reload(); });
   select.addEventListener("change", function () {
     remember(select.value);
     load(select.value);
@@ -256,10 +363,7 @@
   if (saved && [...select.options].some(function (o) { return o.value === saved; })) {
     select.value = saved;
   }
-  load(select.value);
-  if (new URLSearchParams(window.location.search).get("autoplay") === "1") {
-    video.play().catch(function () { show("Press play to continue."); });
-  }
+  load(select.value, autoStartPending);
 })();
 </script>
 {% endblock %}
