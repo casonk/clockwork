@@ -14,6 +14,13 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
+- Configure central-ecu to recognize active HLS `ffmpeg` processes at live
+  priority; it observes process activity rather than requiring an app token
+  API. Give each episode render its own ECU lease so unattended work can use
+  batch priority and a requested render can use interactive priority. Keep the
+  queue coordinator out of the consumer list to avoid stopping the service
+  that launches the per-render lease. Promote on-demand requests while
+  preserving title episode order.
 - Per-job scheduler controls must select exactly one manifest job; invoking a
   whole-manifest installer can overwrite loaded sibling artifacts and leave
   their in-memory scheduler definitions stale.

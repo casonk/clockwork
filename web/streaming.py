@@ -451,11 +451,15 @@ class StreamManager:
     def _start(self, session: Session, index: int) -> None:
         session.stop()
         session.run_start = index
+        encoder = self.encoder()
         command = transcode_command(
-            session.source, session.directory, index, self.encoder(), session.quality
+            session.source, session.directory, index, encoder, session.quality
         )
         session.process = self.popen(
-            command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
         )
 
     def _throttle(self, session: Session, index: int, done: set[int]) -> None:

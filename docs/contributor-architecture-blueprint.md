@@ -57,6 +57,19 @@ workload logic.
 - Favor deterministic text rendering over runtime mutation or hidden side
   effects.
 
+## GPU Workload Handoff
+
+- central-ecu observes active HLS ffmpeg processes as GPU activities. Its local
+  config should classify `ffmpeg` at `live` priority and enable preemption for
+  opted-in ECU leases. Clockwork does not call a token API.
+- Library-wide AI renders remain background work. A title or player request
+  enters the front of the queue, starts the worker if needed, and causes the
+  current background render to save its next chunk and yield.
+- Title-wide requests enter as an episode-ordered batch. After requested work
+  completes, unattended rendering resumes from its manifest. Each episode
+  render gets its own ECU lease at batch or interactive priority. The queue
+  service itself must not also be registered as a GPU consumer.
+
 ## Downstream Examples
 
 - `examples/traction-control/archility-weekly.toml`
