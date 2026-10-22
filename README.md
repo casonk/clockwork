@@ -240,9 +240,12 @@ Unattended library renders use low CPU and I/O priority. A render requested
 from a title or player page moves to the front of the queue, starts the worker
 if needed, and causes the current render to yield after its next saved chunk.
 Title-wide requests keep episode order. The render resumes from its saved
-manifest after the requested work completes. central-ecu separately observes
-active ffmpeg streams and holds or preempts lower-priority ECU-managed work
-according to its activity configuration.
+manifest after the requested work completes. Each episode render acquires an
+ECU lease: unattended work uses `batch` priority, requested work uses
+`interactive`, and both are preemptible by higher-priority live playback. The
+systemd service is only the queue coordinator; do not register it as a GPU
+consumer in central-ecu because the episode render itself owns the lease. If
+central-ecu is unavailable, unattended work falls back to low OS priority.
 
 Measured on an RTX 3090: unthrottled, 360p animation runs about 85 fps (3x
 real time) and 1080p live action to 4K about 6 fps, at 300 W and over 90 C.

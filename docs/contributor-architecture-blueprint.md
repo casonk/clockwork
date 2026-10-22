@@ -66,7 +66,9 @@ workload logic.
   enters the front of the queue, starts the worker if needed, and causes the
   current background render to save its next chunk and yield.
 - Title-wide requests enter as an episode-ordered batch. After requested work
-  completes, unattended rendering resumes from its manifest.
+  completes, unattended rendering resumes from its manifest. Each episode
+  render gets its own ECU lease at batch or interactive priority. The queue
+  service itself must not also be registered as a GPU consumer.
 
 ## Downstream Examples
 

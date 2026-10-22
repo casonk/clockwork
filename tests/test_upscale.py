@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from fractions import Fraction
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "web"))
 
+import ecu  # noqa: E402
 import media_library as ml  # noqa: E402
 import upscale  # noqa: E402
 
@@ -337,6 +339,45 @@ def test_batch_requests_preempt_old_requests_and_keep_input_order(tmp_path):
         str(second_episode),
         str(older),
     ]
+
+
+def test_requested_render_uses_interactive_preemptible_ecu_lease(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(ecu, "_command", lambda: (["ecu"], {"TEST": "1"}))
+    monkeypatch.setattr(
+        ecu,
+        "subprocess",
+        type(
+            "FakeSubprocess",
+            (),
+            {
+                "run": staticmethod(
+                    lambda command, **kwargs: calls.append((command, kwargs))
+                    or subprocess.CompletedProcess(command, 0)
+                )
+            },
+        ),
+    )
+    source = tmp_path / "episode.mkv"
+
+    result = ecu.run_render("interactive", tmp_path, tmp_path / "catalog.db", 100, source)
+
+    assert result == 0
+    command, options = calls[0]
+    assert command[:8] == [
+        "ecu",
+        "run",
+        "--gpu",
+        "quiet",
+        "--priority",
+        "interactive",
+        "--preemptible",
+        "--max-wait",
+    ]
+    assert command[8:11] == ["24h", "--wait", "--"]
+    assert command[-2] == "render-one"
+    assert command[-1] == str(source)
+    assert options["env"] == {"TEST": "1"}
 
 
 def test_render_state_reports_each_stage(tmp_path):

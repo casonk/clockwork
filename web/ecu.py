@@ -1,0 +1,81 @@
+"""Run one render under central-ecu's GPU lease and priority policy."""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+REQUEUED = 75
+
+
+def _command() -> tuple[list[str], dict[str, str]] | None:
+    installed = shutil.which("ecu")
+    if installed:
+        return [installed], os.environ.copy()
+    source = os.environ.get("CENTRAL_ECU_SOURCE")
+    if not source:
+        source = str(Path(__file__).resolve().parents[2] / "central-ecu" / "src")
+    source_path = Path(source)
+    if not (source_path / "central_ecu" / "__main__.py").is_file():
+        return None
+    environment = os.environ.copy()
+    current = environment.get("PYTHONPATH", "")
+    environment["PYTHONPATH"] = str(source_path) + (os.pathsep + current if current else "")
+    return [sys.executable, "-m", "central_ecu"], environment
+
+
+def run_render(
+    priority: str,
+    root: Path,
+    db: Path,
+    min_free_gb: float,
+    source: Path,
+) -> int:
+    """Run one resumable render; ECU preemption and queue yield request a retry."""
+    render = [
+        sys.executable,
+        str(Path(__file__).with_name("upscale.py")),
+        "--root",
+        str(root),
+        "--db",
+        str(db),
+        "--min-free-gb",
+        str(min_free_gb),
+        "render-one",
+        str(source),
+    ]
+    command = _command()
+    if command is None:
+        if priority == "batch":
+            ionice = shutil.which("ionice")
+            nice = shutil.which("nice")
+            if ionice:
+                render = [ionice, "-c", "3", *render]
+            if nice:
+                render = [nice, "-n", "19", *render]
+        return subprocess.run(render, check=False).returncode
+    ecu, environment = command
+    result = subprocess.run(
+        [
+            *ecu,
+            "run",
+            "--gpu",
+            "quiet",
+            "--priority",
+            priority,
+            "--preemptible",
+            "--max-wait",
+            "24h",
+            "--wait",
+            "--",
+            *render,
+        ],
+        env=environment,
+        check=False,
+    )
+    # ECU uses the child's signal exit code if it needed to force-kill after
+    # the graceful preemption window. The saved chunk remains resumable.
+    return REQUEUED if result.returncode == 241 else result.returncode
