@@ -28,11 +28,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-try:
-    from web import ecu
-except ModuleNotFoundError:
-    import ecu
-
 SEGMENT_SECONDS = 6
 IDLE_SECONDS = 600
 MAX_SESSIONS = 3
@@ -322,8 +317,6 @@ class Session:
     run_start: int = 0
     last_index: int = 0
     paused: bool = False
-    activity_token: str | None = None
-    activity_stop: Callable[[str | None], None] | None = field(default=None, repr=False)
     source_mtime: float = 0.0
     last_access: float = field(default_factory=time.time)
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -353,12 +346,7 @@ class Session:
         return max(listed, default=self.run_start - 1)
 
     def running(self) -> bool:
-        active = self.process is not None and self.process.poll() is None
-        if not active and self.activity_token:
-            if self.activity_stop:
-                self.activity_stop(self.activity_token)
-            self.activity_token = None
-        return active
+        return self.process is not None and self.process.poll() is None
 
     def stop(self) -> None:
         if self.process is not None and self.process.poll() is None:
@@ -371,10 +359,6 @@ class Session:
                 self.process.kill()
         self.process = None
         self.paused = False
-        if self.activity_token:
-            if self.activity_stop:
-                self.activity_stop(self.activity_token)
-            self.activity_token = None
 
 
 class StreamManager:
@@ -385,8 +369,6 @@ class StreamManager:
         encoder: Callable[[], str] = pick_encoder,
         probe: Callable[[Path], MediaInfo] = probe_media,
         popen: Callable[..., subprocess.Popen] = subprocess.Popen,
-        activity_start: Callable[[str], str | None] | None = None,
-        activity_stop: Callable[[str | None], None] | None = None,
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
@@ -394,8 +376,6 @@ class StreamManager:
         self.encoder = encoder
         self.probe = probe
         self.popen = popen
-        self.activity_start = activity_start
-        self.activity_stop = activity_stop
         self.clock = clock
         self.sleep = sleep
         self.sessions: dict[str, Session] = {}
@@ -425,7 +405,6 @@ class StreamManager:
                 directory.mkdir(parents=True, exist_ok=True)
                 info = self.probe(source)
                 session = Session(key, source, directory, info, for_source(chosen, info))
-                session.activity_stop = self.activity_stop
                 session.source_mtime = stat.st_mtime
                 self.sessions[key] = session
                 self._enforce_limit(keep=key)
@@ -476,23 +455,12 @@ class StreamManager:
         command = transcode_command(
             session.source, session.directory, index, encoder, session.quality
         )
-        session.activity_token = (
-            self.activity_start("clockwork-stream")
-            if self.activity_start and "nvenc" in encoder.casefold()
-            else None
+        session.process = self.popen(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
         )
-        try:
-            session.process = self.popen(
-                command,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-        except Exception:
-            if self.activity_stop:
-                self.activity_stop(session.activity_token)
-            session.activity_token = None
-            raise
 
     def _throttle(self, session: Session, index: int, done: set[int]) -> None:
         if not session.running():
@@ -579,9 +547,6 @@ def manager() -> StreamManager:
     global _MANAGER
     with _MANAGER_LOCK:
         if _MANAGER is None:
-            _MANAGER = StreamManager(
-                activity_start=ecu.start_activity,
-                activity_stop=ecu.stop_activity,
-            )
+            _MANAGER = StreamManager()
             threading.Thread(target=_MANAGER.reap_forever, daemon=True).start()
         return _MANAGER

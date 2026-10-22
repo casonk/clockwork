@@ -59,18 +59,14 @@ workload logic.
 
 ## GPU Workload Handoff
 
-- An NVENC HLS transcode registers one foreground activity token before ffmpeg
-  starts and releases it when that process exits. ECU uses the token to hold
-  lower-priority leases and yield its configured background consumers.
+- central-ecu observes active HLS ffmpeg processes as GPU activities. Its local
+  config should classify `ffmpeg` at `live` priority and enable preemption for
+  opted-in ECU leases. Clockwork does not call a token API.
 - Library-wide AI renders remain background work. A title or player request
   enters the front of the queue, starts the worker if needed, and causes the
   current background render to save its next chunk and yield.
-- A requested render holds a foreground activity while it runs. Playback and
-  requested rendering may overlap; unattended rendering resumes from its
-  manifest after foreground work releases.
-- Runtime GPU coordination uses the installed `ecu` command or the private
-  `CENTRAL_ECU_SOURCE` environment setting. Do not put machine-specific source
-  paths in tracked manifests.
+- Title-wide requests enter as an episode-ordered batch. After requested work
+  completes, unattended rendering resumes from its manifest.
 
 ## Downstream Examples
 

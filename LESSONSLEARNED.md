@@ -14,10 +14,10 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
-- Register active HLS transcodes with central-ecu for their full process
-  lifetime. Keep unattended AI renders as a yieldable background consumer;
-  on-demand requests need a distinct foreground activity and should enter
-  ahead of the unattended queue.
+- Configure central-ecu to recognize active HLS `ffmpeg` processes at live
+  priority; it observes process activity rather than requiring an app token
+  API. Keep unattended AI renders low priority, and put on-demand requests at
+  the front of their application queue while preserving title episode order.
 - Per-job scheduler controls must select exactly one manifest job; invoking a
   whole-manifest installer can overwrite loaded sibling artifacts and leave
   their in-memory scheduler definitions stale.
