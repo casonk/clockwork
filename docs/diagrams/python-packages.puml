@@ -8,16 +8,24 @@ rectangle "src.clockwork.cli\n1 python file" as src.clockwork.cli
 rectangle "src.clockwork.manifest\n1 python file" as src.clockwork.manifest
 rectangle "src.clockwork.model\n1 python file" as src.clockwork.model
 rectangle "src.clockwork.render\n1 python file" as src.clockwork.render
-rectangle "web\n0 child pkg, 3 modules\n4 python files\nexamples: app, security, status_helpers" as web
+rectangle "web\n0 child pkg, 7 modules\n8 python files\nexamples: app, library_pages, media_library" as web
 rectangle "web.app\n1 python file" as web.app
+rectangle "web.library_pages\n1 python file" as web.library_pages
+rectangle "web.media_library\n1 python file" as web.media_library
 rectangle "web.security\n1 python file" as web.security
 rectangle "web.status_helpers\n1 python file" as web.status_helpers
+rectangle "web.streaming\n1 python file" as web.streaming
+rectangle "web.upscale\n1 python file" as web.upscale
 src.clockwork.__main__ --> src.clockwork.cli
 src.clockwork.cli --> src.clockwork.manifest
 src.clockwork.cli --> src.clockwork.model
 src.clockwork.cli --> src.clockwork.render
 src.clockwork.manifest --> src.clockwork.model
 src.clockwork.render --> src.clockwork.model
+web.app --> web
+web.app --> web.library_pages
 web.app --> web.security
 web.app --> web.status_helpers
+web.library_pages --> web
+web.upscale --> web
 @enduml
