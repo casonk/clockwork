@@ -49,8 +49,10 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from web import ecu
     from web import media_library as ml
 except ModuleNotFoundError:
+    import ecu
     import media_library as ml
 
 UPSCALED_DIR = ".upscaled"
@@ -114,6 +116,10 @@ class Job:
     @property
     def estimated_bytes(self) -> int:
         return int(ESTIMATED_MBPS[self.target_height] * 1_000_000 / 8 * self.duration)
+
+
+class YieldToRequest(Exception):
+    """The background render saved its last chunk for an on-demand request."""
 
 
 def target_height(source_height: int | None) -> int | None:
@@ -382,15 +388,28 @@ def request_render(source: Path, path: Path | None = None, failed_path: Path | N
 
     A video that failed before is retried.
     """
+    return request_renders([source], path, failed_path)[0]
+
+
+def request_renders(
+    sources: Iterable[Path], path: Path | None = None, failed_path: Path | None = None
+) -> list[int]:
+    """Promote requested videos ahead of older requests, preserving their input order."""
     path, failed_path = path or PRIORITY_FILE, failed_path or FAILED_FILE
     failed = load_failed(failed_path)
-    if failed.pop(str(source), None) is not None:
+    requested = list(dict.fromkeys(map(str, sources)))
+    failed_changed = False
+    for source in requested:
+        if failed.pop(source, None) is not None:
+            failed_changed = True
+    if failed_changed:
         failed_path.write_text(json.dumps(failed, indent=2))
     items = load_priority(path)
-    if str(source) not in items:
-        items.append(str(source))
+    promoted = requested + [item for item in items if item not in requested]
+    if promoted != items:
+        items = promoted
         _save_priority(items, path)
-    return items.index(str(source))
+    return [items.index(source) for source in requested]
 
 
 def drop_request(source: Path, path: Path | None = None) -> None:
@@ -656,6 +675,7 @@ class Renderer:
         self.model_dir = model_dir
         self.models: dict[str, Any] = {}
         self.stop_event = threading.Event()
+        self.yield_requested: Callable[[Job], bool] = lambda _job: False
         # Rests and cooling pauses end at once when the service is stopped.
         self.throttle = Throttle(sleep=self.stop_event.wait, stopped=self.stop_event.is_set)
         torch.set_num_threads(THREADS)
@@ -734,6 +754,8 @@ class Renderer:
                 self.throttle.rest(worked)
                 if self.stopping:
                     raise InterruptedError("stopped")
+                if self.yield_requested(job):
+                    raise YieldToRequest
             if decoder.wait() != 0:
                 raise RuntimeError("ffmpeg decode failed")
             if not manifest["chunks"]:
@@ -892,16 +914,58 @@ def wait_for_request(
             return
 
 
-def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
+def render_one(root: Path, db: Path, min_free_gb: float, source: Path) -> int:
+    """Render one selected source under its ECU lease; 75 means replan the queue."""
+    conn = ml.connect(db)
+    jobs = plan_jobs(root, conn, load_failed(), load_priority())
+    conn.close()
+    job = next((candidate for candidate in jobs if candidate.source == source), None)
+    if job is None:
+        return 0
+    if not has_room(root, job, min_free_gb):
+        return ecu.REQUEUED
+
     renderer = Renderer()
+    signal.signal(signal.SIGTERM, lambda _signum, _frame: renderer.stop())
+    signal.signal(signal.SIGINT, lambda _signum, _frame: renderer.stop())
+    base = {"state": "idle", "queued": len(jobs), "finished": 0}
+    progress = progress_reporter(job, {**base, "duty": renderer.throttle.duty})
 
-    def stop(_signum, _frame):
-        renderer.stop()
+    def cooling(
+        temps: dict[str, float | None], job: Job = job, base: dict[str, Any] = base
+    ) -> None:
+        write_status(
+            {
+                **base,
+                "state": "cooling",
+                "title": job.title,
+                "source": str(job.source),
+                **temps,
+            }
+        )
 
-    signal.signal(signal.SIGTERM, stop)
-    signal.signal(signal.SIGINT, stop)
+    renderer.throttle.on_cooling = cooling
+    renderer.yield_requested = lambda current: bool(
+        (requests := load_priority()) and requests[0] != str(current.source)
+    )
+    try:
+        renderer.render(job, progress)
+    except YieldToRequest:
+        return ecu.REQUEUED
+    except InterruptedError:
+        return ecu.REQUEUED
+    except Exception as exc:  # noqa: BLE001 - one bad file must not stop the queue
+        print(f"upscale failed for {job.source}: {exc}", file=sys.stderr)
+        record_failure(job.source, str(exc))
+    return 0
+
+
+def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
+    stopping = threading.Event()
+    signal.signal(signal.SIGTERM, lambda _signum, _frame: stopping.set())
+    signal.signal(signal.SIGINT, lambda _signum, _frame: stopping.set())
     finished = 0
-    while not renderer.stopping:
+    while not stopping.is_set():
         conn = ml.connect(db)
         jobs = plan_jobs(root, conn, load_failed(), load_priority())
         conn.close()
@@ -912,39 +976,31 @@ def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
             write_status({**base, "state": "done"})
             if once:
                 return 0
-            wait_for_request(3600, lambda: renderer.stopping)
+            wait_for_request(3600, stopping.is_set)
             continue
         job = jobs[0]
         if not has_room(root, job, min_free_gb):
             write_status({**base, "state": "disk-floor", "next": job.title})
             if once:
                 return 0
-            wait_for_request(3600, lambda: renderer.stopping)
+            wait_for_request(3600, stopping.is_set)
             continue
-        progress = progress_reporter(job, {**base, "duty": renderer.throttle.duty})
-
-        def cooling(
-            temps: dict[str, float | None], job: Job = job, base: dict[str, Any] = base
-        ) -> None:
-            write_status(
-                {
-                    **base,
-                    "state": "cooling",
-                    "title": job.title,
-                    "source": str(job.source),
-                    **temps,
-                }
-            )
-
-        renderer.throttle.on_cooling = cooling
+        priority = "interactive" if str(job.source) in load_priority() else "batch"
         try:
-            renderer.render(job, progress)
-            finished += 1
-        except InterruptedError:
-            break
-        except Exception as exc:  # noqa: BLE001 - one bad file must not stop the queue
-            print(f"upscale failed for {job.source}: {exc}", file=sys.stderr)
-            record_failure(job.source, str(exc))
+            result = ecu.run_render(priority, root, db, min_free_gb, job.source)
+            if result == ecu.REQUEUED:
+                if once:
+                    break
+                continue
+            if result != 0:
+                write_status({**base, "state": "ecu-error", "next": job.title})
+                return result
+            if str(job.source) not in load_failed():
+                finished += 1
+        except Exception as exc:  # noqa: BLE001 - a failed lease can be retried on restart
+            print(f"ECU render lease failed for {job.source}: {exc}", file=sys.stderr)
+            write_status({**base, "state": "ecu-error", "next": job.title})
+            return 2
         drop_request(job.source)
         if once:
             break
@@ -960,6 +1016,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     run_parser = sub.add_parser("run", help="render until the queue is empty or the disk floor")
     run_parser.add_argument("--once", action="store_true", help="render one video and exit")
+    render_parser = sub.add_parser("render-one", help=argparse.SUPPRESS)
+    render_parser.add_argument("source", type=Path)
     sub.add_parser("queue", help="list the render queue")
     args = parser.parse_args(argv)
     if args.command == "queue":
@@ -973,6 +1031,8 @@ def main(argv: list[str] | None = None) -> int:
                 f"  {job.source_height}p -> {job.target_height}p  {job.model:28} {job.source.name}"
             )
         return 0
+    if args.command == "render-one":
+        return render_one(args.root, args.db, args.min_free_gb, args.source)
     return run(args.root, args.db, args.min_free_gb, once=args.once)
 
 

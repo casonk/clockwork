@@ -294,11 +294,23 @@ def change_genre(rel: str):
     return redirect(url_for("library_pages.title_page", rel=_rel(target)))
 
 
-def _upscale_service_note() -> str:
+def _start_upscale_service() -> str:
     state = _systemctl_show(f"{upscale.SERVICE}.service", "ActiveState").get("ActiveState")
     if state == "active":
-        return ""
-    return " AI upscaling is stopped; start it on the Manage page to render."
+        return " AI upscaling is active."
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "start", "--no-block", f"{upscale.SERVICE}.service"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f" Could not start AI upscaling: {exc}"
+    if result.returncode:
+        return f" Could not start AI upscaling: {result.stderr.strip()}"
+    return " AI upscaling started."
 
 
 @library_pages.post("/library/title/<path:rel>/upscale")
@@ -314,16 +326,18 @@ def request_title_upscale(rel: str):
             conn.close()
     snapshot = _ai_snapshot()
     files.sort(key=lambda f: (f["season"] or 0, f["episode"] or 0, f["name"]))
-    queued = 0
+    sources = []
     for item in files:
         state = _ai_state(item, item["height"], snapshot)
         if state and state["state"] in ("none", "failed"):
-            upscale.request_render(Path(item["source"]))
-            queued += 1
+            sources.append(Path(item["source"]))
+    queued = len(sources)
     if queued:
+        upscale.request_renders(sources)
+        start_note = _start_upscale_service()
         flash(
-            f"Queued {queued} AI render{'s' if queued != 1 else ''} ahead of the rest of the"
-            " library." + _upscale_service_note(),
+            f"Queued {queued} AI render{'s' if queued != 1 else ''} ahead of other requests and"
+            " background library renders, in episode order." + start_note,
             "success",
         )
     else:
@@ -427,9 +441,10 @@ def request_upscale(rel: str):
     else:
         position = upscale.request_render(Path(info["source"]))
         ahead = "next" if position == 0 else f"after {position} other request(s)"
+        start_note = _start_upscale_service()
         flash(
-            f"{state['label']} queued: it renders {ahead}, once the current render finishes."
-            + _upscale_service_note(),
+            f"{state['label']} queued {ahead} of other requests and background renders; it starts"
+            " once the current render yields." + start_note,
             "success",
         )
     return redirect(url_for("library_pages.play_page", rel=_rel(video)))
