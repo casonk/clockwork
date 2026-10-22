@@ -299,7 +299,7 @@ def test_cpu_temperature_reads_the_package_sensor(tmp_path):
     assert upscale.cpu_temperature(tmp_path / "missing") is None
 
 
-def test_requested_videos_jump_the_queue_in_request_order(tmp_path):
+def test_new_requests_move_ahead_of_older_requests_and_background_jobs(tmp_path):
     root, conn = _catalog(tmp_path)
     priority = tmp_path / "priority.json"
     failed = tmp_path / "failed.json"
@@ -308,8 +308,10 @@ def test_requested_videos_jump_the_queue_in_request_order(tmp_path):
     upscale.record_failure(network, "ffmpeg failed", failed)
 
     assert upscale.request_render(hot_rod, priority, failed) == 0
-    assert upscale.request_render(network, priority, failed) == 1
+    assert upscale.request_render(network, priority, failed) == 0
+    assert upscale.load_priority(priority) == [str(network), str(hot_rod)]
     assert upscale.request_render(hot_rod, priority, failed) == 0  # no duplicate
+    assert upscale.load_priority(priority) == [str(hot_rod), str(network)]
     assert upscale.load_failed(failed) == {}  # a requested failure is retried
 
     jobs = upscale.plan_jobs(root, conn, priority=upscale.load_priority(priority))
@@ -317,6 +319,24 @@ def test_requested_videos_jump_the_queue_in_request_order(tmp_path):
 
     upscale.drop_request(hot_rod, priority)
     assert upscale.load_priority(priority) == [str(network)]
+
+
+def test_batch_requests_preempt_old_requests_and_keep_input_order(tmp_path):
+    priority = tmp_path / "priority.json"
+    failed = tmp_path / "failed.json"
+    older = tmp_path / "older.mkv"
+    first_episode = tmp_path / "S01E01.mkv"
+    second_episode = tmp_path / "S01E02.mkv"
+    priority.write_text(json.dumps([str(older)]))
+
+    positions = upscale.request_renders([first_episode, second_episode], priority, failed)
+
+    assert positions == [0, 1]
+    assert upscale.load_priority(priority) == [
+        str(first_episode),
+        str(second_episode),
+        str(older),
+    ]
 
 
 def test_render_state_reports_each_stage(tmp_path):

@@ -49,11 +49,11 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from web import media_library as ml
     from web import ecu
+    from web import media_library as ml
 except ModuleNotFoundError:
-    import media_library as ml
     import ecu
+    import media_library as ml
 
 UPSCALED_DIR = ".upscaled"
 MODEL_DIR = Path(

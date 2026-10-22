@@ -53,7 +53,9 @@ def start_activity(name: str, *, token: str | None = None) -> str | None:
         env=environment,
     )
     if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "ECU activity start failed")
+        raise RuntimeError(
+            result.stderr.strip() or result.stdout.strip() or "ECU activity start failed"
+        )
     return token
 
 
@@ -73,4 +75,6 @@ def stop_activity(token: str | None) -> None:
         env=environment,
     )
     if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "ECU activity stop failed")
+        raise RuntimeError(
+            result.stderr.strip() or result.stdout.strip() or "ECU activity stop failed"
+        )

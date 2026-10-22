@@ -444,8 +444,7 @@ def request_upscale(rel: str):
         start_note = _start_upscale_service()
         flash(
             f"{state['label']} queued {ahead} of other requests and background renders; it starts"
-            " once the current render yields."
-            + start_note,
+            " once the current render yields." + start_note,
             "success",
         )
     return redirect(url_for("library_pages.play_page", rel=_rel(video)))
