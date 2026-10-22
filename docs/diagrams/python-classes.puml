@@ -7,6 +7,30 @@ class "CronSpec" as src.clockwork.model.CronSpec {
   timezone : str | None
   validate() -> None
 }
+class "EntryPlan" as web.media_library.EntryPlan {
+  entry : Path
+  kind : str
+  moves : list[Move]
+  note : str | None
+  prune : Path | None
+  skipped : str | None
+  title : str
+  year : int | None
+}
+class "GenreClassifier" as web.media_library.GenreClassifier {
+  ask : Callable[[str], str] | None
+  cache : sqlite3.Connection | None
+}
+class "Job" as web.upscale.Job {
+  duration : float
+  estimated_bytes : int
+  model : str
+  output : Path
+  source : Path
+  source_height : int
+  target_height : int
+  title : str
+}
 class "JobSpec" as src.clockwork.model.JobSpec {
   after : tuple[str, ...]
   cron : CronSpec | None
@@ -48,6 +72,110 @@ class "Manifest" as src.clockwork.model.Manifest {
   path : str
   validate() -> None
 }
+class "MediaInfo" as web.streaming.MediaInfo {
+  audio_codec : str | None
+  container : str
+  duration : float
+  height : int | None
+  pixel_format : str | None
+  text_subtitles : tuple[tuple[int, str], ...]
+  video_codec : str | None
+}
+class "Metadata" as web.media_library.Metadata {
+  cast : list[str]
+  countries : list[str]
+  directors : list[str]
+  genres : list[str]
+  imdb_id : str | None
+  kind : str | None
+  languages : list[str]
+  plot : str | None
+  rating : float | None
+  runtime_min : int | None
+  sources : list[str]
+  title : str | None
+  tmdb_id : str | None
+  wikidata_id : str | None
+  year : int | None
+  merge(other: Metadata) -> None
+}
+class "Move" as web.media_library.Move {
+  dst : Path
+  src : Path
+}
+class "ParsedName" as web.media_library.ParsedName {
+  edition : str | None
+  episode : int | None
+  episode_end : int | None
+  kind : str
+  season : int | None
+  title : str
+  year : int | None
+}
+class "Profile" as web.streaming.Profile {
+  audio_kbps : int
+  height : int | None
+  label : str
+  maxrate_kbps : int
+  name : str
+  nvenc_cq : int
+  x264_crf : int
+}
+class "Renderer" as web.upscale.Renderer {
+  loader
+  model_dir : Path
+  models : dict[str, Any]
+  stop_event : Event
+  stopping : bool
+  throttle
+  torch
+  model(name: str)
+  render(job: Job, progress: Callable[[int, float], None]) -> None
+  stop() -> None
+}
+class "Session" as web.streaming.Session {
+  directory : Path
+  info
+  key : str
+  last_access : float
+  last_index : int
+  lock
+  paused : bool
+  process : subprocess.Popen | None
+  quality
+  run_start : int
+  source : Path
+  source_mtime : float
+  complete_segments() -> set[int]
+  run_progress() -> int
+  running() -> bool
+  stop() -> None
+}
+class "StreamInfo" as web.media_library.StreamInfo {
+  audio_codec : str | None
+  audio_languages : tuple[str, ...]
+  channels : int | None
+  duration_s : float | None
+  height : int | None
+  quality : str | None
+  subtitle_languages : tuple[str, ...]
+  video_codec : str | None
+  width : int | None
+}
+class "StreamManager" as web.streaming.StreamManager {
+  cache_dir : Path
+  clock
+  encoder
+  lock : lock
+  popen : Popen
+  probe
+  sessions : dict[str, Session]
+  sleep
+  housekeeping() -> None
+  reap_forever(interval: float) -> None
+  segment(source: Path, index: int, quality: str | None) -> Path | None
+  session(source: Path, quality: str | None) -> Session
+}
 class "TargetOverrides" as src.clockwork.model.TargetOverrides {
   accuracy_sec : str | None
   after : tuple[str, ...] | None
@@ -57,6 +185,24 @@ class "TargetOverrides" as src.clockwork.model.TargetOverrides {
   wants : tuple[str, ...] | None
   working_directory : str | None
   validate() -> None
+}
+class "Throttle" as web.upscale.Throttle {
+  check_every : float
+  clock
+  cooling : bool
+  cpu
+  duty
+  gpu
+  last_check : float
+  max_cpu : float
+  max_gpu : float
+  on_cooling : Callable[[dict[str, float | None]], None]
+  sleep
+  stopped
+  temps : dict[str, float | None]
+  after_batch(worked_seconds: float) -> None
+  guard() -> float
+  rest(worked_seconds: float) -> None
 }
 class "TimerSpec" as src.clockwork.model.TimerSpec {
   accuracy_sec : str | None
@@ -70,4 +216,20 @@ class "TimerSpec" as src.clockwork.model.TimerSpec {
   unit : str | None
   validate() -> None
 }
+class "TmdbProvider" as web.media_library.TmdbProvider {
+  api_key : str
+  base : str
+  name : str
+  search(title: str, year: int | None, kind: str) -> Metadata | None
+}
+class "WikidataProvider" as web.media_library.WikidataProvider {
+  endpoint : str
+  name : str
+  details(qid: str, chosen: dict[str, Any]) -> Metadata
+  search(title: str, year: int | None, kind: str) -> Metadata | None
+}
+web.streaming.Session --> web.streaming.MediaInfo : info
+web.streaming.Session --> web.streaming.Profile : quality
+web.streaming.StreamManager --> web.streaming.Session : sessions
+web.upscale.Throttle --* web.upscale.Renderer : throttle
 @enduml
