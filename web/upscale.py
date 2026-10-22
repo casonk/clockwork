@@ -50,8 +50,10 @@ from typing import Any
 
 try:
     from web import media_library as ml
+    from web import ecu
 except ModuleNotFoundError:
     import media_library as ml
+    import ecu
 
 UPSCALED_DIR = ".upscaled"
 MODEL_DIR = Path(
@@ -114,6 +116,10 @@ class Job:
     @property
     def estimated_bytes(self) -> int:
         return int(ESTIMATED_MBPS[self.target_height] * 1_000_000 / 8 * self.duration)
+
+
+class YieldToRequest(Exception):
+    """The background render saved its last chunk for an on-demand request."""
 
 
 def target_height(source_height: int | None) -> int | None:
@@ -656,6 +662,7 @@ class Renderer:
         self.model_dir = model_dir
         self.models: dict[str, Any] = {}
         self.stop_event = threading.Event()
+        self.yield_requested: Callable[[Job], bool] = lambda _job: False
         # Rests and cooling pauses end at once when the service is stopped.
         self.throttle = Throttle(sleep=self.stop_event.wait, stopped=self.stop_event.is_set)
         torch.set_num_threads(THREADS)
@@ -734,6 +741,8 @@ class Renderer:
                 self.throttle.rest(worked)
                 if self.stopping:
                     raise InterruptedError("stopped")
+                if self.yield_requested(job):
+                    raise YieldToRequest
             if decoder.wait() != 0:
                 raise RuntimeError("ffmpeg decode failed")
             if not manifest["chunks"]:
@@ -937,14 +946,24 @@ def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
             )
 
         renderer.throttle.on_cooling = cooling
+        renderer.yield_requested = lambda current: bool(
+            (requests := load_priority()) and requests[0] != str(current.source)
+        )
+        request_token = None
         try:
+            if str(job.source) in load_priority():
+                request_token = ecu.start_activity("clockwork-upscale-request")
             renderer.render(job, progress)
             finished += 1
+        except YieldToRequest:
+            continue
         except InterruptedError:
             break
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the queue
             print(f"upscale failed for {job.source}: {exc}", file=sys.stderr)
             record_failure(job.source, str(exc))
+        finally:
+            ecu.stop_activity(request_token)
         drop_request(job.source)
         if once:
             break

@@ -183,6 +183,13 @@ Library pages (`web/library_pages.py`):
   sources) and every lower step of 1440p, 1080p (8 Mb/s), 720p (4 Mb/s),
   480p (1.5 Mb/s) and 360p (0.8 Mb/s). Switching continues from the same moment, stops the
   previous quality's transcoder, and is remembered per browser.
+- Each active HLS ffmpeg process registers a `clockwork-stream` foreground
+  activity with the shared GPU coordinator (`ecu` CLI). It yields the
+  configured low-priority upscaler while playback is transcoding and blocks
+  lower-priority leases until the stream process exits. The `ecu` CLI can be
+  installed, exposed through private `CENTRAL_ECU_SOURCE`, or loaded from its
+  standard sibling checkout; the live ECU
+  config must declare `clockwork-stream` and its upscaler consumer.
 - `/library/browse/`: the folder tree as it is on disk, hidden `.release/`
   folders excluded, with play and download links.
 - `/library/manage`: start a sync (`systemctl --user start` of
@@ -230,6 +237,15 @@ package `CLOCKWORK_UPSCALE_MAX_CPU_C` (78, a median over a few seconds since
 Intel package readings spike) until both are 6 C cooler, and limits ffmpeg and
 PyTorch to `CLOCKWORK_UPSCALE_THREADS` (2) CPU threads. The Manage page shows
 the duty cycle and any cooling pause.
+
+Unattended library renders are a background ECU consumer. Playback can yield
+that service at a chunk boundary and the render resumes from its manifest. A
+render requested from a title or player page goes to the front of the queue,
+starts the worker if needed, and causes the current background render to yield
+after its next saved chunk. The requested render then holds a foreground ECU
+activity. Foreground playback and on-demand renders may run together; background
+leases wait until both finish. Once the request completes, the background
+render resumes from its manifest.
 
 Measured on an RTX 3090: unthrottled, 360p animation runs about 85 fps (3x
 real time) and 1080p live action to 4K about 6 fps, at 300 W and over 90 C.

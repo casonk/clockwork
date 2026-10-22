@@ -14,6 +14,10 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
+- Register active HLS transcodes with central-ecu for their full process
+  lifetime. Keep unattended AI renders as a yieldable background consumer;
+  on-demand requests need a distinct foreground activity and should enter
+  ahead of the unattended queue.
 - Per-job scheduler controls must select exactly one manifest job; invoking a
   whole-manifest installer can overwrite loaded sibling artifacts and leave
   their in-memory scheduler definitions stale.
