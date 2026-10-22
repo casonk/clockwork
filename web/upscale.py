@@ -920,8 +920,10 @@ def render_one(root: Path, db: Path, min_free_gb: float, source: Path) -> int:
     jobs = plan_jobs(root, conn, load_failed(), load_priority())
     conn.close()
     job = next((candidate for candidate in jobs if candidate.source == source), None)
-    if job is None or not has_room(root, job, min_free_gb):
+    if job is None:
         return 0
+    if not has_room(root, job, min_free_gb):
+        return ecu.REQUEUED
 
     renderer = Renderer()
     signal.signal(signal.SIGTERM, lambda _signum, _frame: renderer.stop())
