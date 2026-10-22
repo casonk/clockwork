@@ -408,7 +408,8 @@ def test_player_lists_versions_and_queues_an_ai_render(client, library, probed, 
     source = str(library / rel.lstrip("/"))
     assert ai_files.load_priority(ai_files.PRIORITY_FILE) == [source]
     html = client.get("/library/play" + rel).get_data(as_text=True)
-    assert "AI 4K queued: it renders next" in html and "queued, next" in html
+    assert "AI 4K queued next of other requests and background renders" in html
+    assert "queued, next" in html
 
 
 def test_player_links_previous_and_next_episode(client, probed, ai_files):
@@ -426,12 +427,14 @@ def test_player_links_previous_and_next_episode(client, probed, ai_files):
 def test_title_page_queues_ai_renders_for_every_episode(client, library, probed, ai_files):
     rel = "/library/title/shows/Breaking Bad (2008)"
     assert "Generate AI versions" in client.get(rel).get_data(as_text=True)
+    ai_files.PRIORITY_FILE.write_text(json.dumps(["older-request.mkv"]))
 
     client.post(rel + "/upscale", data={"csrf_token": _csrf(client)})
     queued = ai_files.load_priority(ai_files.PRIORITY_FILE)
     assert [Path(p).name for p in queued] == [
         "Breaking_Bad_S01E01_1080p.mkv",
         "Breaking_Bad_S01E02_1080p.mkv",
+        "older-request.mkv",
     ]
     html = client.get(rel).get_data(as_text=True)
     assert "✨ queued" in html and "Generate AI versions" not in html

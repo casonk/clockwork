@@ -183,6 +183,11 @@ Library pages (`web/library_pages.py`):
   sources) and every lower step of 1440p, 1080p (8 Mb/s), 720p (4 Mb/s),
   480p (1.5 Mb/s) and 360p (0.8 Mb/s). Switching continues from the same moment, stops the
   previous quality's transcoder, and is remembered per browser.
+- ecu observes the active HLS `ffmpeg` process as GPU activity. Set a
+  matching `[[activities]]` entry in its local config with `process = "ffmpeg"`,
+  `priority = "live"`, and `preempt = true`. Lower-priority ECU leases then
+  wait for playback or preempt their command when opted in with
+  `--preemptible`.
 - `/library/browse/`: the folder tree as it is on disk, hidden `.release/`
   folders excluded, with play and download links.
 - `/library/manage`: start a sync (`systemctl --user start` of
@@ -230,6 +235,17 @@ package `CLOCKWORK_UPSCALE_MAX_CPU_C` (78, a median over a few seconds since
 Intel package readings spike) until both are 6 C cooler, and limits ffmpeg and
 PyTorch to `CLOCKWORK_UPSCALE_THREADS` (2) CPU threads. The Manage page shows
 the duty cycle and any cooling pause.
+
+Unattended library renders use low CPU and I/O priority. A render requested
+from a title or player page moves to the front of the queue, starts the worker
+if needed, and causes the current render to yield after its next saved chunk.
+Title-wide requests keep episode order. The render resumes from its saved
+manifest after the requested work completes. Each episode render acquires an
+ECU lease: unattended work uses `batch` priority, requested work uses
+`interactive`, and both are preemptible by higher-priority live playback. The
+systemd service is only the queue coordinator; do not register it as a GPU
+consumer in ecu because the episode render itself owns the lease. If
+ecu is unavailable, unattended work falls back to low OS priority.
 
 Measured on an RTX 3090: unthrottled, 360p animation runs about 85 fps (3x
 real time) and 1080p live action to 4K about 6 fps, at 300 W and over 90 C.
