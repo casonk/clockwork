@@ -108,6 +108,8 @@
   const badge = document.getElementById("mode-badge");
   const storageKey = "clockwork-library-quality";
   const autoplayKey = "clockwork-library-autoplay";
+  const volumeKey = "clockwork-library-volume";
+  const mutedKey = "clockwork-library-muted";
   let autoStartPending = new URLSearchParams(window.location.search).get("autoplay") === "1";
   video.autoplay = autoStartPending;
   let hls = null;
@@ -125,6 +127,30 @@
   function remember(value) {
     try { localStorage.setItem(storageKey, value); } catch (_err) { /* private mode */ }
   }
+
+  function rememberVolume() {
+    try {
+      localStorage.setItem(volumeKey, String(video.volume));
+      localStorage.setItem(mutedKey, video.muted ? "1" : "0");
+    } catch (_err) { /* private mode */ }
+  }
+
+  function restoreVolume(volume, muted) {
+    if (volume === undefined || muted === undefined) {
+      try {
+        const savedVolume = localStorage.getItem(volumeKey);
+        const parsedVolume = savedVolume === null ? NaN : Number(savedVolume);
+        volume = Number.isFinite(parsedVolume) ? Math.min(1, Math.max(0, parsedVolume)) : video.volume;
+        const savedMuted = localStorage.getItem(mutedKey);
+        muted = savedMuted === "1" ? true : savedMuted === "0" ? false : video.muted;
+      } catch (_err) { return; /* private mode */ }
+    }
+    video.volume = volume;
+    video.muted = muted;
+  }
+
+  video.addEventListener("volumechange", rememberVolume);
+  restoreVolume();
 
   function resumeAt(time, playing, startPlayback) {
     const play = function () {
@@ -151,6 +177,8 @@
   function load(quality, startPlayback) {
     const time = video.currentTime;
     const playing = !video.paused;
+    const volume = video.volume;
+    const muted = video.muted;
     const hlsBase = video.dataset.hls;
     const directSrc = video.dataset.direct;
     startPlayback = Boolean(startPlayback);
@@ -161,6 +189,7 @@
       badge.textContent = "direct play";
       badge.className = "badge quality";
       video.src = directSrc;
+      restoreVolume(volume, muted);
       resumeAt(time, playing, startPlayback);
       return;
     }
@@ -178,6 +207,7 @@
     if (!window.Hls || !window.Hls.isSupported()) {
       if (video.canPlayType("application/vnd.apple.mpegurl")) {
         video.src = source;
+        restoreVolume(volume, muted);
         resumeAt(time, playing, startPlayback);
       } else {
         show("This browser cannot stream here. Use the download button and open the file in VLC.", "error");
@@ -193,6 +223,7 @@
     window.libraryHls = hls;  // handy when debugging from the console
     hls.loadSource(source);
     hls.attachMedia(video);
+    restoreVolume(volume, muted);
     if (playing || startPlayback) resumeAt(time, playing, startPlayback);
     hls.on(window.Hls.Events.ERROR, function (_event, data) {
       if (!data.fatal) return;
