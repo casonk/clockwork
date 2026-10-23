@@ -424,6 +424,9 @@ def test_player_links_previous_and_next_episode(client, probed, ai_files):
     assert 'video.addEventListener("canplay"' in first
     assert 'video.addEventListener("dblclick"' in first
     assert "video.requestFullscreen()" in first and "document.exitFullscreen()" in first
+    assert 'video.addEventListener("volumechange", rememberVolume)' in first
+    assert 'const volumeKey = "clockwork-library-volume"' in first
+    assert "restoreVolume(volume, muted)" in first
     assert 'fetch(url, { headers: { Accept: "text/html" } })' in first
     assert "window.history.pushState" in first
     second = client.get(
