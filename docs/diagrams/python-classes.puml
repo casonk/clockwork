@@ -1,4 +1,4 @@
-@startuml classes_clockwork
+@startuml classes_checkout
 set namespaceSeparator none
 class "CronSpec" as src.clockwork.model.CronSpec {
   command : str
@@ -129,6 +129,7 @@ class "Renderer" as web.upscale.Renderer {
   stopping : bool
   throttle
   torch
+  yield_requested : Callable[[Job], bool]
   model(name: str)
   render(job: Job, progress: Callable[[int, float], None]) -> None
   stop() -> None
@@ -227,6 +228,8 @@ class "WikidataProvider" as web.media_library.WikidataProvider {
   name : str
   details(qid: str, chosen: dict[str, Any]) -> Metadata
   search(title: str, year: int | None, kind: str) -> Metadata | None
+}
+class "<color:red>YieldToRequest</color>" as web.upscale.YieldToRequest {
 }
 web.streaming.Session --> web.streaming.MediaInfo : info
 web.streaming.Session --> web.streaming.Profile : quality
