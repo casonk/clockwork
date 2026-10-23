@@ -246,6 +246,9 @@ ECU lease: unattended work uses `batch` priority, requested work uses
 systemd service is only the queue coordinator; do not register it as a GPU
 consumer in ecu because the episode render itself owns the lease. If
 ecu is unavailable, unattended work falls back to low OS priority.
+After a preemption the worker does not retry at once: it asks
+`ecu retry-after --json`, which rate limits preemptible leases with AIMD, and
+pauses (state `throttled`) until then, waking early for a render request.
 
 Measured on an RTX 3090: unthrottled, 360p animation runs about 85 fps (3x
 real time) and 1080p live action to 4K about 6 fps, at 300 W and over 90 C.
