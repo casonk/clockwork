@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 REQUEUED = 75
+FALLBACK_RETRY_S = 60.0  # when an installed ECU cannot say: wait rather than spin
 
 
 def _command() -> tuple[list[str], dict[str, str]] | None:
@@ -79,3 +82,29 @@ def run_render(
     # ECU uses the child's signal exit code if it needed to force-kill after
     # the graceful preemption window. The saved chunk remains resumable.
     return REQUEUED if result.returncode == 241 else result.returncode
+
+
+def retry_after() -> dict[str, Any]:
+    """Ask central-ecu when a requeued render may try again; ECU owns the backoff.
+
+    Without an ECU, renders run unleased and are only requeued for a render
+    request or the disk floor, so they go on at once.
+    """
+    command = _command()
+    if command is None:
+        return {"retry_after_s": 0.0}
+    ecu, environment = command
+    try:
+        result = subprocess.run(
+            [*ecu, "retry-after", "--json"],
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        answer = json.loads(result.stdout)
+        answer["retry_after_s"] = max(float(answer["retry_after_s"]), 0.0)
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return {"retry_after_s": FALLBACK_RETRY_S}
+    return answer

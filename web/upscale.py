@@ -960,6 +960,24 @@ def render_one(root: Path, db: Path, min_free_gb: float, source: Path) -> int:
     return 0
 
 
+def pause_after_requeue(base: dict[str, Any], job: Job, should_stop: Callable[[], bool]) -> None:
+    """Sleep until central-ecu will admit the next lease, waking for a render request."""
+    answer = ecu.retry_after()
+    delay = answer["retry_after_s"]
+    if delay <= 0:
+        return
+    write_status(
+        {
+            **base,
+            "state": "throttled",
+            "next": job.title,
+            "activity": answer.get("activity", ""),
+            "retry_at": time.strftime("%H:%M", time.localtime(time.time() + delay)),
+        }
+    )
+    wait_for_request(delay, should_stop)
+
+
 def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
     stopping = threading.Event()
     signal.signal(signal.SIGTERM, lambda _signum, _frame: stopping.set())
@@ -991,6 +1009,7 @@ def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
             if result == ecu.REQUEUED:
                 if once:
                     break
+                pause_after_requeue(base, job, stopping.is_set)
                 continue
             if result != 0:
                 write_status({**base, "state": "ecu-error", "next": job.title})
