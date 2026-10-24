@@ -61,7 +61,7 @@
   {% elif st.state == "disk-floor" %}
     <p class="small" style="margin-top:8px">Paused: the next render ({{ st.next }}) would take free space below the floor. Checking again hourly.</p>
   {% elif st.state == "throttled" %}
-    <p class="small" style="margin-top:8px">Paused: {{ st.activity or "live playback" }} needed the GPU, so ecu is spacing out retries. Trying {{ st.next }} again at {{ st.retry_at }}.</p>
+    <p class="small" style="margin-top:8px">Paused: {{ st.activity or "live playback" }} needed the GPU, so the ECU is spacing out retries. Trying {{ st.next }} again at {{ st.retry_at }}.</p>
   {% elif st.state == "done" %}
     <p class="small muted" style="margin-top:8px">Everything is rendered.</p>
   {% elif st.state %}

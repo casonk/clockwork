@@ -961,7 +961,7 @@ def render_one(root: Path, db: Path, min_free_gb: float, source: Path) -> int:
 
 
 def pause_after_requeue(base: dict[str, Any], job: Job, should_stop: Callable[[], bool]) -> None:
-    """Sleep until ecu will admit the next lease, waking for a render request."""
+    """Sleep until the ECU will admit the next lease, waking for a render request."""
     answer = ecu.retry_after()
     delay = answer["retry_after_s"]
     if delay <= 0:
