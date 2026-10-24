@@ -59,7 +59,7 @@ workload logic.
 
 ## GPU Workload Handoff
 
-- central-ecu observes active HLS ffmpeg processes as GPU activities. Its local
+- The ECU observes active HLS ffmpeg processes as GPU activities. Its local
   config should classify `ffmpeg` at `live` priority and enable preemption for
   opted-in ECU leases. Clockwork does not call a token API.
 - Library-wide AI renders remain background work. A title or player request

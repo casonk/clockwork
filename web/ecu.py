@@ -1,4 +1,4 @@
-"""Run one render under central-ecu's GPU lease and priority policy."""
+"""Run one render under the ECU's GPU lease and priority policy."""
 
 from __future__ import annotations
 
@@ -14,15 +14,25 @@ REQUEUED = 75
 FALLBACK_RETRY_S = 60.0  # when an installed ECU cannot say: wait rather than spin
 
 
+def _sibling_source(root: Path) -> Path | None:
+    """A sibling checkout's ``src`` that holds the ECU package, if one exists."""
+    try:
+        checkouts = sorted(p for p in root.iterdir() if p.is_dir())
+    except OSError:
+        return None
+    return next(
+        (c / "src" for c in checkouts if (c / "src" / "central_ecu" / "__main__.py").is_file()),
+        None,
+    )
+
+
 def _command() -> tuple[list[str], dict[str, str]] | None:
     installed = shutil.which("ecu")
     if installed:
         return [installed], os.environ.copy()
     source = os.environ.get("CENTRAL_ECU_SOURCE")
-    if not source:
-        source = str(Path(__file__).resolve().parents[2] / "central-ecu" / "src")
-    source_path = Path(source)
-    if not (source_path / "central_ecu" / "__main__.py").is_file():
+    source_path = Path(source) if source else _sibling_source(Path(__file__).resolve().parents[2])
+    if source_path is None or not (source_path / "central_ecu" / "__main__.py").is_file():
         return None
     environment = os.environ.copy()
     current = environment.get("PYTHONPATH", "")

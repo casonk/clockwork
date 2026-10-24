@@ -494,3 +494,12 @@ def test_requeued_render_goes_on_when_ecu_admits_now(tmp_path, monkeypatch):
     upscale.pause_after_requeue({}, job, lambda: False)
 
     assert (statuses, waits) == ([], [])
+
+
+def test_ecu_source_is_found_among_sibling_checkouts(tmp_path):
+    (tmp_path / "clockwork").mkdir()
+    package = tmp_path / "gpu-arbiter" / "src" / "central_ecu"
+    package.mkdir(parents=True)
+    (package / "__main__.py").write_text("")
+    assert ecu._sibling_source(tmp_path) == tmp_path / "gpu-arbiter" / "src"
+    assert ecu._sibling_source(tmp_path / "clockwork") is None

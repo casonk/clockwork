@@ -14,7 +14,7 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
-- Configure central-ecu to recognize active HLS `ffmpeg` processes at live
+- Configure the ECU to recognize active HLS `ffmpeg` processes at live
   priority; it observes process activity rather than requiring an app token
   API. Give each episode render its own ECU lease so unattended work can use
   batch priority and a requested render can use interactive priority. Keep the
