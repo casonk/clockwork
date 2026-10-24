@@ -183,7 +183,7 @@ Library pages (`web/library_pages.py`):
   sources) and every lower step of 1440p, 1080p (8 Mb/s), 720p (4 Mb/s),
   480p (1.5 Mb/s) and 360p (0.8 Mb/s). Switching continues from the same moment, stops the
   previous quality's transcoder, and is remembered per browser.
-- ecu observes the active HLS `ffmpeg` process as GPU activity. Set a
+- The ECU (`ecu`) observes the active HLS `ffmpeg` process as GPU activity. Set a
   matching `[[activities]]` entry in its local config with `process = "ffmpeg"`,
   `priority = "live"`, and `preempt = true`. Lower-priority ECU leases then
   wait for playback or preempt their command when opted in with
@@ -244,8 +244,8 @@ manifest after the requested work completes. Each episode render acquires an
 ECU lease: unattended work uses `batch` priority, requested work uses
 `interactive`, and both are preemptible by higher-priority live playback. The
 systemd service is only the queue coordinator; do not register it as a GPU
-consumer in ecu because the episode render itself owns the lease. If
-ecu is unavailable, unattended work falls back to low OS priority.
+consumer in the ECU because the episode render itself owns the lease. If
+the ECU is unavailable, unattended work falls back to low OS priority.
 After a preemption the worker does not retry at once: it asks
 `ecu retry-after --json`, which rate limits preemptible leases with AIMD, and
 pauses (state `throttled`) until then, waking early for a render request.

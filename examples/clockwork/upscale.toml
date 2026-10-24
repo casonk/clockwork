@@ -4,7 +4,7 @@ description = "Experimental AI super-resolution of the watch library (Real-ESRGA
 scope = "user"
 service_type = "simple"
 working_directory = "%h/git/util-repos/clockwork"
-# Each render runs through ecu at batch or interactive priority.
+# Each render runs through the ECU at batch or interactive priority.
 exec_start = "%h/.local/share/clockwork/upscale-venv/bin/python %h/git/util-repos/clockwork/web/upscale.py run"
 # Tuning (duty cycle, temperature limits, disk floor, ...): see config/upscale.env.example.
 environment_files = ["-%h/git/util-repos/clockwork/config/upscale.env.local"]
