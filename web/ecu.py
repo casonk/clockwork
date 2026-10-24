@@ -85,7 +85,7 @@ def run_render(
 
 
 def retry_after() -> dict[str, Any]:
-    """Ask ecu when a requeued render may try again; ECU owns the backoff.
+    """Ask the ECU when a requeued render may try again; it owns the backoff.
 
     Without an ECU, renders run unleased and are only requeued for a render
     request or the disk floor, so they go on at once.
