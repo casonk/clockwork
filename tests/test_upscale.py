@@ -430,3 +430,67 @@ def test_cooling_ends_at_once_when_the_service_stops():
     )  # fmt: skip
     throttle.guard()
     assert stop == [30]  # one pause, then it notices the stop instead of waiting to cool
+
+
+def _fake_ecu_subprocess(monkeypatch, run):
+    monkeypatch.setattr(ecu, "_command", lambda: (["ecu"], {}))
+    monkeypatch.setattr(
+        ecu,
+        "subprocess",
+        type("FakeSubprocess", (), {**vars(subprocess), "run": staticmethod(run)}),
+    )
+
+
+def test_retry_after_asks_central_ecu(monkeypatch):
+    calls = []
+    answer = {"retry_after_s": 95.0, "rate_per_hour": 30.0, "activity": "clockwork-stream"}
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, json.dumps(answer), "")
+
+    _fake_ecu_subprocess(monkeypatch, run)
+    assert ecu.retry_after() == answer
+    assert calls == [["ecu", "retry-after", "--json"]]
+
+
+def test_retry_after_waits_rather_than_spins_when_ecu_cannot_answer(monkeypatch):
+    _fake_ecu_subprocess(
+        monkeypatch, lambda command, **kwargs: subprocess.CompletedProcess(command, 2, "", "boom")
+    )
+    assert ecu.retry_after() == {"retry_after_s": ecu.FALLBACK_RETRY_S}
+
+
+def test_retry_after_without_ecu_goes_on_at_once(monkeypatch):
+    monkeypatch.setattr(ecu, "_command", lambda: None)
+    assert ecu.retry_after() == {"retry_after_s": 0.0}
+
+
+def test_requeued_render_sleeps_on_the_ecu_answer(tmp_path, monkeypatch):
+    statuses, waits = [], []
+    monkeypatch.setattr(
+        upscale.ecu, "retry_after", lambda: {"retry_after_s": 120.0, "activity": "clockwork-stream"}
+    )
+    monkeypatch.setattr(upscale, "write_status", statuses.append)
+    monkeypatch.setattr(upscale, "wait_for_request", lambda s, stop: waits.append(s))
+    job = upscale.Job(tmp_path / "a.mkv", tmp_path / "out.mkv", 360, 1080, "m", 60.0, "A Show")
+
+    upscale.pause_after_requeue({"queued": 3}, job, lambda: False)
+
+    assert waits == [120.0]
+    assert statuses[0]["state"] == "throttled"
+    assert statuses[0]["next"] == "A Show"
+    assert statuses[0]["activity"] == "clockwork-stream"
+    assert statuses[0]["queued"] == 3
+
+
+def test_requeued_render_goes_on_when_ecu_admits_now(tmp_path, monkeypatch):
+    statuses, waits = [], []
+    monkeypatch.setattr(upscale.ecu, "retry_after", lambda: {"retry_after_s": 0.0})
+    monkeypatch.setattr(upscale, "write_status", statuses.append)
+    monkeypatch.setattr(upscale, "wait_for_request", lambda s, stop: waits.append(s))
+    job = upscale.Job(tmp_path / "a.mkv", tmp_path / "out.mkv", 360, 1080, "m", 60.0, "A Show")
+
+    upscale.pause_after_requeue({}, job, lambda: False)
+
+    assert (statuses, waits) == ([], [])
