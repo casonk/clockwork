@@ -77,6 +77,8 @@ def run_render(
             "run",
             "--gpu",
             "quiet",
+            "--skip-consumer",
+            "clockwork-upscale",
             "--priority",
             priority,
             "--preemptible",

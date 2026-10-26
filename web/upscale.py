@@ -67,6 +67,18 @@ STATUS_FILE = Path(
         Path.home() / ".cache" / "clockwork" / "upscale-status.json",
     )
 )
+PAUSE_FILE = Path(
+    os.environ.get(
+        "CLOCKWORK_UPSCALE_PAUSE_FILE",
+        Path.home() / ".cache" / "clockwork" / "upscale-pause",
+    )
+).expanduser()
+PAUSED_FILE = Path(
+    os.environ.get(
+        "CLOCKWORK_UPSCALE_PAUSED_FILE",
+        Path.home() / ".cache" / "clockwork" / "upscale-paused",
+    )
+).expanduser()
 FAILED_FILE = Path(
     os.environ.get(
         "CLOCKWORK_UPSCALE_FAILED", ml.BASE_DIR / "config" / "media-library-upscale-failed.json"
@@ -750,12 +762,12 @@ class Renderer:
                 if got < want:
                     break  # end of the video
                 chunk_start = chunk_end
+                if self.yield_requested(job):
+                    raise YieldToRequest
                 # The encoder is closed: the GPU drops to idle while resting.
                 self.throttle.rest(worked)
                 if self.stopping:
                     raise InterruptedError("stopped")
-                if self.yield_requested(job):
-                    raise YieldToRequest
             if decoder.wait() != 0:
                 raise RuntimeError("ffmpeg decode failed")
             if not manifest["chunks"]:
@@ -946,7 +958,8 @@ def render_one(root: Path, db: Path, min_free_gb: float, source: Path) -> int:
 
     renderer.throttle.on_cooling = cooling
     renderer.yield_requested = lambda current: bool(
-        (requests := load_priority()) and requests[0] != str(current.source)
+        PAUSE_FILE.exists()
+        or ((requests := load_priority()) and requests[0] != str(current.source))
     )
     try:
         renderer.render(job, progress)
@@ -978,12 +991,37 @@ def pause_after_requeue(base: dict[str, Any], job: Job, should_stop: Callable[[]
     wait_for_request(delay, should_stop)
 
 
+def wait_while_paused(
+    should_stop: Callable[[], bool],
+    status: dict[str, Any],
+    *,
+    pause_file: Path = PAUSE_FILE,
+    paused_file: Path = PAUSED_FILE,
+    sleep: Callable[[float], None] = time.sleep,
+) -> bool:
+    """Acknowledge a lease pause after rendering has yielded and wait for resume."""
+    if not pause_file.exists():
+        return False
+    write_status({**status, "state": "paused"})
+    paused_file.parent.mkdir(parents=True, exist_ok=True)
+    paused_file.touch(mode=0o600, exist_ok=True)
+    try:
+        while pause_file.exists() and not should_stop():
+            sleep(1.0)
+    finally:
+        paused_file.unlink(missing_ok=True)
+    return not should_stop()
+
+
 def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
     stopping = threading.Event()
     signal.signal(signal.SIGTERM, lambda _signum, _frame: stopping.set())
     signal.signal(signal.SIGINT, lambda _signum, _frame: stopping.set())
     finished = 0
     while not stopping.is_set():
+        base = {"state": "idle", "finished": finished}
+        if not wait_while_paused(stopping.is_set, base) and stopping.is_set():
+            break
         conn = ml.connect(db)
         jobs = plan_jobs(root, conn, load_failed(), load_priority())
         conn.close()
@@ -1009,6 +1047,8 @@ def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
             if result == ecu.REQUEUED:
                 if once:
                     break
+                if wait_while_paused(stopping.is_set, base | {"next": job.title}):
+                    continue
                 pause_after_requeue(base, job, stopping.is_set)
                 continue
             if result != 0:
