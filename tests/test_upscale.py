@@ -352,8 +352,9 @@ def test_requested_render_uses_interactive_preemptible_ecu_lease(tmp_path, monke
             (),
             {
                 "run": staticmethod(
-                    lambda command, **kwargs: calls.append((command, kwargs))
-                    or subprocess.CompletedProcess(command, 0)
+                    lambda command, **kwargs: (
+                        calls.append((command, kwargs)) or subprocess.CompletedProcess(command, 0)
+                    )
                 )
             },
         ),
@@ -364,17 +365,12 @@ def test_requested_render_uses_interactive_preemptible_ecu_lease(tmp_path, monke
 
     assert result == 0
     command, options = calls[0]
-    assert command[:8] == [
-        "ecu",
-        "run",
-        "--gpu",
-        "quiet",
-        "--priority",
-        "interactive",
-        "--preemptible",
-        "--max-wait",
-    ]
-    assert command[8:11] == ["24h", "--wait", "--"]
+    assert command[:4] == ["ecu", "run", "--gpu", "quiet"]
+    assert command[command.index("--priority") + 1] == "interactive"
+    assert command[command.index("--preemptible")] == "--preemptible"
+    assert command[command.index("--max-wait") + 1] == "24h"
+    assert command[command.index("--skip-consumer") + 1] == "clockwork-upscale"
+    assert command[command.index("--wait") : command.index("--wait") + 2] == ["--wait", "--"]
     assert command[-2] == "render-one"
     assert command[-1] == str(source)
     assert options["env"] == {"TEST": "1"}
@@ -494,6 +490,28 @@ def test_requeued_render_goes_on_when_ecu_admits_now(tmp_path, monkeypatch):
     upscale.pause_after_requeue({}, job, lambda: False)
 
     assert (statuses, waits) == ([], [])
+
+
+def test_cooperative_pause_acknowledges_and_waits_for_resume(tmp_path, monkeypatch):
+    pause_file = tmp_path / "pause"
+    paused_file = tmp_path / "paused"
+    pause_file.touch()
+    statuses = []
+    monkeypatch.setattr(upscale, "write_status", statuses.append)
+
+    def resume(_seconds):
+        assert paused_file.exists()
+        pause_file.unlink()
+
+    assert upscale.wait_while_paused(
+        lambda: False,
+        {"queued": 2},
+        pause_file=pause_file,
+        paused_file=paused_file,
+        sleep=resume,
+    )
+    assert statuses == [{"queued": 2, "state": "paused"}]
+    assert not paused_file.exists()
 
 
 def test_ecu_source_is_found_among_sibling_checkouts(tmp_path):

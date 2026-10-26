@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Cooperatively yield the AI upscaler to ECU leases after saving its current
+  chunk, release the render subprocess's GPU memory, then resume when the lease
+  ends.
+
 - Pin registry services to the `/home` top bar with `top_bar = true` in their
   wiring-harness registry entry; an entry may also set its own `icon`. The
   link URL comes from the registry, and pins stay in the ignored local
