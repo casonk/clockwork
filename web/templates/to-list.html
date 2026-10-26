@@ -91,8 +91,10 @@
       .add-btn { width:100%; }
     }
   </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
 </head>
 <body>
+{% include "_site_nav.html" %}
 <header>
   <div class="header-left">
     <a href="/home" class="back-link" title="Home">🏠</a>
