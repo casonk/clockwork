@@ -202,3 +202,13 @@ should change how future sessions work in this repo.
 - When several transcoder runs share one segment directory, judge a run's
   progress from its own playlist only; counting segments left by earlier seeks
   made a fresh run look finished, so requests waited on a paused process.
+
+### 2026-10-26 — Share portal navigation across web pages
+
+- Keep the site-wide navigation in one template and stylesheet. Repeating icon
+  rows in page headers makes destinations inconsistent and crowds small screens.
+- Build service links from the wiring-harness registry, and keep its `top_bar`
+  pins at the start of the grouped service menu. Do not copy private service
+  names or URLs into tracked navigation code.
+- Check the open menus at narrow viewport widths as well as the closed bar;
+  dropdowns need viewport bounds, scrolling, and keyboard dismissal.

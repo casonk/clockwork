@@ -224,7 +224,11 @@ def _request_host_candidates() -> set[str]:
     return {host for host in candidates if host}
 
 
-app = Flask(__name__)
+app = Flask(
+    __name__,
+    template_folder=str(Path(__file__).parent / "templates"),
+    static_folder=str(Path(__file__).parent / "static"),
+)
 app.secret_key = os.environ.get("CLOCKWORK_WEB_SECRET") or secrets.token_hex(32)
 app.register_blueprint(library_pages)
 
@@ -251,6 +255,11 @@ def _inject_csrf_token() -> dict[str, object]:
 @app.context_processor
 def _inject_nav_categories() -> dict[str, object]:
     return {"nav_categories": _load_nav_categories()}
+
+
+@app.context_processor
+def _inject_site_navigation() -> dict[str, object]:
+    return {"site_service_groups": _site_service_groups(_load_portal_groups())}
 
 
 def _return_path(default: str = "/home") -> str:
@@ -4794,6 +4803,22 @@ def _top_bar_services(groups: list[tuple[str, list[dict]]]) -> list[dict]:
     return [card for _, group_cards in groups for card in group_cards if card.get("top_bar")]
 
 
+def _site_service_groups(groups: list[tuple[str, list[dict]]]) -> list[dict]:
+    """Put registry pins first, then group the other service links."""
+    pinned = []
+    remaining = []
+    for label, cards in groups:
+        if label == "Clockwork":
+            continue
+        pinned.extend(card for card in cards if card.get("top_bar"))
+        unpinned = [card for card in cards if not card.get("top_bar")]
+        if unpinned:
+            remaining.append({"label": label, "services": unpinned})
+    if pinned:
+        remaining.insert(0, {"label": "Pinned", "services": pinned})
+    return remaining
+
+
 def _load_portal_groups() -> list[tuple[str, list[dict]]]:
     local = WIRING_HARNESS_DIR / "services.local.toml"
     base = WIRING_HARNESS_DIR / "services.toml"
@@ -4922,7 +4947,7 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
 @app.get("/home")
 def home():
     groups = _load_portal_groups()
-    return render_template("home.html", groups=groups, top_bar_services=_top_bar_services(groups))
+    return render_template("home.html", groups=groups)
 
 
 def _schedule_clockwork_web_refresh() -> tuple[bool, str]:

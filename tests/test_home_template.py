@@ -14,36 +14,25 @@ def test_home_cards_use_shrinkable_mobile_grid_tracks():
     assert "overflow-wrap: anywhere;" in css
 
 
-def test_home_header_uses_compact_mobile_icon_toolbar():
-    css = HOME_TEMPLATE.read_text()
+def test_standalone_pages_share_site_navigation():
+    templates = HOME_TEMPLATE.parent
+    for path in templates.glob("*.html"):
+        page = path.read_text()
+        if "<body>" in page:
+            assert '{% include "_site_nav.html" %}' in page, path.name
+            assert "site-nav.css" in page, path.name
 
-    assert "header {" in css
-    assert "flex-wrap: nowrap;" in css
-    assert ".nav-links {" in css
-    assert "flex-wrap: nowrap;" in css
-    assert ".home-title { display: none; }" in css
-    assert ".nav-label { display: none; }" in css
-    assert ".nav-icon { display: inline; }" in css
-    assert (
-        'nav_icons = {"Monitoring": "📊", "Pit Box": "💻", "Infrastructure": "🧰", "AI": "🤖"}'
-        in css
-    )
-    assert 'action="/refresh/site"' in css
-    assert 'aria-label="Refresh site"' in css
+    home = HOME_TEMPLATE.read_text()
+    assert 'action="/refresh/site"' in home
+    assert 'aria-label="Refresh site"' in home
+    assert 'class="nav-links"' not in home
 
 
-def test_list_pages_use_compact_mobile_category_icons():
+def test_list_pages_keep_refresh_action_beside_shared_navigation():
     for template in (GROCERIES_TEMPLATE, SHOPPING_TEMPLATE):
-        css = template.read_text()
+        page = template.read_text()
 
-        assert ".nav-category-link {" in css
-        assert ".nav-label { display: none; }" in css
-        assert ".nav-icon { display: inline; }" in css
-        assert (
-            'nav_icons = {"Monitoring": "📊", "Pit Box": "💻", "Infrastructure": "🧰", "AI": "🤖"}'
-            in css
-        )
-        assert 'class="back-link nav-category-link"' in css
-        assert 'aria-label="{{ cat.label }}"' in css
-        assert 'action="/refresh/site"' in css
-        assert 'aria-label="Refresh site"' in css
+        assert '{% include "_site_nav.html" %}' in page
+        assert 'class="back-link nav-category-link"' not in page
+        assert 'action="/refresh/site"' in page
+        assert 'aria-label="Refresh site"' in page

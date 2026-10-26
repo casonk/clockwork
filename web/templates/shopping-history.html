@@ -77,8 +77,10 @@
       .history-table th:nth-child(3), .history-table td:nth-child(3) { display: none; }
     }
   </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
 </head>
 <body>
+{% include "_site_nav.html" %}
 
 <header>
   <a href="/shopping" class="back-link" title="Shopping">🛍️</a>
