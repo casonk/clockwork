@@ -48,8 +48,10 @@
     .empty { color:var(--muted); font-style:italic; padding:20px 0; text-align:center; }
     @media (max-width:560px) { header { padding:12px 16px; } main { padding:14px 16px 80px; } }
   </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
 </head>
 <body>
+{% include "_site_nav.html" %}
 <header>
   <div class="header-left">
     <a class="back-link" href="/home" title="Home">🏠</a>

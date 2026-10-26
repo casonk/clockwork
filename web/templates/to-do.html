@@ -62,8 +62,10 @@
     .toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
     @media (max-width:600px) { header { flex-wrap:wrap; padding:10px 14px; } .item { min-height:48px; } }
   </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
 </head>
 <body>
+{% include "_site_nav.html" %}
 <header>
   <div class="header-left">
     <a href="/home" class="back-link" title="Home">🏠</a>

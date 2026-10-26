@@ -31,41 +31,11 @@
       min-height: 100vh;
     }
 
-    header {
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      padding: 14px 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      flex-wrap: nowrap;
-      position: sticky;
-      top: 0;
-      z-index: 100;
-    }
-    header h1 { font-size: 17px; font-weight: 700; letter-spacing: 0; min-width: 0; }
-    .home-title { white-space: nowrap; }
-    .nav-links { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 1 1 auto; flex-wrap: nowrap; min-width: 0; }
-    .nav-link {
-      width: 30px;
-      height: 30px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      flex: 0 0 auto;
-      border-radius: 7px;
-      font-size: 18px; text-decoration: none;
-      opacity: 0.6; transition: opacity 0.15s;
-    }
-    .nav-link:hover { opacity: 1; }
-    .nav-link-text { gap: 5px; font-size: 13px; font-weight: 500; width: auto; padding: 0 4px; }
-    .nav-form { display: inline-flex; flex: 0 0 auto; margin: 0; }
-    .nav-button { border: 0; background: transparent; color: inherit; cursor: pointer; }
-    .nav-icon { display: inline; }
-    .nav-label { display: none; }
-
     main { max-width: 1100px; margin: 0 auto; padding: 28px 20px 80px; }
+    .home-heading-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 24px; }
+    .home-heading-row h1 { font-size: 22px; line-height: 1.25; }
+    .home-refresh { padding: 7px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface2); color: var(--text); font: inherit; cursor: pointer; }
+    .home-refresh:hover { border-color: var(--accent); }
 
     .group { margin-bottom: 32px; }
     .group-label {
@@ -189,12 +159,6 @@
     .card-actions form { flex: 1 1 74px; display: flex; min-width: 0; }
 
     @media (max-width: 640px) {
-      header { padding: 10px 12px; gap: 8px; }
-      .home-title { display: none; }
-      .nav-links { gap: 5px; }
-      .nav-link { width: 28px; height: 28px; }
-      .nav-label { display: none; }
-      .nav-icon { display: inline; }
       main { padding: 18px 12px 60px; }
       .card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
       .card { padding: 14px 12px; }
@@ -204,33 +168,20 @@
       .card-grid { grid-template-columns: 1fr; }
     }
   </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
 </head>
 <body>
-
-<header>
-  <h1><span aria-hidden="true">🏠</span><span class="home-title"> Internal Services</span></h1>
-  <div class="nav-links">
-    <a href="/groceries" class="nav-link" title="Groceries">🛒</a>
-    <a href="/shopping" class="nav-link" title="Shopping">🛍️</a>
-    <a href="/to-watch" class="nav-link" title="To Watch">📺</a>
-    <a href="/library" class="nav-link" title="Library">🎬</a>
-    <a href="/to-read" class="nav-link" title="To Read">📚</a>
-    <a href="/to-listen" class="nav-link" title="To Listen">🎧</a>
-    <a href="/to-do" class="nav-link" title="To Do">✅</a>
-    <a href="/to-tradility" class="nav-link" title="Tradility">📈</a>
-    <a href="/" class="nav-link" title="Clockwork">⏰</a>
-    {% for svc in top_bar_services %}<a href="{{ svc.url }}" class="nav-link" title="{{ svc.display }}" aria-label="{{ svc.display }}">{{ svc.icon }}</a>{% endfor %}
-    {% set nav_icons = {"Monitoring": "📊", "Pit Box": "💻", "Infrastructure": "🧰", "AI": "🤖"} %}
-    {% for cat in nav_categories %}<a href="{{ cat.href }}" class="nav-link" title="{{ cat.label }}" aria-label="{{ cat.label }}"><span class="nav-icon" aria-hidden="true">{{ nav_icons.get(cat.label, "🔗") }}</span><span class="nav-label">{{ cat.label }}</span></a>{% endfor %}
-    <form method="post" action="/refresh/site" class="nav-form">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input type="hidden" name="next" value="/home">
-      <button type="submit" class="nav-link nav-button" title="Refresh site" aria-label="Refresh site">↻</button>
-    </form>
-  </div>
-</header>
+{% include "_site_nav.html" %}
 
 <main>
+  <div class="home-heading-row">
+    <h1>Internal Services</h1>
+    <form method="post" action="/refresh/site">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="next" value="/home">
+      <button type="submit" class="home-refresh" title="Refresh site" aria-label="Refresh site">↻ Refresh</button>
+    </form>
+  </div>
   {% with messages = get_flashed_messages(with_categories=true) %}
   {% if messages %}
   <div style="margin-bottom:18px;display:flex;flex-direction:column;gap:6px;">
