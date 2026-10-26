@@ -514,6 +514,26 @@ def test_cooperative_pause_acknowledges_and_waits_for_resume(tmp_path, monkeypat
     assert not paused_file.exists()
 
 
+def test_cooperative_pause_clears_request_from_dead_lease(tmp_path, monkeypatch):
+    pause_file = tmp_path / "pause"
+    paused_file = tmp_path / "paused"
+    pause_file.write_text("99999999\n")
+    paused_file.touch()
+
+    def dead_process(_pid, _signal):
+        raise ProcessLookupError
+
+    monkeypatch.setattr(upscale.os, "kill", dead_process)
+    assert not upscale.wait_while_paused(
+        lambda: False,
+        {},
+        pause_file=pause_file,
+        paused_file=paused_file,
+    )
+    assert not pause_file.exists()
+    assert not paused_file.exists()
+
+
 def test_ecu_source_is_found_among_sibling_checkouts(tmp_path):
     (tmp_path / "clockwork").mkdir()
     package = tmp_path / "gpu-arbiter" / "src" / "central_ecu"
