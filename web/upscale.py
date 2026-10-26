@@ -1002,6 +1002,19 @@ def wait_while_paused(
     """Acknowledge a lease pause after rendering has yielded and wait for resume."""
     if not pause_file.exists():
         return False
+    try:
+        requester_pid = int(pause_file.read_text(encoding="ascii").strip())
+    except (OSError, ValueError):
+        requester_pid = 0
+    if requester_pid > 0:
+        try:
+            os.kill(requester_pid, 0)
+        except ProcessLookupError:
+            pause_file.unlink(missing_ok=True)
+            paused_file.unlink(missing_ok=True)
+            return False
+        except PermissionError:
+            pass
     write_status({**status, "state": "paused"})
     paused_file.parent.mkdir(parents=True, exist_ok=True)
     paused_file.touch(mode=0o600, exist_ok=True)
