@@ -243,12 +243,36 @@ Title-wide requests keep episode order. The render resumes from its saved
 manifest after the requested work completes. Each episode render acquires an
 ECU lease: unattended work uses `batch` priority, requested work uses
 `interactive`, and both are preemptible by higher-priority live playback. The
-systemd service is only the queue coordinator; do not register it as a GPU
-consumer in the ECU because the episode render itself owns the lease. If
-the ECU is unavailable, unattended work falls back to low OS priority.
+systemd service is only the queue coordinator; its pause-file consumer
+cooperatively yields when an external lease needs the GPU. The episode render
+skips that consumer for its own lease. If the ECU is unavailable, unattended
+work falls back to low OS priority.
 After a preemption the worker does not retry at once: it asks
 `ecu retry-after --json`, which rate limits preemptible leases with AIMD, and
 pauses (state `throttled`) until then, waking early for a render request.
+
+To configure cooperative yielding, add a `pause-file` consumer to
+`~/.config/central-ecu/config.toml`:
+
+```toml
+[[consumers]]
+name = "clockwork-upscale"
+kind = "pause-file"
+unit = "clockwork-upscale.service"
+process = "/.local/share/clockwork/upscale-venv/bin/python"
+pause_file = "~/.cache/clockwork/upscale-pause"
+acknowledgement_file = "~/.cache/clockwork/upscale-paused"
+pause_timeout_s = 180
+```
+
+Keep the paths aligned with `CLOCKWORK_UPSCALE_PAUSE_FILE` and
+`CLOCKWORK_UPSCALE_PAUSED_FILE` in `config/upscale.env.local`. The worker saves
+the current chunk, exits its render subprocess to release GPU memory, then
+acknowledges and waits for ECU to remove the pause request. Its own per-render
+lease uses `--skip-consumer clockwork-upscale`, so it does not pause itself.
+The `process` value should match the full Python executable path reported by
+`nvidia-smi` (the suffix shown works with the example Clockwork unit). After
+installing the config and environment settings, restart `clockwork-upscale`.
 
 Measured on an RTX 3090: unthrottled, 360p animation runs about 85 fps (3x
 real time) and 1080p live action to 4K about 6 fps, at 300 W and over 90 C.
