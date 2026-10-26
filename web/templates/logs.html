@@ -64,8 +64,10 @@
     }
     .fab:hover { filter: brightness(1.15); }
   </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
 </head>
 <body>
+{% include "_site_nav.html" %}
 
 <header>
   <a href="/">← Back</a>

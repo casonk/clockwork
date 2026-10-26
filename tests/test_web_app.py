@@ -1578,3 +1578,31 @@ def test_registry_entry_sets_top_bar_pin_and_icon(tmp_path, monkeypatch):
     with web_app.app.test_request_context("/home", base_url="https://clockwork.home.internal"):
         pinned = web_app._top_bar_services(web_app._load_portal_groups())
     assert [(c["name"], c["icon"]) for c in pinned] == [("example-web", "💼")]
+
+
+def test_site_navigation_groups_registry_services_and_keeps_pins_first(tmp_path, monkeypatch):
+    (tmp_path / "services.local.toml").write_text(
+        "[[services]]\n"
+        'name = "pinned-web"\ndescription = "Pinned Example"\n'
+        'hostname = "pinned.example.invalid"\naccess_mode = "shared-mtls"\n'
+        'owner_repo = "./util-repos/tachometer"\ntop_bar = true\nicon = "📌"\n\n'
+        "[[services]]\n"
+        'name = "other-web"\ndescription = "Other Example"\n'
+        'hostname = "other.example.invalid"\naccess_mode = "shared-mtls"\n'
+        'owner_repo = "./util-repos/tachometer"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(web_app, "WIRING_HARNESS_DIR", tmp_path)
+
+    response = web_app.app.test_client().get("/home")
+    assert response.status_code == 200
+    nav = (
+        response.get_data(as_text=True)
+        .split('<nav class="cw-site-nav"', 1)[1]
+        .split("</nav>", 1)[0]
+    )
+    assert nav.index("Pinned") < nav.index("Monitoring")
+    assert nav.count('href="https://pinned.example.invalid"') == 1
+    assert nav.count('href="https://other.example.invalid"') == 1
+    assert 'href="/groceries"' in nav
+    assert 'href="/library"' in nav

@@ -223,8 +223,10 @@
       font-size: 13px; margin-bottom: 12px; color: #e05252;
     }
   </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
 </head>
 <body>
+{% include "_site_nav.html" %}
 
 <header>
   <a href="/" class="back-link" title="Home">←</a>
