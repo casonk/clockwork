@@ -34,6 +34,8 @@ def list_files(tmp_path, monkeypatch):
         "LISTEN_LIST_HISTORY_FILE": tmp_path / "to-listen-history.jsonl",
         "INVEST_LIST_FILE": tmp_path / "to-invest.json",
         "INVEST_LIST_HISTORY_FILE": tmp_path / "to-invest-history.jsonl",
+        "CODE_LIST_FILE": tmp_path / "to-code.json",
+        "CODE_LIST_HISTORY_FILE": tmp_path / "to-code-history.jsonl",
         "GROCERIES_FILE": tmp_path / "groceries.json",
         "GROCERIES_HISTORY_FILE": tmp_path / "groceries-history.jsonl",
         "SHOPPING_FILE": tmp_path / "shopping.json",
@@ -109,6 +111,91 @@ def test_to_list_api_add_toggle_delete_item(client, page, api_path, category, pa
     page_resp = client.get(f"/{page}")
     assert page_resp.status_code == 200
     assert "localStorage" not in page_resp.get_data(as_text=True)
+
+
+def test_to_code_list_renders_grouped_repositories_and_accepts_backlog_items(client, list_files):
+    page = client.get("/to-code")
+    html = page.get_data(as_text=True)
+
+    assert page.status_code == 200
+    assert all(group in html for group in ("archive", "doc", "health", "util", "sec", "dedicated"))
+    assert 'href="/to-code"' in html
+    assert 'name="repo"' in html
+    assert "personal-finance" in html
+    assert 'name="category" aria-label="Repo group" required' in html
+    assert html.count('action="/to-code/add-item"') == 1
+
+    csrf = _csrf(client, "/api/code")
+    added = client.post(
+        "/api/code/add-item",
+        json={
+            "category": "dedicated",
+            "repo": "personal-finance",
+            "item": "Add reconciliation report",
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert added.status_code == 200
+    item = added.get_json()["data"]["categories"][-1]["items"][0]
+    assert item == {
+        "title": "Add reconciliation report",
+        "done": False,
+        "repo": "personal-finance",
+    }
+    assert json.loads(list_files["CODE_LIST_FILE"].read_text()) == added.get_json()["data"]
+    grouped_page = client.get("/to-code").get_data(as_text=True)
+    assert "Add reconciliation report" in grouped_page
+    assert 'data-type="personal-finance"' in grouped_page
+
+    form_add = client.post(
+        "/to-code/add-item",
+        data={
+            "csrf_token": csrf,
+            "category": "util",
+            "repo": "clockwork",
+            "item": "Document scheduler setup",
+        },
+        follow_redirects=True,
+    )
+    assert form_add.status_code == 200
+    assert "Document scheduler setup" in form_add.get_data(as_text=True)
+    saved_categories = json.loads(list_files["CODE_LIST_FILE"].read_text())["categories"]
+    util_items = next(
+        category["items"] for category in saved_categories if category["name"] == "util"
+    )
+    assert any(item["title"] == "Document scheduler setup" for item in util_items)
+
+    invalid_group = client.post(
+        "/api/code/add-item",
+        json={"category": "archvie", "repo": "clockwork", "item": "Wrong group"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert invalid_group.status_code == 404
+    assert "archvie" not in {
+        category["name"]
+        for category in json.loads(list_files["CODE_LIST_FILE"].read_text())["categories"]
+    }
+
+
+def test_to_code_list_distinguishes_same_item_across_repositories(client):
+    csrf = _csrf(client, "/api/code")
+    for repo in ("personal-finance", "clockwork"):
+        response = client.post(
+            "/api/code/add-item",
+            json={"category": "dedicated", "repo": repo, "item": "Improve docs"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert response.status_code == 200
+
+    toggled = client.post(
+        "/api/code/toggle-item",
+        json={"category": "dedicated", "repo": "clockwork", "item": "Improve docs"},
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    items = toggled.get_json()["data"]["categories"][-1]["items"]
+    assert [item["done"] for item in items] == [False, True]
 
 
 def test_list_store_is_an_explicit_opt_in_bridge(list_files, monkeypatch):

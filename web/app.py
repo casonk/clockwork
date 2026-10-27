@@ -158,6 +158,14 @@ INVEST_LIST_HISTORY_FILE = Path(
         "CLOCKWORK_INVEST_LIST_HISTORY_FILE", BASE_DIR / "config" / "to-invest-history.jsonl"
     )
 )
+CODE_LIST_FILE = Path(
+    os.environ.get("CLOCKWORK_CODE_LIST_FILE", BASE_DIR / "config" / "to-code.json")
+)
+CODE_LIST_HISTORY_FILE = Path(
+    os.environ.get(
+        "CLOCKWORK_CODE_LIST_HISTORY_FILE", BASE_DIR / "config" / "to-code-history.jsonl"
+    )
+)
 
 
 def _resolve_manifest_path(canonical_rel: str) -> Path:
@@ -3342,6 +3350,32 @@ SIMPLE_LIST_CONFIGS = {
         "ollama": True,
         "holdings_sync": True,
     },
+    "code": {
+        "page": "to-code",
+        "file_var": "CODE_LIST_FILE",
+        "history_var": "CODE_LIST_HISTORY_FILE",
+        "title": "To Code",
+        "icon": "💻",
+        "primary": "title",
+        "status": "done",
+        "default_category": "util",
+        "default_categories": [
+            "archive",
+            "doc",
+            "health",
+            "research",
+            "util",
+            "sec",
+            "dedicated",
+        ],
+        "done_label": "done",
+        "todo_label": "to code",
+        "reset_label": "not done",
+        "item_placeholder": "Add backlog item...",
+        "category_placeholder": "New repo group...",
+        "name_label": "Repo group",
+        "extras": ["repo"],
+    },
 }
 
 
@@ -3512,12 +3546,16 @@ def _simple_item_value(item: dict, cfg: dict) -> str:
     return str(item.get(cfg["primary"]) or "").strip()
 
 
-def _find_simple_item(cat: dict, value: str, cfg: dict) -> dict | None:
+def _find_simple_item(cat: dict, value: str, cfg: dict, *, repo: str | None = None) -> dict | None:
     wanted = value.strip().upper() if cfg["primary"] == "ticker" else value.strip().lower()
     for item in cat["items"]:
         current = _simple_item_value(item, cfg)
         current = current.upper() if cfg["primary"] == "ticker" else current.lower()
-        if current == wanted:
+        if current == wanted and (
+            cfg.get("key") != "code"
+            or repo is None
+            or str(item.get("repo") or "").casefold() == repo.strip().casefold()
+        ):
             return item
     return None
 
@@ -3545,6 +3583,39 @@ def _find_todo_item(cat: dict, title: str) -> dict | None:
 def _render_simple_list(key: str):
     cfg = _simple_list_config(key)
     data = load_simple_list(key)
+    if key == "code":
+        category_views = []
+        visible_repos = set()
+        for category in data["categories"]:
+            by_repo = {}
+            for item in category["items"]:
+                repo = str(item.get("repo") or "Unassigned")
+                group = by_repo.setdefault(repo.casefold(), {"name": repo, "items": []})
+                group["items"].append(item)
+                visible_repos.add(repo)
+            groups = sorted(by_repo.values(), key=lambda group: group["name"].casefold())
+            for group in groups:
+                group["items"].sort(key=lambda item: bool(item.get(cfg["status"])))
+                group["remaining"] = sum(not item.get(cfg["status"]) for item in group["items"])
+            category_views.append({**category, "groups": groups})
+        total = sum(len(c["items"]) for c in data["categories"])
+        done_count = sum(
+            1 for c in data["categories"] for item in c["items"] if item.get(cfg["status"])
+        )
+        backup_exists, backup_mtimes = _backup_slot_info(cfg["file"])
+        return render_template(
+            "to-code.html",
+            cfg=cfg,
+            data=data,
+            category_views=category_views,
+            visible_repos=sorted(visible_repos, key=str.casefold),
+            known_repos=["personal-finance"],
+            total=total,
+            done_count=done_count,
+            todo_count=total - done_count,
+            backup_slots_exist=backup_exists,
+            backup_slots_mtime=backup_mtimes,
+        )
     total = sum(len(c["items"]) for c in data["categories"])
     done_count = sum(
         1 for c in data["categories"] for item in c["items"] if item.get(cfg["status"])
@@ -3567,6 +3638,11 @@ def _render_simple_list(key: str):
 @app.get("/to-do")
 def to_do():
     return _render_simple_list("todo")
+
+
+@app.get("/to-code")
+def to_code():
+    return _render_simple_list("code")
 
 
 @app.get("/to-watch")
@@ -3693,13 +3769,19 @@ def simple_list_add_item(page):
         flash(f'{cfg["name_label"]} "{category}" not found.', "error")
         return redirect(url_for(_simple_list_endpoint(key)))
     item = _parse_simple_item(raw, cfg)
+    repo = request.form.get("repo", "").strip()
+    if key == "code":
+        if not repo:
+            flash("Repository name cannot be empty.", "error")
+            return redirect(url_for(_simple_list_endpoint(key)) + f"#{_slug(category)}")
+        item["repo"] = repo
     value = _simple_item_value(item, cfg)
-    if _find_simple_item(cat, value, cfg):
-        flash(f'"{value}" is already in {category}.', "error")
+    if _find_simple_item(cat, value, cfg, repo=repo if key == "code" else None):
+        flash(f'"{value}" is already in {repo or category}.', "error")
         return redirect(url_for(_simple_list_endpoint(key)))
     cat["items"].append(item)
     save_simple_list(key, data)
-    _log_event(cfg["history_file"], "add", item=value, category=category)
+    _log_event(cfg["history_file"], "add", item=value, category=category, detail=repo)
     return redirect(url_for(_simple_list_endpoint(key)) + f"#{_slug(category)}")
 
 
@@ -3709,11 +3791,12 @@ def simple_list_toggle_item(page):
     cfg = _simple_list_config(key)
     category = request.form.get("category", "").strip()
     value = request.form.get("item", request.form.get("title", "")).strip()
+    repo = request.form.get("repo", "").strip()
     data = load_simple_list(key)
     cat = _find_simple_category(data, category)
     new_state = None
     if cat:
-        item = _find_simple_item(cat, value, cfg)
+        item = _find_simple_item(cat, value, cfg, repo=repo if key == "code" else None)
         if item:
             item[cfg["status"]] = not item.get(cfg["status"], False)
             new_state = item[cfg["status"]]
@@ -3734,11 +3817,15 @@ def simple_list_delete_item(page):
     cfg = _simple_list_config(key)
     category = request.form.get("category", "").strip()
     value = request.form.get("item", request.form.get("title", "")).strip()
+    repo = request.form.get("repo", "").strip()
     data = load_simple_list(key)
     cat = _find_simple_category(data, category)
     if cat:
         cat["items"] = [
-            item for item in cat["items"] if _simple_item_value(item, cfg).lower() != value.lower()
+            item
+            for item in cat["items"]
+            if _simple_item_value(item, cfg).lower() != value.lower()
+            or (key == "code" and str(item.get("repo") or "").casefold() != repo.casefold())
         ]
     save_simple_list(key, data)
     _log_event(cfg["history_file"], "remove", item=value, category=category)
@@ -3789,6 +3876,7 @@ def simple_list_history(page):
 def _simple_list_endpoint(key: str) -> str:
     return {
         "todo": "to_do",
+        "code": "to_code",
         "watch": "to_watch",
         "read": "to_read",
         "listen": "to_listen",
@@ -3861,13 +3949,18 @@ def api_simple_add_item(list_key):
         return jsonify({"ok": False, "error": "item/title/ticker required"}), 400
     data = load_simple_list(key)
     cat = _find_simple_category(data, category)
-    if cat is None and bool(payload.get("create_category", True)):
+    if key != "code" and cat is None and bool(payload.get("create_category", True)):
         cat = {"name": category, "items": []}
         data["categories"].append(cat)
         _log_event(cfg["history_file"], "add-category", category=category)
     if cat is None:
         return jsonify({"ok": False, "error": f'{cfg["name_label"]} "{category}" not found'}), 404
     item = _parse_simple_item(raw, cfg)
+    repo = str(payload.get("repo") or "").strip()
+    if key == "code":
+        if not repo:
+            return jsonify({"ok": False, "error": "repo required"}), 400
+        item["repo"] = repo
     if cfg["primary"] == "ticker" and payload.get("name"):
         item["name"] = str(payload["name"]).strip()
     if payload.get("year") and "year" in cfg.get("extras", []):
@@ -3877,11 +3970,11 @@ def api_simple_add_item(list_key):
     elif "done" in payload:
         item[cfg["status"]] = bool(payload["done"])
     value = _simple_item_value(item, cfg)
-    if _find_simple_item(cat, value, cfg):
-        return jsonify({"ok": False, "error": f'"{value}" already in {category}'}), 409
+    if _find_simple_item(cat, value, cfg, repo=repo if key == "code" else None):
+        return jsonify({"ok": False, "error": f'"{value}" already in {repo or category}'}), 409
     cat["items"].append(item)
     save_simple_list(key, data)
-    _log_event(cfg["history_file"], "add", item=value, category=category)
+    _log_event(cfg["history_file"], "add", item=value, category=category, detail=repo)
     return jsonify({"ok": True, "data": data})
 
 
@@ -3894,9 +3987,12 @@ def api_simple_toggle_item(list_key):
         return error
     category = str(payload.get("category") or "").strip()
     value = str(payload.get("item") or payload.get("title") or payload.get("ticker") or "").strip()
+    repo = str(payload.get("repo") or "").strip()
+    if key == "code" and not repo:
+        return jsonify({"ok": False, "error": "repo required"}), 400
     data = load_simple_list(key)
     cat = _find_simple_category(data, category)
-    item = _find_simple_item(cat, value, cfg) if cat else None
+    item = _find_simple_item(cat, value, cfg, repo=repo if key == "code" else None) if cat else None
     if item is None:
         return jsonify({"ok": False, "error": "item not found"}), 404
     if cfg["status"] in payload:
@@ -3924,13 +4020,19 @@ def api_simple_delete_item(list_key):
         return error
     category = str(payload.get("category") or "").strip()
     value = str(payload.get("item") or payload.get("title") or payload.get("ticker") or "").strip()
+    repo = str(payload.get("repo") or "").strip()
+    if key == "code" and not repo:
+        return jsonify({"ok": False, "error": "repo required"}), 400
     data = load_simple_list(key)
     cat = _find_simple_category(data, category)
     if cat is None:
         return jsonify({"ok": False, "error": "category not found"}), 404
     before = len(cat["items"])
     cat["items"] = [
-        item for item in cat["items"] if _simple_item_value(item, cfg).lower() != value.lower()
+        item
+        for item in cat["items"]
+        if _simple_item_value(item, cfg).lower() != value.lower()
+        or (key == "code" and str(item.get("repo") or "").casefold() != repo.casefold())
     ]
     if len(cat["items"]) == before:
         return jsonify({"ok": False, "error": "item not found"}), 404
@@ -4927,6 +5029,16 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
             "hostname": "",
             "access_mode": "shared-mtls",
             "icon": "✅",
+        }
+    )
+    groups["Clockwork"].append(
+        {
+            "name": "clockwork-to-code",
+            "display": "To Code",
+            "url": "/to-code",
+            "hostname": "",
+            "access_mode": "shared-mtls",
+            "icon": "💻",
         }
     )
     groups["Clockwork"].append(

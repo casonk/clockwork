@@ -1596,6 +1596,7 @@ def test_site_navigation_groups_registry_services_and_keeps_pins_first(tmp_path,
 
     response = web_app.app.test_client().get("/home")
     assert response.status_code == 200
+    assert '<span class="card-name">To Code</span>' in response.get_data(as_text=True)
     nav = (
         response.get_data(as_text=True)
         .split('<nav class="cw-site-nav"', 1)[1]
@@ -1606,3 +1607,4 @@ def test_site_navigation_groups_registry_services_and_keeps_pins_first(tmp_path,
     assert nav.count('href="https://other.example.invalid"') == 1
     assert 'href="/groceries"' in nav
     assert 'href="/library"' in nav
+    assert 'href="/to-code"' in nav
