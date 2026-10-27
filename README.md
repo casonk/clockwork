@@ -268,7 +268,8 @@ pause_timeout_s = 180
 Keep the paths aligned with `CLOCKWORK_UPSCALE_PAUSE_FILE` and
 `CLOCKWORK_UPSCALE_PAUSED_FILE` in `config/upscale.env.local`. The worker saves
 the current chunk, exits its render subprocess to release GPU memory, then
-acknowledges and waits for ECU to remove the pause request. Its own per-render
+acknowledges and waits for ECU to remove the pause request. It also acknowledges
+requests while idle, throttled, or waiting for disk space. Its own per-render
 lease uses `--skip-consumer clockwork-upscale`, so it does not pause itself.
 The `process` value should match the full Python executable path reported by
 `nvidia-smi` (the suffix shown works with the example Clockwork unit). After
