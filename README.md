@@ -384,8 +384,17 @@ reviewed migration.
 
 ### Optional external personal-list authority
 
-Clockwork keeps JSON-file list storage by default. To move the To Do, Watch,
-Read, Listen, and Invest compatibility routes onto an external SQLite storage
+Clockwork's **To Code** list is available from `/home` and the Lists menu at
+`/to-code`. It groups backlog items by repository family and repository, with
+an explicit family selector when adding an item. Its default store is the
+gitignored `config/to-code.json`; `CLOCKWORK_CODE_LIST_FILE` and
+`CLOCKWORK_CODE_LIST_HISTORY_FILE` can point to other local files. Importing
+repo `BACKLOG.md` entries is a one-time local snapshot. Keep each repo's tracked
+`BACKLOG.md` current when completing an item; the page does not write back to
+those files.
+
+Clockwork keeps JSON-file list storage by default. To move the To Do, Code,
+Watch, Read, Listen, and Invest compatibility routes onto an external SQLite storage
 authority, install a reviewed adapter package that exposes
 `ClockworkPersonalListAdapter`, `PersonalListSpec`, and `SQLiteResourceStore`,
 then set these owner-only environment values:

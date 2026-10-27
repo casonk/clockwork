@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add a To Code portfolio backlog list grouped by repository family and
+  repository, with explicit family selection, local history, and a Home link.
 - Cancel a waiting per-render ECU lease when an external pause request arrives,
   allowing the queue coordinator to acknowledge without waiting for admission.
 - Wake the upscaler queue for ECU pause requests even while idle, throttled,
