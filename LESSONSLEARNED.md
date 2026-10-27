@@ -20,7 +20,8 @@ should change how future sessions work in this repo.
   batch priority and a requested render can use interactive priority. Keep the
   queue coordinator out of stop/start consumers; a pause-file consumer can
   acknowledge only after its render releases the GPU. All queue waits must wake
-  for pause requests, including idle, throttled, and disk-floor waits. Promote
+  for pause requests, including ECU admission, idle, throttled, and disk-floor
+  waits. Promote
   on-demand requests while
   preserving title episode order.
 - Per-job scheduler controls must select exactly one manifest job; invoking a

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Cancel a waiting per-render ECU lease when an external pause request arrives,
+  allowing the queue coordinator to acknowledge without waiting for admission.
 - Wake the upscaler queue for ECU pause requests even while idle, throttled,
   or waiting for disk space, so a waiting lease receives acknowledgment.
 
