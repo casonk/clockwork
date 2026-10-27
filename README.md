@@ -271,6 +271,9 @@ the current chunk, exits its render subprocess to release GPU memory, then
 acknowledges and waits for ECU to remove the pause request. It also acknowledges
 requests while idle, throttled, or waiting for disk space. Its own per-render
 lease uses `--skip-consumer clockwork-upscale`, so it does not pause itself.
+It also passes the same pause path to ECU as a pre-start cancellation file,
+allowing the coordinator to acknowledge an external request while its own
+render lease is waiting for admission, resources, or another lease.
 The `process` value should match the full Python executable path reported by
 `nvidia-smi` (the suffix shown works with the example Clockwork unit). After
 installing the config and environment settings, restart `clockwork-upscale`.

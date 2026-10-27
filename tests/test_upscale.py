@@ -368,6 +368,9 @@ def test_requested_render_uses_interactive_preemptible_ecu_lease(tmp_path, monke
     assert command[:4] == ["ecu", "run", "--gpu", "quiet"]
     assert command[command.index("--priority") + 1] == "interactive"
     assert command[command.index("--preemptible")] == "--preemptible"
+    assert command[command.index("--cancel-before-start-file") + 1] == str(
+        Path.home() / ".cache" / "clockwork" / "upscale-pause"
+    )
     assert command[command.index("--max-wait") + 1] == "24h"
     assert command[command.index("--skip-consumer") + 1] == "clockwork-upscale"
     assert command[command.index("--wait") : command.index("--wait") + 2] == ["--wait", "--"]
