@@ -82,6 +82,11 @@ def run_render(
             "--priority",
             priority,
             "--preemptible",
+            "--cancel-before-start-file",
+            os.environ.get(
+                "CLOCKWORK_UPSCALE_PAUSE_FILE",
+                str(Path.home() / ".cache" / "clockwork" / "upscale-pause"),
+            ),
             "--max-wait",
             "24h",
             "--wait",
