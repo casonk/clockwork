@@ -23,4 +23,8 @@ Mark items `[x]` when complete and move them to Done.
 
 ## Done
 
+- [x] [manual:2026-10-26] **Add the To Code portfolio backlog list** — group
+  items by repository family and repository, require explicit family selection,
+  and link the local list from Home and the Lists menu.
+
 - [x] [manual:2026-10-19] **AI upscaler: let the GPU really rest, and make renders resumable** — chunked rendering: chunks of whole 6 s streaming segments (~60 s of GPU work each) with the NVENC session closed between them, so rests reach P8 (~20 W) instead of P2 (~120 W). Manifest-based resume locates the next frame by content (timestamp seeks were off by ±1 frame depending on the container), the audio is encoded once at the join, and renders in progress stream from their finished chunks. ECU pause-file requests now stop cleanly after a saved chunk and resume after the lease.

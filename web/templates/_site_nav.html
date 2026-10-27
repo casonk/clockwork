@@ -8,6 +8,7 @@
         <a href="/groceries" {% if request.path.startswith('/groceries') %}aria-current="page"{% endif %}>🛒 Groceries</a>
         <a href="/shopping" {% if request.path.startswith('/shopping') %}aria-current="page"{% endif %}>🛍️ Shopping</a>
         <a href="/to-do" {% if request.path == '/to-do' %}aria-current="page"{% endif %}>✅ To Do</a>
+        <a href="/to-code" {% if request.path == '/to-code' %}aria-current="page"{% endif %}>💻 To Code</a>
         <a href="/to-invest" {% if request.path == '/to-invest' %}aria-current="page"{% endif %}>📈 To Invest</a>
         <a href="/to-tradility" {% if request.path == '/to-tradility' %}aria-current="page"{% endif %}>📊 Tradility</a>
       </div>
