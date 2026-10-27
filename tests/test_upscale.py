@@ -417,6 +417,22 @@ def test_idle_worker_wakes_when_a_render_is_requested(tmp_path, monkeypatch):
     assert clock[0] < 60
 
 
+def test_waiting_worker_wakes_for_ecu_pause(tmp_path, monkeypatch):
+    priority = tmp_path / "priority.json"
+    pause = tmp_path / "pause"
+    clock = [0.0]
+    monkeypatch.setattr(upscale.time, "time", lambda: clock[0])
+
+    def sleep(seconds):
+        clock[0] += seconds
+        if clock[0] >= 4:
+            pause.write_text("12345\n")
+
+    monkeypatch.setattr(upscale.time, "sleep", sleep)
+    upscale.wait_for_request(3600, lambda: False, priority, pause_file=pause)
+    assert 4 <= clock[0] < 10
+
+
 def test_cooling_ends_at_once_when_the_service_stops():
     fake = FakeClock()
     stop = []

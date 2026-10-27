@@ -908,9 +908,13 @@ def progress_reporter(job: Job, base: dict[str, Any]) -> Callable[[int, float], 
 
 
 def wait_for_request(
-    seconds: float, should_stop: Callable[[], bool], path: Path | None = None
+    seconds: float,
+    should_stop: Callable[[], bool],
+    path: Path | None = None,
+    *,
+    pause_file: Path = PAUSE_FILE,
 ) -> None:
-    """Sleep up to ``seconds``, waking early when a render is requested."""
+    """Sleep until a render or ECU pause is requested, or the delay expires."""
     path = path or PRIORITY_FILE
 
     def stamp() -> float:
@@ -921,8 +925,10 @@ def wait_for_request(
 
     before, deadline = stamp(), time.time() + seconds
     while time.time() < deadline and not should_stop():
-        time.sleep(min(10.0, max(deadline - time.time(), 0.0)))
-        if stamp() != before:
+        if pause_file.exists():
+            return
+        time.sleep(min(2.0, max(deadline - time.time(), 0.0)))
+        if pause_file.exists() or stamp() != before:
             return
 
 
