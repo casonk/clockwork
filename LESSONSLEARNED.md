@@ -14,6 +14,11 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
+- Keep the shared To Code list as an operational view of repo backlogs. Require
+  an explicit repository family and repository for each entry; reject unknown
+  families in the API, and reconcile each repo's tracked `BACKLOG.md` when work
+  is completed because the local list does not write back.
+
 - Configure the ECU to recognize active HLS `ffmpeg` processes at live
   priority; it observes process activity rather than requiring an app token
   API. Give each episode render its own ECU lease so unattended work can use
