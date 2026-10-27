@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Wake the upscaler queue for ECU pause requests even while idle, throttled,
+  or waiting for disk space, so a waiting lease receives acknowledgment.
+
 - Cooperatively yield the AI upscaler to ECU leases after saving its current
   chunk, release the render subprocess's GPU memory, then resume when the lease
   ends.
