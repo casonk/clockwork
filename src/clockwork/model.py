@@ -79,6 +79,8 @@ class TargetOverrides:
     after: tuple[str, ...] | None = None
     wants: tuple[str, ...] | None = None
     environment: dict[str, str] | None = None
+    start_condition: tuple[str, ...] | None = None
+    time_limit: str | None = None
     randomized_delay_sec: str | None = None
     accuracy_sec: str | None = None
 
@@ -102,6 +104,14 @@ class JobSpec:
     after: tuple[str, ...] = ()
     wants: tuple[str, ...] = ()
     start_limit_interval_sec: str | None = None
+    # systemd ``ExecCondition=`` commands: a job whose condition exits 1-254 is
+    # skipped rather than failed, and 255 or a crash fails it. This is how a
+    # start guard (for example traction-control's job_guard) travels with the
+    # rendered unit instead of through a drop-in that must be re-installed.
+    start_condition: tuple[str, ...] = ()
+    # Wall-clock bound on one run: ``TimeoutStartSec=`` for a oneshot service,
+    # which is "starting" until it exits, and ``RuntimeMaxSec=`` otherwise.
+    time_limit: str | None = None
     environment: dict[str, str] = field(default_factory=dict)
     environment_files: tuple[str, ...] = ()
     user: str | None = None
@@ -163,6 +173,10 @@ class JobSpec:
             changes["wants"] = overrides.wants
         if overrides.environment is not None:
             changes["environment"] = dict(overrides.environment)
+        if overrides.start_condition is not None:
+            changes["start_condition"] = overrides.start_condition
+        if overrides.time_limit is not None:
+            changes["time_limit"] = overrides.time_limit or None
         return replace(self, **changes)
 
     def for_launchd(self) -> JobSpec:
@@ -190,6 +204,10 @@ class JobSpec:
             raise ValueError(
                 f"job {self.name!r} has unsupported service_type {self.service_type!r}"
             )
+        if any(not command.strip() for command in self.start_condition):
+            raise ValueError(f"job {self.name!r} has an empty start_condition")
+        if self.time_limit is not None and not self.time_limit.strip():
+            raise ValueError(f"job {self.name!r} has an empty time_limit")
         if self.timer is not None:
             self.timer.validate()
         if self.cron is not None:

@@ -26,6 +26,13 @@ def _as_str_tuple(value: Any) -> tuple[str, ...]:
     return tuple(result)
 
 
+def _as_command_tuple(value: Any) -> tuple[str, ...]:
+    """A command string or a list of them; one command is the common case."""
+    if isinstance(value, str):
+        return (value,)
+    return _as_str_tuple(value)
+
+
 def _as_str_dict(value: Any) -> dict[str, str]:
     if value is None:
         return {}
@@ -93,6 +100,8 @@ _LAUNCHD_OVERRIDE_KEYS = frozenset(
         "after",
         "wants",
         "environment",
+        "start_condition",
+        "time_limit",
         "timer",
     }
 )
@@ -140,6 +149,10 @@ def _parse_target_overrides(value: Any, *, target: str) -> TargetOverrides | Non
         after=_as_str_tuple(value["after"]) if "after" in value else None,
         wants=_as_str_tuple(value["wants"]) if "wants" in value else None,
         environment=_as_str_dict(value["environment"]) if "environment" in value else None,
+        start_condition=(
+            _as_command_tuple(value["start_condition"]) if "start_condition" in value else None
+        ),
+        time_limit=_as_optional_str(value.get("time_limit"), field=f"{target}.time_limit"),
         randomized_delay_sec=_as_optional_str(
             timer_value.get("randomized_delay_sec"), field=f"{target}.timer.randomized_delay_sec"
         ),
@@ -162,6 +175,8 @@ def _parse_job(value: Any) -> JobSpec:
         after=_as_str_tuple(value.get("after")),
         wants=_as_str_tuple(value.get("wants")),
         start_limit_interval_sec=value.get("start_limit_interval_sec"),
+        start_condition=_as_command_tuple(value.get("start_condition")) or (),
+        time_limit=_as_optional_str(value.get("time_limit"), field="time_limit"),
         environment=_as_str_dict(value.get("environment")),
         environment_files=_as_str_tuple(value.get("environment_files")),
         user=value.get("user"),
