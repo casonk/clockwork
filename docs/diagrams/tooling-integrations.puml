@@ -1,5 +1,5 @@
 @startuml
-title clockwork Tooling Integrations
+title checkout Tooling Integrations
 left to right direction
 skinparam shadowing false
 skinparam defaultFontName Monospace
@@ -12,7 +12,7 @@ rectangle "config/scripts/clockwork-system-install\n0 detected tools" as source_
 rectangle "scripts/activate.sh\n3 detected tools" as source_scripts_activate_sh #E0F2FE
 rectangle "scripts/bootstrap_clockwork_web_macos.sh\n3 detected tools" as source_scripts_bootstrap_clockwork_web_macos_sh #E0F2FE
 rectangle "scripts/run_clockwork_web_macos.sh\n0 detected tools" as source_scripts_run_clockwork_web_macos_sh #E0F2FE
-rectangle "scripts/run_tachometer_profile.sh\n3 detected tools" as source_scripts_run_tachometer_profile_sh #E0F2FE
+rectangle "scripts/run_tachometer_profile.sh\n1 detected tool" as source_scripts_run_tachometer_profile_sh #E0F2FE
 cloud "casonk/.github/.github/workflows/install-check.yml" as tool_casonk_github_github_workflows_install_check_yml #FEF3C7
 cloud "casonk/.github/.github/workflows/python-ci.yml" as tool_casonk_github_github_workflows_python_ci_yml #FEF3C7
 cloud "casonk/.github/.github/workflows/python-publish.yml" as tool_casonk_github_github_workflows_python_publish_yml #FEF3C7
@@ -21,8 +21,6 @@ cloud "chmod" as tool_chmod #FEF3C7
 cloud "install" as tool_install #FEF3C7
 cloud "mkdir" as tool_mkdir #FEF3C7
 cloud "pip" as tool_pip #FEF3C7
-cloud "run" as tool_run #FEF3C7
-cloud "summarize" as tool_summarize #FEF3C7
 cloud "systemctl" as tool_systemctl #FEF3C7
 cloud "tachometer" as tool_tachometer #FEF3C7
 cloud "visudo" as tool_visudo #FEF3C7
@@ -36,11 +34,9 @@ source_scripts_activate_sh --> tool_visudo
 source_scripts_bootstrap_clockwork_web_macos_sh --> tool_chmod
 source_scripts_bootstrap_clockwork_web_macos_sh --> tool_mkdir
 source_scripts_bootstrap_clockwork_web_macos_sh --> tool_pip
-source_scripts_run_tachometer_profile_sh --> tool_run
-source_scripts_run_tachometer_profile_sh --> tool_summarize
 source_scripts_run_tachometer_profile_sh --> tool_tachometer
 note as toolingGraphSummary
 Scanned 8 tooling entrypoints.
-Detected 13 third-party tools.
+Detected 11 third-party tools.
 end note
 @enduml
