@@ -41,6 +41,8 @@
     .item select.priority.p4, .item select.priority.unrated { color: #8890b0; }
     .item .in-person-toggle { font-size: 12px; opacity: .45; }
     .item .in-person-toggle.on { opacity: 1; border-color: #b08cf0; color: #b08cf0; }
+    .item .flag-toggle { font-size: 12px; opacity: .45; }
+    .item .flag-toggle.on { opacity: 1; border-color: #e0a84a; color: #e0a84a; }
     .add-item, .add-group { padding: 10px; background: #191c2a; }
     .add-item input[name="item"] { flex: 1; }
     .add-group { margin-top: 14px; border: 1px solid #2e3250; border-radius: 8px; }
@@ -89,7 +91,8 @@
       {% for p in priorities %}<option value="{{ p }}">{{ p }} · {{ priority_labels[p] }}</option>{% endfor %}
       <option value="unrated">Unrated</option>
     </select>
-    <label class="muted"><input type="checkbox" data-in-person-only> 🖥 In person only ({{ in_person_count }})</label>
+    <label class="muted"><input type="checkbox" data-in-person-only> 🖥 In person only ({{ flag_counts.in_person }})</label>
+    <label class="muted"><input type="checkbox" data-ready-only> ✅ Ready for an agent ({{ ready_count }})</label>
     <input type="search" placeholder="Search backlog…" aria-label="Search backlog" data-list-search>
     <span class="muted" data-filter-status aria-live="polite"></span>
   </div>
@@ -107,6 +110,8 @@
       {% for p in priorities %}<option value="{{ p }}">{{ p }} · {{ priority_labels[p] }}</option>{% endfor %}
     </select>
     <label class="muted"><input type="checkbox" name="in_person" value="yes"> 🖥 In person</label>
+    <label class="muted"><input type="checkbox" name="requires_human" value="yes"> 👤 Needs a human</label>
+    <label class="muted"><input type="checkbox" name="requires_sudo" value="yes"> 🔑 Needs sudo</label>
     <button type="submit">+ Add backlog item</button>
   </form>
   {% for cat in category_views %}
@@ -117,7 +122,7 @@
       <summary class="subcategory-header">{{ group.name }}<span class="count">{{ group.remaining }} open / {{ group["items"]|length }}</span></summary>
       <div class="items">
         {% for item in group["items"] %}
-        <div class="item" data-search-item="{{ item.title }} {{ item.repo }}" data-priority="{{ item.priority or 'unrated' }}" data-in-person="{{ 'true' if item.in_person else 'false' }}">
+        <div class="item" data-search-item="{{ item.title }} {{ item.repo }}" data-priority="{{ item.priority or 'unrated' }}" data-in-person="{{ 'true' if item.in_person else 'false' }}" data-ready="{{ 'false' if item.in_person or item.requires_human or item.requires_sudo else 'true' }}">
           <form method="post" action="/to-code/toggle-item">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="category" value="{{ cat.name }}">
@@ -144,6 +149,19 @@
             <input type="hidden" name="in_person" value="{{ '' if item.in_person else 'yes' }}">
             <button class="in-person-toggle {{ 'on' if item.in_person else '' }}" type="submit" title="{{ 'Needs in-person work at a machine (click to clear)' if item.in_person else 'Mark as needing in-person work at a machine' }}">🖥</button>
           </form>
+          {% for flag, icon, on_title, off_title in [
+            ('requires_human', '👤', 'Needs a human: logins, accounts, or decisions (click to clear)', 'Mark as needing a human to log in, create accounts, or decide'),
+            ('requires_sudo', '🔑', 'Needs sudo commands from you (click to clear)', 'Mark as needing sudo commands run by you'),
+          ] %}
+          <form method="post" action="/to-code/update-item">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="category" value="{{ cat.name }}">
+            <input type="hidden" name="item" value="{{ item.title }}">
+            <input type="hidden" name="repo" value="{{ item.repo }}">
+            <input type="hidden" name="{{ flag }}" value="{{ '' if item[flag] else 'yes' }}">
+            <button class="flag-toggle {{ 'on' if item[flag] else '' }}" type="submit" title="{{ on_title if item[flag] else off_title }}">{{ icon }}</button>
+          </form>
+          {% endfor %}
           <form method="post" action="/to-code/delete-item">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="category" value="{{ cat.name }}">

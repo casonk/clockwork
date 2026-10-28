@@ -2,10 +2,15 @@
 
 ## Unreleased
 
-- Add a P1-P4 priority rating and an "in person" flag (work that needs hands on
-  a specific machine) to To Code items. Items sort by priority within each
-  repository, can be filtered by either field, and are editable through
-  `/to-code/update-item` and `/api/code/update-item`.
+- Add a P1-P4 priority rating and "in person", "needs a human" and "needs sudo"
+  flags to To Code items. Items sort by priority within each repository, can be
+  filtered by priority or flag, and are editable through `/to-code/update-item`
+  and `/api/code/update-item`. A "Ready for an agent" filter shows items with
+  none of the flags.
+
+- Keep the To Code filters across the reload after any row action, and have its
+  add form follow the active repo-group and repository filter, narrowing the
+  repository suggestions.
 
 - Add a To Code portfolio backlog list grouped by repository family and
   repository, with explicit family selection, local history, and a Home link.
