@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add a **Machine load** page (`/ecu`, JSON at `/api/ecu`) showing the held lease
+  (command, priority, mode, GPU size), GPU memory and processes, and each
+  timer job's run/defer verdict from `ecu status --json`. It degrades to an
+  explanation when the `ecu` command is missing (`CLOCKWORK_ECU_BIN` overrides
+  the lookup).
 - Refer to the engine control unit generically in the upscaler README and
   `upscale.env.example` instead of naming its private repository.
 
