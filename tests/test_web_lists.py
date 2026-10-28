@@ -121,7 +121,7 @@ def test_to_code_list_renders_grouped_repositories_and_accepts_backlog_items(cli
     assert all(group in html for group in ("archive", "doc", "health", "util", "sec", "dedicated"))
     assert 'href="/to-code"' in html
     assert 'name="repo"' in html
-    assert "personal-finance" in html
+    assert "Repository (e.g. my-repo)" in html
     assert 'name="category" aria-label="Repo group" required' in html
     assert html.count('action="/to-code/add-item"') == 1
 
@@ -130,7 +130,7 @@ def test_to_code_list_renders_grouped_repositories_and_accepts_backlog_items(cli
         "/api/code/add-item",
         json={
             "category": "dedicated",
-            "repo": "personal-finance",
+            "repo": "sample-app",
             "item": "Add reconciliation report",
         },
         headers={"X-CSRF-Token": csrf},
@@ -141,12 +141,12 @@ def test_to_code_list_renders_grouped_repositories_and_accepts_backlog_items(cli
     assert item == {
         "title": "Add reconciliation report",
         "done": False,
-        "repo": "personal-finance",
+        "repo": "sample-app",
     }
     assert json.loads(list_files["CODE_LIST_FILE"].read_text()) == added.get_json()["data"]
     grouped_page = client.get("/to-code").get_data(as_text=True)
     assert "Add reconciliation report" in grouped_page
-    assert 'data-type="personal-finance"' in grouped_page
+    assert 'data-type="sample-app"' in grouped_page
 
     form_add = client.post(
         "/to-code/add-item",
@@ -178,9 +178,18 @@ def test_to_code_list_renders_grouped_repositories_and_accepts_backlog_items(cli
     }
 
 
+def test_to_code_form_suggests_repositories_named_in_the_environment(client, monkeypatch):
+    assert "extra-repo" not in client.get("/to-code").get_data(as_text=True)
+
+    monkeypatch.setenv("CLOCKWORK_CODE_EXTRA_REPOS", " extra-repo, ,other-repo ")
+    html = client.get("/to-code").get_data(as_text=True)
+
+    assert '<option value="extra-repo">' in html and '<option value="other-repo">' in html
+
+
 def test_to_code_list_distinguishes_same_item_across_repositories(client):
     csrf = _csrf(client, "/api/code")
-    for repo in ("personal-finance", "clockwork"):
+    for repo in ("sample-app", "clockwork"):
         response = client.post(
             "/api/code/add-item",
             json={"category": "dedicated", "repo": repo, "item": "Improve docs"},

@@ -103,7 +103,7 @@
       <option value="" selected disabled>Choose repo group…</option>
       {% for cat in category_views %}<option value="{{ cat.name }}">{{ cat.name }}</option>{% endfor %}
     </select>
-    <input type="text" name="repo" list="code-repositories" placeholder="Repository (e.g. personal-finance)" aria-label="Repository" required>
+    <input type="text" name="repo" list="code-repositories" placeholder="Repository (e.g. my-repo)" aria-label="Repository" required>
     <input type="text" name="item" placeholder="{{ cfg.item_placeholder }}" aria-label="Backlog item" autocomplete="off" required>
     <select name="priority" aria-label="Priority">
       <option value="">Priority…</option>

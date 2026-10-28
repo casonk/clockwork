@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Stop naming a private repository in the To Code source: the add form's extra
+  repository suggestions come from `CLOCKWORK_CODE_EXTRA_REPOS` (comma-separated,
+  empty by default), and the placeholder and tests use synthetic names.
+
 - Add `start_condition` and `time_limit` job fields, rendered as systemd
   `ExecCondition=` and `TimeoutStartSec=`/`RuntimeMaxSec=`, so a start guard and
   run limit travel with the rendered unit. launchd and Windows refuse them until
