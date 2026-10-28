@@ -468,6 +468,19 @@ def test_get_shopping_shows_items(client):
     assert b"T-Shirt" in resp.data
     assert b"Toilet Paper" in resp.data
     assert b"Water Bottle" in resp.data
+    assert b'data-list-groups="shopping"' in resp.data
+    assert b'<details class="category"' in resp.data
+    assert b'<details class="subcategory" data-type="Uncategorized"' in resp.data
+    assert b"All categories" in resp.data
+    assert b"All subcategories" in resp.data
+
+
+def test_shopping_category_views_group_by_type(sample_shopping_data):
+    sample_shopping_data["categories"][0]["items"][0]["type"] = "Tops"
+    sample_shopping_data["categories"][0]["items"][2]["type"] = "Tops"
+    views = web_app._list_category_views(sample_shopping_data, "owned")
+    assert [group["name"] for group in views[0]["groups"]] == ["Tops", "Uncategorized"]
+    assert [item["name"] for item in views[0]["groups"][0]["items"]] == ["T-Shirt", "Jacket"]
 
 
 def test_add_shopping_category(client, shopping_file):
@@ -513,6 +526,69 @@ def test_toggle_shopping_item_flips_owned(client, shopping_file):
     clothes = next(c for c in data["categories"] if c["name"] == "Clothes")
     tshirt = next(i for i in clothes["items"] if i["name"] == "T-Shirt")
     assert tshirt["owned"] is True
+
+
+def test_organize_shopping_item_moves_category_and_preserves_owned(
+    client, shopping_file, tmp_path, monkeypatch
+):
+    history = tmp_path / "shopping-history.jsonl"
+    monkeypatch.setattr(web_app, "SHOPPING_HISTORY_FILE", history)
+    response = client.post(
+        "/shopping/organize-item",
+        data={
+            "category": "Clothes",
+            "item": "Jacket",
+            "target_category": "Home",
+            "type": "Outerwear",
+        },
+        headers={"Origin": "http://localhost"},
+        follow_redirects=True,
+    )
+    updated = web_app.load_shopping()
+    assert not any(item["name"] == "Jacket" for item in updated["categories"][0]["items"])
+    moved = next(item for item in updated["categories"][1]["items"] if item["name"] == "Jacket")
+    assert moved["owned"] is True
+    assert moved["type"] == "Outerwear"
+    assert b'data-type="Outerwear"' in response.data
+    assert json.loads(history.read_text().splitlines()[-1])["action"] == "organize"
+
+
+def test_organize_shopping_item_can_clear_subcategory(client, shopping_file, tmp_path, monkeypatch):
+    monkeypatch.setattr(web_app, "SHOPPING_HISTORY_FILE", tmp_path / "history.jsonl")
+    data = json.loads(shopping_file.read_text())
+    data["categories"][0]["items"][0]["type"] = "Tops"
+    shopping_file.write_text(json.dumps(data))
+    client.post(
+        "/shopping/organize-item",
+        data={"category": "Clothes", "item": "T-Shirt", "target_category": "Clothes", "type": ""},
+        headers={"Origin": "http://localhost"},
+    )
+    assert "type" not in web_app.load_shopping()["categories"][0]["items"][0]
+
+
+def test_organize_shopping_item_creates_category_and_subcategory(
+    client, shopping_file, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(web_app, "SHOPPING_HISTORY_FILE", tmp_path / "history.jsonl")
+    response = client.post(
+        "/shopping/organize-item",
+        data={
+            "category": "Clothes",
+            "item": "Jacket",
+            "target_category": "__new__",
+            "new_category": "Travel",
+            "type": "__new__",
+            "new_type": "Packing",
+        },
+        headers={"Origin": "http://localhost"},
+        follow_redirects=True,
+    )
+    data = web_app.load_shopping()
+    travel = next(category for category in data["categories"] if category["name"] == "Travel")
+    assert travel["items"][0]["name"] == "Jacket"
+    assert travel["items"][0]["owned"] is True
+    assert travel["items"][0]["type"] == "Packing"
+    assert b'data-type="Packing"' in response.data
 
 
 def test_delete_shopping_item(client, shopping_file):

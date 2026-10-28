@@ -64,6 +64,7 @@
     .action-sync    { background: var(--green-dim); color: var(--green); }
     .action-restore { background: #1a0a3d; color: #a07bff; }
     .action-add-category    { background: var(--accent-dim); color: var(--accent); }
+    .action-organize { background: var(--accent-dim); color: var(--accent); }
     .action-delete-category { background: var(--red-dim); color: var(--red); }
     .action-other   { background: var(--surface2); color: var(--muted); }
 
@@ -119,6 +120,7 @@
     <option value="reset">reset</option>
     <option value="sync">sync</option>
     <option value="restore">restore</option>
+    <option value="organize">organize</option>
   </select>
 </div>
 
@@ -137,7 +139,7 @@
     <tr data-action="{{ e.action }}" data-item="{{ e.item or '' }}" data-cat="{{ e.category or '' }}">
       <td class="ts-cell">{{ e.ts | replace('T', ' ') }}</td>
       <td><span class="action-badge action-{{ e.action | lower | replace('_', '-') }}
-        {%- if e.action not in ('add','remove','owned','wanted','reset','sync','restore','add-category','delete-category') %} action-other{% endif %}">
+        {%- if e.action not in ('add','remove','owned','wanted','reset','sync','restore','organize','add-category','delete-category') %} action-other{% endif %}">
         {{ e.action }}</span></td>
       <td class="cat-cell">{{ e.category or '—' }}</td>
       <td class="item-cell">{{ e.item or '' }}</td>

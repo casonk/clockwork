@@ -8,11 +8,24 @@
   {% for c in breadcrumbs %}{% if not loop.first %} / {% endif %}<a href="{{ url_for('library_pages.browse', rel=c.rel) if c.rel else url_for('library_pages.browse') }}">{{ c.name }}</a>{% endfor %}
   {% if is_title %} · <a class="btn primary" href="{{ url_for('library_pages.title_page', rel=rel) }}">Details</a>{% endif %}
 </div>
+{% if current_meta %}
+<div class="panel small" style="margin-bottom:12px"{% if current_meta.kind == 'shows' and (not current_meta.rating or not current_meta.has_plot) %} data-guide-api="{{ url_for('library_pages.show_summary', rel=rel) }}" data-has-plot="{{ '1' if current_meta.has_plot else '0' }}"{% endif %}>
+  <span class="browse-rating">{% if current_meta.rating %}<span class="badge">★ {{ "%.1f"|format(current_meta.rating) }}</span>{% endif %}</span>
+  <span class="browse-description">{{ current_meta.description }}</span>
+</div>
+{% endif %}
 <div class="panel scroll">
   <table>
     {% for d in dirs %}
       <tr>
-        <td>📁 <a href="{{ url_for('library_pages.browse', rel=d.rel) }}">{{ d.name }}</a></td>
+        <td>📁 <a href="{{ url_for('library_pages.browse', rel=d.rel) }}">{{ d.name }}</a>
+          {% if d.meta %}
+            <div class="small muted"{% if d.meta.kind == 'shows' and (not d.meta.rating or not d.meta.has_plot) %} data-guide-api="{{ url_for('library_pages.show_summary', rel=d.rel) }}" data-has-plot="{{ '1' if d.meta.has_plot else '0' }}"{% endif %}>
+              <span class="browse-rating">{% if d.meta.rating %}★ {{ "%.1f"|format(d.meta.rating) }}{% endif %}</span>
+              <span class="browse-description">{% if d.meta.description %} · {{ d.meta.description|truncate(180) }}{% endif %}</span>
+            </div>
+          {% endif %}
+        </td>
         <td class="small muted" style="white-space:nowrap">{{ d.count }} item{{ "" if d.count == 1 else "s" }}</td>
         <td style="white-space:nowrap">{% if d.is_title %}<a class="btn" href="{{ url_for('library_pages.title_page', rel=d.rel) }}">Details</a>{% endif %}</td>
       </tr>
@@ -30,4 +43,35 @@
     {% if not dirs and not files %}<tr><td class="muted">Empty folder.</td></tr>{% endif %}
   </table>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const rows = [...document.querySelectorAll('[data-guide-api]')];
+  async function fill(row) {
+    try {
+      const response = await fetch(row.dataset.guideApi);
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data.ambiguous) return;
+      const rating = row.querySelector('.browse-rating');
+      const description = row.querySelector('.browse-description');
+      if (!rating.textContent.trim() && data.rating) rating.textContent = `★ ${Number(data.rating).toFixed(1)} `;
+      if (row.dataset.hasPlot !== '1' && data.description) description.textContent = ` · ${data.description.slice(0, 180)}`;
+      if (data.source_url?.startsWith('https://www.tvmaze.com/')) {
+        const source = document.createElement('a');
+        source.href = data.source_url;
+        source.target = '_blank';
+        source.rel = 'noopener noreferrer';
+        source.textContent = ' TVmaze';
+        row.append(source);
+      }
+    } catch (_error) { /* Keep the catalog text when TVmaze is unavailable. */ }
+  }
+  async function fillVisible() {
+    for (const row of rows) await fill(row);
+  }
+  fillVisible();
+})();
+</script>
 {% endblock %}

@@ -3,6 +3,18 @@
 {% block title %}{{ title }}{% endblock %}
 {% block heading %}{{ title }}{% if year %} <span class="muted">({{ year }})</span>{% endif %}{% endblock %}
 {% block subheading %}{% if kind == "shows" %}TV show{% else %}Movie{% endif %}{% if genre %} · {{ genre }}{% endif %}{% endblock %}
+{% block head %}
+<style>
+  .guide-season { margin-top:10px; border-top:1px solid var(--border); padding-top:8px; }
+  .guide-season summary { cursor:pointer; font-weight:700; }
+  .guide-episode { padding:9px 0; border-bottom:1px solid var(--border); }
+  .guide-episode-head { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .guide-episode-head strong { flex:1; min-width:180px; }
+  .guide-results { margin:6px 0 0 18px; }
+  .guide-result { display:flex; gap:7px; align-items:center; flex-wrap:wrap; padding:5px 0; }
+  .guide-result-name { flex:1; min-width:180px; overflow-wrap:anywhere; }
+</style>
+{% endblock %}
 {% macro file_row(item) %}
   <tr>
     <td>
@@ -54,6 +66,7 @@
   {% if meta.genres %}<p><span class="muted">Genres</span> {{ meta.genres[:6]|join(", ") }}</p>{% endif %}
   {% if meta.countries or meta.languages %}<p class="small muted">{{ (meta.countries + meta.languages)|join(" · ") }}</p>{% endif %}
   {% if meta.plot %}<p style="margin-top:8px">{{ meta.plot }}</p>{% endif %}
+  {% if kind == "shows" and (not meta.rating or not meta.plot) %}<div id="guide-show-meta" class="small" style="margin-top:8px"></div>{% endif %}
   <p class="small" style="margin-top:8px">
     {% if meta.imdb_id %}<a href="https://www.imdb.com/title/{{ meta.imdb_id|urlencode }}/" target="_blank" rel="noopener noreferrer">IMDb</a>{% endif %}
     {% if meta.wikidata_id %} · <a href="https://www.wikidata.org/wiki/{{ meta.wikidata_id|urlencode }}" target="_blank" rel="noopener noreferrer">Wikidata</a>{% endif %}
@@ -86,6 +99,12 @@
 {% endif %}
 
 {% if kind == "shows" %}
+  <section class="panel" id="episode-guide" data-api="{{ url_for('library_pages.show_episodes', rel=rel) }}" data-title="{{ title }}" data-year="{{ year or '' }}">
+    <h2>Episode guide</h2>
+    <p id="episode-guide-status" class="small muted">Checking aired episodes against the library…</p>
+    <div id="episode-guide-content"></div>
+    <p class="small muted" style="margin-top:10px">Episode data from <a id="episode-guide-source" href="https://www.tvmaze.com/" target="_blank" rel="noopener noreferrer">TVmaze</a>.</p>
+  </section>
   {% for season, items in seasons %}
     <h2>{% if season %}Season {{ season }}{% else %}Other{% endif %} <span class="muted">· {{ items|length }} episodes</span></h2>
     <div class="panel scroll"><table>{% for item in items %}{{ file_row(item) }}{% endfor %}</table></div>
@@ -101,5 +120,156 @@
     {% for e in extras %}<tr><td class="small">{{ e.name }}</td><td class="small">{{ e.size }}</td>
       <td style="white-space:nowrap"><a class="btn primary" href="{{ url_for('library_pages.play_page', rel=e.rel) }}">▶ Play</a></td></tr>{% endfor %}
   </table></div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{% if kind == "shows" %}
+<script>
+(() => {
+  const root = document.getElementById('episode-guide');
+  const status = document.getElementById('episode-guide-status');
+  const content = document.getElementById('episode-guide-content');
+  const source = document.getElementById('episode-guide-source');
+  const csrfToken = {{ csrf_token|tojson }};
+  const hasCatalogRating = {{ (meta.get('rating') is not none)|tojson }};
+  const hasCatalogPlot = {{ (meta.get('plot') is not none)|tojson }};
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  async function searchEpisode(episode, output, button) {
+    button.disabled = true;
+    output.replaceChildren(el('p', 'small muted', 'Searching Magneto sources…'));
+    const params = new URLSearchParams({
+      q: `${root.dataset.title} ${episode.code}`, cat: 'TV Shows',
+      title: root.dataset.title, year: root.dataset.year,
+      season: String(episode.season), episode: String(episode.episode),
+    });
+    try {
+      const response = await fetch(`/api/torrent-search?${params}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      output.replaceChildren();
+      if (!data.results.length) output.append(el('p', 'small muted', 'No matching releases found.'));
+      for (const result of data.results) {
+        const row = el('div', 'guide-result');
+        row.append(el('span', 'guide-result-name', result.name));
+        row.append(el('span', 'small muted', `↑${result.seeders || 0}${result.size_str ? ` · ${result.size_str}` : ''}`));
+        const add = el('button', 'btn', result.library_conflict ? 'In Library' : '+ Add');
+        add.type = 'button';
+        add.disabled = Boolean(result.library_conflict);
+        add.title = result.library_conflict || 'Send to Magneto / Transmission';
+        add.addEventListener('click', async () => {
+          add.disabled = true;
+          add.textContent = 'Adding…';
+          try {
+            const response = await fetch('/api/torrent-add', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+              body: JSON.stringify({
+                magnet: result.magnet, name: result.name, title: root.dataset.title,
+                year: root.dataset.year, category: 'TV Shows',
+              }),
+            });
+            const data = await response.json();
+            if (!response.ok || !data.ok) throw new Error(data.error || `HTTP ${response.status}`);
+            add.textContent = '✓ Added';
+            status.textContent = `Sent ${result.name} to Magneto.`;
+          } catch (error) {
+            add.disabled = false;
+            add.textContent = '+ Add';
+            status.textContent = `Could not add release: ${error.message}`;
+          }
+        });
+        row.append(add);
+        output.append(row);
+      }
+    } catch (error) {
+      output.replaceChildren(el('p', 'small muted', `Search failed: ${error.message}`));
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function renderGuide(data) {
+    content.replaceChildren();
+    if (data.ambiguous) {
+      status.textContent = 'Several shows have this title. Choose the matching series.';
+      const select = el('select');
+      for (const candidate of data.candidates) {
+        const option = el('option', '', `${candidate.name} (${candidate.year || 'year unknown'})`);
+        option.value = String(candidate.id);
+        select.append(option);
+      }
+      const use = el('button', 'btn', 'Use selected show');
+      use.type = 'button';
+      use.addEventListener('click', () => loadGuide(select.value));
+      content.append(select, use);
+      return;
+    }
+    const counts = data.counts;
+    status.textContent = `${counts.owned} in library · ${counts.new} new · ${counts.missing} missing · ${counts.upcoming} upcoming`;
+    if (data.show.url?.startsWith('https://www.tvmaze.com/')) source.href = data.show.url;
+    const fallback = document.getElementById('guide-show-meta');
+    if (fallback) {
+      const parts = [];
+      if (!hasCatalogRating && data.show.rating) parts.push(`★ ${Number(data.show.rating).toFixed(1)} (TVmaze)`);
+      if (!hasCatalogPlot && data.show.summary) parts.push(data.show.summary);
+      fallback.textContent = parts.join(' · ');
+    }
+    const missing = data.episodes.filter(item => item.status === 'new' || item.status === 'missing');
+    if (!missing.length) {
+      content.append(el('p', 'small muted', 'All aired episodes in the guide are in the library.'));
+      return;
+    }
+    const seasons = new Map();
+    for (const episode of missing) {
+      if (!seasons.has(episode.season)) seasons.set(episode.season, []);
+      seasons.get(episode.season).push(episode);
+    }
+    for (const [season, episodes] of seasons) {
+      const details = el('details', 'guide-season');
+      details.open = episodes.some(item => item.status === 'new');
+      details.append(el('summary', '', `Season ${season} · ${episodes.length} to find`));
+      for (const episode of episodes) {
+        const row = el('div', 'guide-episode');
+        const head = el('div', 'guide-episode-head');
+        head.append(el('strong', '', `${episode.code} · ${episode.name || 'Untitled'}`));
+        head.append(el('span', 'badge', episode.status === 'new' ? 'New' : 'Missing'));
+        if (episode.rating) head.append(el('span', 'badge', `★ ${Number(episode.rating).toFixed(1)}`));
+        head.append(el('span', 'small muted', episode.airdate));
+        const find = el('button', 'btn', '🔍 Find');
+        find.type = 'button';
+        head.append(find);
+        row.append(head);
+        if (episode.summary) row.append(el('p', 'small muted', episode.summary));
+        const results = el('div', 'guide-results');
+        row.append(results);
+        find.addEventListener('click', () => searchEpisode(episode, results, find));
+        details.append(row);
+      }
+      content.append(details);
+    }
+  }
+
+  async function loadGuide(showId) {
+    status.textContent = 'Checking aired episodes against the library…';
+    const url = showId ? `${root.dataset.api}?show_id=${encodeURIComponent(showId)}` : root.dataset.api;
+    try {
+      const response = await fetch(url);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      renderGuide(data);
+    } catch (error) {
+      status.textContent = `Episode guide unavailable: ${error.message}`;
+    }
+  }
+  loadGuide();
+})();
+</script>
 {% endif %}
 {% endblock %}
