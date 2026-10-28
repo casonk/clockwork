@@ -309,7 +309,7 @@ After a preemption the worker does not retry at once: it asks
 pauses (state `throttled`) until then, waking early for a render request.
 
 To configure cooperative yielding, add a `pause-file` consumer to
-`~/.config/central-ecu/config.toml`:
+the ECU's `config.toml` (under `~/.config/` in the ECU's own directory):
 
 ```toml
 [[consumers]]
