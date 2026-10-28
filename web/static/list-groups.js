@@ -7,6 +7,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const typeFilter = root.querySelector('[data-type-filter]');
   const search = root.querySelector('[data-list-search]');
   const favoritesOnly = root.querySelector('[data-favorites-only]');
+  const priorityFilter = root.querySelector('[data-priority-filter]');
+  const inPersonOnly = root.querySelector('[data-in-person-only]');
   const empty = root.querySelector('[data-filter-empty]');
   const status = root.querySelector('[data-filter-status]');
   const storageKey = `clockwork:${root.dataset.listGroups}:open-groups`;
@@ -27,8 +29,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const selectedType = typeFilter.value;
     const query = search ? search.value.trim().toLocaleLowerCase() : '';
     const starred = favoritesOnly?.checked || false;
-    const active = Boolean(selectedCategory || selectedType || query || starred);
-    const narrowItems = Boolean(selectedType || query || starred);
+    const selectedPriority = priorityFilter ? priorityFilter.value : '';
+    const inPerson = inPersonOnly?.checked || false;
+    const active = Boolean(selectedCategory || selectedType || query || starred || selectedPriority || inPerson);
+    const narrowItems = Boolean(selectedType || query || starred || selectedPriority || inPerson);
     let visible = 0;
 
     for (const category of categories) {
@@ -43,7 +47,9 @@ document.addEventListener('DOMContentLoaded', () => {
           const textMatches = !query || categoryMatches || groupMatches ||
             item.dataset.searchItem.toLocaleLowerCase().includes(query);
           const show = categoryAllowed && typeAllowed && textMatches &&
-            (!starred || item.dataset.favorite === 'true');
+            (!starred || item.dataset.favorite === 'true') &&
+            (!selectedPriority || item.dataset.priority === selectedPriority) &&
+            (!inPerson || item.dataset.inPerson === 'true');
           item.hidden = !show;
           if (show) groupVisible += 1;
         }
@@ -77,6 +83,11 @@ document.addEventListener('DOMContentLoaded', () => {
   typeFilter.addEventListener('change', applyFilters);
   if (search) search.addEventListener('input', applyFilters);
   if (favoritesOnly) favoritesOnly.addEventListener('change', applyFilters);
+  if (priorityFilter) priorityFilter.addEventListener('change', applyFilters);
+  if (inPersonOnly) inPersonOnly.addEventListener('change', applyFilters);
+  for (const select of root.querySelectorAll('form[data-autosubmit] select')) {
+    select.addEventListener('change', () => select.form.requestSubmit());
+  }
   updateTypeOptions();
   applyFilters();
 

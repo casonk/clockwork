@@ -3374,9 +3374,48 @@ SIMPLE_LIST_CONFIGS = {
         "item_placeholder": "Add backlog item...",
         "category_placeholder": "New repo group...",
         "name_label": "Repo group",
-        "extras": ["repo"],
+        "extras": ["repo", "priority", "in_person"],
     },
 }
+
+CODE_PRIORITIES = ("P1", "P2", "P3", "P4")
+CODE_PRIORITY_LABELS = {
+    "P1": "Urgent",
+    "P2": "High",
+    "P3": "Normal",
+    "P4": "Low",
+}
+
+
+def _clean_code_priority(value) -> str:
+    """Return a canonical P1-P4 rating, or "" when unrated or unrecognised."""
+    text = str(value or "").strip().upper()
+    if text.isdigit():
+        text = f"P{text}"
+    return text if text in CODE_PRIORITIES else ""
+
+
+def _clean_code_in_person(value) -> str:
+    """Return "yes" when the item needs in-person work at a machine, else ""."""
+    if isinstance(value, str):
+        return "yes" if value.strip().lower() in ("1", "true", "yes", "on") else ""
+    return "yes" if value else ""
+
+
+def _apply_code_triage(item: dict, *, priority=None, in_person=None) -> None:
+    """Set or clear the triage fields; ``None`` leaves a field unchanged."""
+    if priority is not None:
+        cleaned = _clean_code_priority(priority)
+        if cleaned:
+            item["priority"] = cleaned
+        else:
+            item.pop("priority", None)
+    if in_person is not None:
+        cleaned = _clean_code_in_person(in_person)
+        if cleaned:
+            item["in_person"] = cleaned
+        else:
+            item.pop("in_person", None)
 
 
 def _simple_list_config(key: str) -> dict:
@@ -3444,8 +3483,14 @@ def _normalize_simple_list_data(data: dict, cfg: dict) -> dict:
                 status: bool(item.get(status, item.get("done", item.get("watched", False)))),
             }
             for field in cfg.get("extras", []):
-                if item.get(field):
-                    normalized_item[field] = str(item[field]).strip()
+                if field == "priority":
+                    cleaned = _clean_code_priority(item.get(field))
+                elif field == "in_person":
+                    cleaned = _clean_code_in_person(item.get(field))
+                else:
+                    cleaned = str(item.get(field) or "").strip()
+                if cleaned:
+                    normalized_item[field] = cleaned
             items.append(normalized_item)
         normalized["categories"].append({"name": name, "items": items})
     if not normalized["categories"]:
@@ -3595,7 +3640,13 @@ def _render_simple_list(key: str):
                 visible_repos.add(repo)
             groups = sorted(by_repo.values(), key=lambda group: group["name"].casefold())
             for group in groups:
-                group["items"].sort(key=lambda item: bool(item.get(cfg["status"])))
+                # Stable sort: open items first, then P1..P4, unrated last.
+                group["items"].sort(
+                    key=lambda item: (
+                        bool(item.get(cfg["status"])),
+                        item.get("priority") or "P9",
+                    )
+                )
                 group["remaining"] = sum(not item.get(cfg["status"]) for item in group["items"])
             category_views.append({**category, "groups": groups})
         total = sum(len(c["items"]) for c in data["categories"])
@@ -3610,6 +3661,14 @@ def _render_simple_list(key: str):
             category_views=category_views,
             visible_repos=sorted(visible_repos, key=str.casefold),
             known_repos=["personal-finance"],
+            priorities=CODE_PRIORITIES,
+            priority_labels=CODE_PRIORITY_LABELS,
+            in_person_count=sum(
+                1
+                for c in data["categories"]
+                for item in c["items"]
+                if item.get("in_person") and not item.get(cfg["status"])
+            ),
             total=total,
             done_count=done_count,
             todo_count=total - done_count,
@@ -3775,6 +3834,11 @@ def simple_list_add_item(page):
             flash("Repository name cannot be empty.", "error")
             return redirect(url_for(_simple_list_endpoint(key)) + f"#{_slug(category)}")
         item["repo"] = repo
+        _apply_code_triage(
+            item,
+            priority=request.form.get("priority", ""),
+            in_person=request.form.get("in_person", ""),
+        )
     value = _simple_item_value(item, cfg)
     if _find_simple_item(cat, value, cfg, repo=repo if key == "code" else None):
         flash(f'"{value}" is already in {repo or category}.', "error")
@@ -3808,6 +3872,37 @@ def simple_list_toggle_item(page):
             item=value,
             category=category,
         )
+    return redirect(url_for(_simple_list_endpoint(key)) + f"#{_slug(category)}")
+
+
+@app.post("/<page>/update-item")
+def simple_list_update_item(page):
+    key = _simple_list_key_from_page(page)
+    if key != "code":
+        abort(404)
+    cfg = _simple_list_config(key)
+    category = request.form.get("category", "").strip()
+    value = request.form.get("item", request.form.get("title", "")).strip()
+    repo = request.form.get("repo", "").strip()
+    data = load_simple_list(key)
+    cat = _find_simple_category(data, category)
+    item = _find_simple_item(cat, value, cfg, repo=repo) if cat else None
+    if item is None:
+        flash(f'"{value}" not found in {category or "that group"}.', "error")
+        return redirect(url_for(_simple_list_endpoint(key)))
+    _apply_code_triage(
+        item,
+        priority=request.form.get("priority") if "priority" in request.form else None,
+        in_person=request.form.get("in_person") if "in_person" in request.form else None,
+    )
+    save_simple_list(key, data)
+    _log_event(
+        cfg["history_file"],
+        "triage",
+        item=value,
+        category=category,
+        detail=f"{item.get('priority', 'unrated')}{', in person' if item.get('in_person') else ''}",
+    )
     return redirect(url_for(_simple_list_endpoint(key)) + f"#{_slug(category)}")
 
 
@@ -3961,6 +4056,9 @@ def api_simple_add_item(list_key):
         if not repo:
             return jsonify({"ok": False, "error": "repo required"}), 400
         item["repo"] = repo
+        _apply_code_triage(
+            item, priority=payload.get("priority"), in_person=payload.get("in_person")
+        )
     if cfg["primary"] == "ticker" and payload.get("name"):
         item["name"] = str(payload["name"]).strip()
     if payload.get("year") and "year" in cfg.get("extras", []):
@@ -4007,6 +4105,39 @@ def api_simple_toggle_item(list_key):
         cfg["done_label"] if item[cfg["status"]] else cfg["reset_label"],
         item=value,
         category=category,
+    )
+    return jsonify({"ok": True, "data": data})
+
+
+@app.post("/api/<list_key>/update-item")
+def api_simple_update_item(list_key):
+    key = _api_simple_key(list_key)
+    if key != "code":
+        abort(404)
+    cfg = _simple_list_config(key)
+    payload, error = _todo_payload()
+    if error:
+        return error
+    category = str(payload.get("category") or "").strip()
+    value = str(payload.get("item") or payload.get("title") or "").strip()
+    repo = str(payload.get("repo") or "").strip()
+    if not repo:
+        return jsonify({"ok": False, "error": "repo required"}), 400
+    if str(payload.get("priority") or "").strip() and not _clean_code_priority(payload["priority"]):
+        return jsonify({"ok": False, "error": "priority must be P1-P4 or empty"}), 400
+    data = load_simple_list(key)
+    cat = _find_simple_category(data, category)
+    item = _find_simple_item(cat, value, cfg, repo=repo) if cat else None
+    if item is None:
+        return jsonify({"ok": False, "error": "item not found"}), 404
+    _apply_code_triage(item, priority=payload.get("priority"), in_person=payload.get("in_person"))
+    save_simple_list(key, data)
+    _log_event(
+        cfg["history_file"],
+        "triage",
+        item=value,
+        category=category,
+        detail=f"{item.get('priority', 'unrated')}{', in person' if item.get('in_person') else ''}",
     )
     return jsonify({"ok": True, "data": data})
 

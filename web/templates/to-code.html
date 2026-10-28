@@ -34,6 +34,13 @@
     .item form { display: contents; }
     .item button { padding: 3px 8px; }
     .item .done-toggle { color: #5b9eff; }
+    .item select.priority { padding: 2px 4px; font-size: 12px; font-weight: 700; }
+    .item select.priority.p1 { color: #e05252; border-color: #e05252; }
+    .item select.priority.p2 { color: #f0a040; border-color: #f0a040; }
+    .item select.priority.p3 { color: #5b9eff; }
+    .item select.priority.p4, .item select.priority.unrated { color: #8890b0; }
+    .item .in-person-toggle { font-size: 12px; opacity: .45; }
+    .item .in-person-toggle.on { opacity: 1; border-color: #b08cf0; color: #b08cf0; }
     .add-item, .add-group { padding: 10px; background: #191c2a; }
     .add-item input[name="item"] { flex: 1; }
     .add-group { margin-top: 14px; border: 1px solid #2e3250; border-radius: 8px; }
@@ -77,6 +84,12 @@
       <option value="">All repositories</option>
       {% for repo in visible_repos %}<option value="{{ repo }}">{{ repo }}</option>{% endfor %}
     </select>
+    <select aria-label="Filter priority" data-priority-filter>
+      <option value="">All priorities</option>
+      {% for p in priorities %}<option value="{{ p }}">{{ p }} · {{ priority_labels[p] }}</option>{% endfor %}
+      <option value="unrated">Unrated</option>
+    </select>
+    <label class="muted"><input type="checkbox" data-in-person-only> 🖥 In person only ({{ in_person_count }})</label>
     <input type="search" placeholder="Search backlog…" aria-label="Search backlog" data-list-search>
     <span class="muted" data-filter-status aria-live="polite"></span>
   </div>
@@ -89,6 +102,11 @@
     </select>
     <input type="text" name="repo" list="code-repositories" placeholder="Repository (e.g. personal-finance)" aria-label="Repository" required>
     <input type="text" name="item" placeholder="{{ cfg.item_placeholder }}" aria-label="Backlog item" autocomplete="off" required>
+    <select name="priority" aria-label="Priority">
+      <option value="">Priority…</option>
+      {% for p in priorities %}<option value="{{ p }}">{{ p }} · {{ priority_labels[p] }}</option>{% endfor %}
+    </select>
+    <label class="muted"><input type="checkbox" name="in_person" value="yes"> 🖥 In person</label>
     <button type="submit">+ Add backlog item</button>
   </form>
   {% for cat in category_views %}
@@ -99,7 +117,7 @@
       <summary class="subcategory-header">{{ group.name }}<span class="count">{{ group.remaining }} open / {{ group["items"]|length }}</span></summary>
       <div class="items">
         {% for item in group["items"] %}
-        <div class="item" data-search-item="{{ item.title }} {{ item.repo }}">
+        <div class="item" data-search-item="{{ item.title }} {{ item.repo }}" data-priority="{{ item.priority or 'unrated' }}" data-in-person="{{ 'true' if item.in_person else 'false' }}">
           <form method="post" action="/to-code/toggle-item">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="category" value="{{ cat.name }}">
@@ -108,6 +126,24 @@
             <button class="done-toggle" type="submit" title="Toggle done">{{ '✓' if item.done else '○' }}</button>
           </form>
           <span class="item-title {{ 'done' if item.done else '' }}">{{ item.title }}</span>
+          <form method="post" action="/to-code/update-item" data-autosubmit>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="category" value="{{ cat.name }}">
+            <input type="hidden" name="item" value="{{ item.title }}">
+            <input type="hidden" name="repo" value="{{ item.repo }}">
+            <select class="priority {{ (item.priority or 'unrated')|lower }}" name="priority" aria-label="Priority">
+              <option value="" {{ 'selected' if not item.priority else '' }}>—</option>
+              {% for p in priorities %}<option value="{{ p }}" {{ 'selected' if item.priority == p else '' }}>{{ p }}</option>{% endfor %}
+            </select>
+          </form>
+          <form method="post" action="/to-code/update-item">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="category" value="{{ cat.name }}">
+            <input type="hidden" name="item" value="{{ item.title }}">
+            <input type="hidden" name="repo" value="{{ item.repo }}">
+            <input type="hidden" name="in_person" value="{{ '' if item.in_person else 'yes' }}">
+            <button class="in-person-toggle {{ 'on' if item.in_person else '' }}" type="submit" title="{{ 'Needs in-person work at a machine (click to clear)' if item.in_person else 'Mark as needing in-person work at a machine' }}">🖥</button>
+          </form>
           <form method="post" action="/to-code/delete-item">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="category" value="{{ cat.name }}">

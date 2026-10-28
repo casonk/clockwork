@@ -429,3 +429,68 @@ def test_library_search_reports_missing_catalog(client, tmp_path, monkeypatch):
         "items": [],
         "facets": {},
     }
+
+
+def test_to_code_items_carry_priority_and_in_person_flags(client, list_files):
+    csrf = _csrf(client, "/api/code")
+    added = client.post(
+        "/api/code/add-item",
+        json={
+            "category": "dedicated",
+            "repo": "clockwork",
+            "item": "Flash firmware",
+            "priority": "2",
+            "in_person": True,
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    item = added.get_json()["data"]["categories"][-1]["items"][0]
+    assert item["priority"] == "P2"
+    assert item["in_person"] == "yes"
+
+    updated = client.post(
+        "/api/code/update-item",
+        json={
+            "category": "dedicated",
+            "repo": "clockwork",
+            "item": "Flash firmware",
+            "priority": "p1",
+            "in_person": False,
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    item = updated.get_json()["data"]["categories"][-1]["items"][0]
+    assert item["priority"] == "P1"
+    assert "in_person" not in item
+
+    bad = client.post(
+        "/api/code/update-item",
+        json={
+            "category": "dedicated",
+            "repo": "clockwork",
+            "item": "Flash firmware",
+            "priority": "urgent",
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert bad.status_code == 400
+
+    form = client.post(
+        "/to-code/update-item",
+        data={
+            "csrf_token": csrf,
+            "category": "dedicated",
+            "repo": "clockwork",
+            "item": "Flash firmware",
+            "in_person": "yes",
+        },
+    )
+    assert form.status_code == 302
+    saved = json.loads(list_files["CODE_LIST_FILE"].read_text())["categories"][-1]["items"][0]
+    assert saved["priority"] == "P1"  # untouched by the in-person-only form
+    assert saved["in_person"] == "yes"
+
+    html = client.get("/to-code").get_data(as_text=True)
+    assert 'data-priority="P1"' in html
+    assert 'data-in-person="true"' in html
+    assert client.post("/to-do/update-item", data={"csrf_token": csrf}).status_code == 404
