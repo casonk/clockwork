@@ -1686,6 +1686,44 @@ def job_details():
     )
 
 
+def _ecu_binary() -> str | None:
+    """The `ecu` command: CLOCKWORK_ECU_BIN, else PATH, else the user bin directory."""
+    configured = os.environ.get("CLOCKWORK_ECU_BIN", "").strip()
+    for candidate in (configured, shutil.which("ecu") or "", str(Path.home() / ".local/bin/ecu")):
+        if candidate and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def _ecu_status() -> tuple[dict | None, str]:
+    """`ecu status --json` as a document, or (None, why it is unavailable)."""
+    binary = _ecu_binary()
+    if binary is None:
+        return None, "the ecu command was not found (set CLOCKWORK_ECU_BIN)"
+    rc, out = _run(binary, "status", "--json", timeout=20)
+    try:
+        document = json.loads(out)
+    except ValueError:
+        document = None
+    if rc != 0 or not isinstance(document, dict):
+        return None, out.splitlines()[-1] if out else f"ecu status exited {rc}"
+    return document, ""
+
+
+@app.get("/api/ecu")
+def api_ecu():
+    document, error = _ecu_status()
+    if document is None:
+        return jsonify({"error": error}), 503
+    return jsonify(document)
+
+
+@app.get("/ecu")
+def ecu_page():
+    document, error = _ecu_status()
+    return render_template("ecu.html", ecu=document, error=error)
+
+
 @app.get("/logs/<unit>")
 def job_logs(unit: str):
     scope = request.args.get("scope", "user")
