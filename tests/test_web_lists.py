@@ -441,12 +441,16 @@ def test_to_code_items_carry_priority_and_in_person_flags(client, list_files):
             "item": "Flash firmware",
             "priority": "2",
             "in_person": True,
+            "requires_human": True,
+            "requires_sudo": "yes",
         },
         headers={"X-CSRF-Token": csrf},
     )
     item = added.get_json()["data"]["categories"][-1]["items"][0]
     assert item["priority"] == "P2"
     assert item["in_person"] == "yes"
+    assert item["requires_human"] == "yes"
+    assert item["requires_sudo"] == "yes"
 
     updated = client.post(
         "/api/code/update-item",
@@ -456,12 +460,15 @@ def test_to_code_items_carry_priority_and_in_person_flags(client, list_files):
             "item": "Flash firmware",
             "priority": "p1",
             "in_person": False,
+            "requires_human": False,
         },
         headers={"X-CSRF-Token": csrf},
     )
     item = updated.get_json()["data"]["categories"][-1]["items"][0]
     assert item["priority"] == "P1"
     assert "in_person" not in item
+    assert "requires_human" not in item
+    assert item["requires_sudo"] == "yes"  # untouched by a payload that omits it
 
     bad = client.post(
         "/api/code/update-item",
@@ -493,4 +500,5 @@ def test_to_code_items_carry_priority_and_in_person_flags(client, list_files):
     html = client.get("/to-code").get_data(as_text=True)
     assert 'data-priority="P1"' in html
     assert 'data-in-person="true"' in html
+    assert 'data-ready="false"' in html
     assert client.post("/to-do/update-item", data={"csrf_token": csrf}).status_code == 404
