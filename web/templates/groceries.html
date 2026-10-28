@@ -108,6 +108,43 @@
 
     /* ── Layout ── */
     main { max-width: 680px; margin: 0 auto; padding: 18px 14px 100px; }
+    [hidden] { display: none !important; }
+    .search-row { margin-bottom: 14px; }
+    .search-row input[type="search"] {
+      width: 100%; padding: 10px 12px; border-radius: 7px;
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text); font: inherit;
+    }
+    .search-row input[type="search"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .search-status { margin-top: 5px; color: var(--muted); font-size: 12px; }
+    .category-selectors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+    .category-selectors label { color: var(--muted); font-size: 12px; }
+    .category-selectors select { display: block; width: 100%; margin-top: 3px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
+    .favorites-filter { display: inline-flex; align-items: center; gap: 7px; margin-top: 7px; color: var(--muted); cursor: pointer; font-size: 12px; }
+    .favorites-filter input { accent-color: var(--yellow); }
+    .rules-panel {
+      margin-bottom: 14px; padding: 12px 14px; border: 1px solid var(--border);
+      border-radius: 10px; background: var(--surface);
+      scroll-margin-top: 110px;
+    }
+    .rules-panel summary { cursor: pointer; font-weight: 700; }
+    .rules-help { color: var(--muted); font-size: 12px; margin: 10px 0; }
+    .rule-row { padding: 9px 0; border-top: 1px solid var(--border); }
+    .rule-name { font-weight: 600; }
+    .rule-inactive { color: var(--yellow); font-size: 11px; margin-left: 7px; }
+    .rule-tokens { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .rule-token {
+      display: inline-flex; align-items: center; gap: 6px; max-width: 100%;
+      padding: 3px 7px; border-radius: 5px; border: 1px solid var(--border);
+      background: var(--surface2); font-family: var(--mono); font-size: 11px;
+      overflow-wrap: anywhere;
+    }
+    .rule-token.new { border-color: var(--green); }
+    .rule-token.rejected { border-color: var(--red); }
+    .rule-token form { display: inline-flex; }
+    .rule-token button { border: 0; background: none; color: var(--red); cursor: pointer; font-size: 14px; }
+    .rule-new { color: var(--green); font-family: inherit; font-weight: 700; }
+    .rule-warning { color: var(--red); font-family: inherit; font-weight: 700; }
 
     /* ── Empty state ── */
     .empty-state {
@@ -132,7 +169,13 @@
       padding: 12px 14px;
       border-bottom: 1px solid var(--border);
       background: var(--surface2);
+      cursor: pointer;
+      list-style: none;
     }
+    .category-header::-webkit-details-marker, .subcategory-header::-webkit-details-marker { display: none; }
+    .category-header::before, .subcategory-header::before { content: '▾'; color: var(--muted); width: 12px; }
+    .category:not([open]) > .category-header::before, .subcategory:not([open]) > .subcategory-header::before { content: '▸'; }
+    .category:not([open]) > .category-header { border-bottom: 0; }
     .category-name {
       font-size: 13px;
       font-weight: 700;
@@ -146,6 +189,14 @@
       background: var(--surface); color: var(--muted); border: 1px solid var(--border);
     }
     .category-count .needs { color: var(--red); font-weight: 700; }
+    .subcategory { margin: 9px 10px; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; background: var(--surface3); }
+    .subcategory-header { display: flex; align-items: center; gap: 9px; padding: 8px 11px; background: var(--surface2); cursor: pointer; list-style: none; }
+    .subcategory:not([open]) > .subcategory-header { background: var(--surface3); }
+    .subcategory-name { flex: 1; font-size: 12px; font-weight: 700; color: var(--text); }
+    .subcategory-count { font-size: 11px; color: var(--muted); }
+    .category-delete-row { display: flex; justify-content: flex-end; padding: 5px 12px 10px; }
+    .category-delete-row button { border: 0; background: none; color: var(--muted); font-size: 11px; cursor: pointer; }
+    .category-delete-row button:hover { color: var(--red); }
 
     /* ── Item list ── */
     .items { padding: 6px 0; }
@@ -187,11 +238,21 @@
     .check-btn.not-stocked:hover {
       border-color: var(--muted);
     }
+    .favorite-form { flex-shrink: 0; line-height: 0; }
+    .favorite-btn {
+      width: 26px; height: 26px; border: 0; border-radius: 6px;
+      background: transparent; color: var(--muted); font-size: 21px;
+      cursor: pointer; line-height: 1;
+    }
+    .favorite-btn:hover, .favorite-btn:focus-visible { color: var(--yellow); }
+    .favorite-btn.active { color: var(--yellow); }
 
     .item-name {
       flex: 1;
       font-size: 14px;
       user-select: none;
+      min-width: 0;
+      overflow-wrap: anywhere;
     }
     .item-name.stocked {
       color: var(--muted);
@@ -214,6 +275,17 @@
     }
     .item:hover .delete-btn { opacity: 1; }
     .delete-btn:hover { color: var(--red); border-color: var(--red-dim); background: var(--red-dim); }
+    .organize-btn { flex-shrink: 0; width: 26px; height: 26px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; }
+    .organize-btn:hover { color: var(--accent); border-color: var(--accent); }
+    #organize-dialog { width: min(420px, calc(100vw - 28px)); border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); padding: 18px; margin: auto; }
+    #organize-dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
+    #organize-dialog h2 { font-size: 17px; margin-bottom: 12px; }
+    #organize-dialog label { display: block; margin: 10px 0; font-size: 12px; color: var(--muted); }
+    #organize-dialog select, #organize-dialog input[type="text"] { display: block; width: 100%; padding: 9px; margin-top: 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+    #organize-dialog p { font-size: 11px; color: var(--muted); }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+    .dialog-actions button { padding: 7px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); cursor: pointer; }
+    .dialog-actions button[type="submit"] { color: var(--accent); border-color: var(--accent); }
 
     /* ── Add item row ── */
     .add-item-row {
@@ -373,6 +445,7 @@
       font-size: 11px; color: var(--muted); white-space: nowrap;
       padding: 3px 8px; border-radius: 5px;
       border: 1px solid var(--border); background: var(--surface2);
+      text-decoration: none;
     }
 
     /* ── Mobile ── */
@@ -407,7 +480,7 @@
     <div>
       <h1>🛒 Groceries</h1>
       <div class="subtitle">
-        {% if total == 0 %}No items yet{% else %}{{ stocked }} / {{ total }} stocked{% endif %}
+        {% if total == 0 %}No items yet{% else %}{{ stocked }} / {{ total }} stocked{% if favorites %} · {{ favorites }} starred{% endif %}{% endif %}
       </div>
     </div>
   </div>
@@ -415,9 +488,7 @@
     {% if last_synced_at %}
     <span class="last-synced" title="Last synced from intake">⟳ {{ last_synced_at[:16] | replace('T',' ') }}</span>
     {% endif %}
-    {% if rules_count %}
-    <span class="rules-chip" title="{{ rules_generated_at or 'AI-generated' }}">{{ rules_count }} AI rules</span>
-    {% endif %}
+    <a class="rules-chip" href="{{ url_for('groceries', show_rules=1) }}#rules" title="View receipt matching rules{% if rules_generated_at %}; generated {{ rules_generated_at }}{% endif %}">{{ rules_count }} AI rules</a>
     <form method="post" action="/groceries/sync-intake">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button type="submit" class="sync-btn"
@@ -582,7 +653,83 @@
 {% endif %}
 {% endwith %}
 
-<main>
+<main data-list-groups="groceries" data-total="{{ total }}">
+  <details class="rules-panel" id="rules" {% if request.args.get('show_rules') %}open{% endif %}>
+    <summary>Receipt matching rules ({{ rules_count }})</summary>
+    <p class="rules-help">Each token below can match words in one receipt line. When you press Sync, a matching receipt can mark that grocery item as stocked. Item names and built-in aliases also match receipts. Removing a token rejects it from future generated suggestions; it does not change items already stocked.</p>
+    {% if rules_generated_at %}<p class="rules-help">Last generated: {{ rules_generated_at | replace('T', ' ') }}</p>{% endif %}
+    {% for name, tokens in rule_aliases %}
+    {% if tokens %}
+    <div class="rule-row">
+      <span class="rule-name">{{ name }}</span>
+      {% if name | lower not in active_items %}<span class="rule-inactive">Not on current list</span>{% endif %}
+      <div class="rule-tokens">
+        {% for token in tokens %}
+        <span class="rule-token{% if (name, token) in new_rule_tokens %} new{% endif %}">
+          {{ token }}
+          {% if (name, token) in new_rule_tokens %}<span class="rule-new">new</span>{% endif %}
+          <form method="post" action="/groceries/remove-rule">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="item" value="{{ name }}">
+            <input type="hidden" name="token" value="{{ token }}">
+            <button type="submit" title="Remove and reject {{ token }} rule for {{ name }}" aria-label="Remove and reject {{ token }} rule for {{ name }}">×</button>
+          </form>
+        </span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    {% else %}
+    <p class="rules-help">No generated receipt rules yet.</p>
+    {% endfor %}
+    {% if rejected_aliases %}
+    <div class="rule-row">
+      <strong>Rejected suggestions</strong>
+      <p class="rules-help">These item and token pairs are blocked even if Gen Rules suggests them again.</p>
+    </div>
+    {% for name, tokens in rejected_aliases %}
+    <div class="rule-row">
+      <span class="rule-name">{{ name }}</span>
+      <div class="rule-tokens">
+        {% for token in tokens %}
+        <span class="rule-token rejected">
+          {{ token }}
+          {% if (name | lower, token | lower) in last_rejected_keys %}<span class="rule-warning">suggested again</span>{% endif %}
+          <form method="post" action="/groceries/allow-rule">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="item" value="{{ name }}">
+            <input type="hidden" name="token" value="{{ token }}">
+            <button type="submit" title="Allow {{ token }} for {{ name }} in future suggestions" aria-label="Allow {{ token }} for {{ name }} in future suggestions">↺</button>
+          </form>
+        </span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+    {% endif %}
+  </details>
+
+  <div class="search-row">
+    <div class="category-selectors">
+      <label for="category-filter">Category
+        <select id="category-filter" data-category-filter>
+          <option value="">All categories</option>
+          {% for cat in category_views %}<option value="{{ cat.name }}">{{ cat.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label for="type-filter">Subcategory
+        <select id="type-filter" data-type-filter>
+          <option value="">All subcategories</option>
+          {% for type_name in visible_types %}<option value="{{ type_name }}">{{ type_name }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    <label for="grocery-search">Search groceries</label>
+    <input id="grocery-search" data-list-search type="search" placeholder="Find an item or category…" autocomplete="off">
+    <label class="favorites-filter" for="favorites-only"><input id="favorites-only" data-favorites-only type="checkbox"> ★ Favorites only</label>
+    <div class="search-status" id="search-status" data-filter-status aria-live="polite"></div>
+  </div>
+  <div class="empty-state" id="search-empty" data-filter-empty hidden>No groceries match these filters.</div>
   {% if not data.categories %}
   <div class="empty-state">
     <p>No categories yet.</p>
@@ -590,29 +737,27 @@
   </div>
   {% endif %}
 
-  {% for cat in data.categories %}
+  {% for cat in category_views %}
   {% set cat_slug = cat.name | lower | replace(' ', '-') %}
   {% set needs = cat['items'] | rejectattr('stocked') | list | length %}
-  <div class="category" id="{{ cat_slug }}">
+  <details class="category" id="{{ cat_slug }}" data-category="{{ cat.name }}" data-collapse-key="category:{{ cat.name }}" open>
 
-    <div class="category-header">
+    <summary class="category-header">
       <span class="category-name">{{ cat.name }}</span>
       <span class="category-count">
         {% if needs > 0 %}<span class="needs">{{ needs }} needed</span>{% else %}all stocked{% endif %}
       </span>
-      <form method="post" action="/groceries/delete-category" style="line-height:0">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="category" value="{{ cat.name }}">
-        <button type="submit" class="cat-delete-btn" title="Delete category">×</button>
-      </form>
-    </div>
+    </summary>
 
-    <div class="items">
-      {# Not-stocked items first, then stocked #}
-      {% set ns_items = cat['items'] | rejectattr('stocked') | list %}
-      {% set s_items  = cat['items'] | selectattr('stocked') | list %}
-      {% for item in ns_items + s_items %}
-      <div class="item">
+    {% for group in cat.groups %}
+    <details class="subcategory" data-type="{{ group.name }}" data-collapse-key="subcategory:{{ cat.name }}:{{ group.name }}" open>
+      <summary class="subcategory-header">
+        <span class="subcategory-name">{{ group.name }}</span>
+        <span class="subcategory-count">{{ group.remaining }} needed / {{ group['items'] | length }}</span>
+      </summary>
+      <div class="items">
+      {% for item in group['items'] %}
+      <div class="item" data-search-item="{{ item.name }} {{ item.type or '' }}" data-favorite="{{ 'true' if item.favorite else 'false' }}">
         <form class="check-form" method="post" action="/groceries/toggle-item">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <input type="hidden" name="category" value="{{ cat.name }}">
@@ -624,12 +769,24 @@
           </button>
         </form>
 
+        <form class="favorite-form" method="post" action="/groceries/toggle-favorite">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="category" value="{{ cat.name }}">
+          <input type="hidden" name="item" value="{{ item.name }}">
+          <button type="submit" class="favorite-btn{% if item.favorite %} active{% endif %}"
+                  aria-pressed="{{ 'true' if item.favorite else 'false' }}"
+                  title="{{ 'Remove' if item.favorite else 'Add' }} {{ item.name }} {{ 'from' if item.favorite else 'to' }} favorites"
+                  aria-label="{{ 'Remove' if item.favorite else 'Add' }} {{ item.name }} {{ 'from' if item.favorite else 'to' }} favorites">{{ '★' if item.favorite else '☆' }}</button>
+        </form>
+
         <span class="item-name {{ 'stocked' if item.stocked else 'not-stocked' }}">
           {{ item.name }}
         </span>
         {% if item.type %}
         <span class="type-badge type-{{ item.type }}">{{ item.type }}</span>
         {% endif %}
+
+        <button type="button" class="organize-btn" data-organize-open data-item="{{ item.name }}" data-category="{{ cat.name }}" data-type="{{ item.type or '' }}" title="Move or categorize {{ item.name }}" aria-label="Move or categorize {{ item.name }}">⋯</button>
 
         <form class="delete-form" method="post" action="/groceries/delete-item">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -638,12 +795,12 @@
           <button type="submit" class="delete-btn" title="Remove item">×</button>
         </form>
       </div>
-      {% else %}
-      <div class="item" style="color: var(--muted); font-size: 12px; font-style: italic;">
-        No items — add one below.
-      </div>
       {% endfor %}
-    </div>
+      </div>
+    </details>
+    {% else %}
+    <div class="item" style="color: var(--muted); font-size: 12px; font-style: italic;">No items — add one below.</div>
+    {% endfor %}
 
     <div class="add-item-row">
       <form method="post" action="/groceries/add-item" style="display:contents">
@@ -654,7 +811,15 @@
       </form>
     </div>
 
-  </div>
+    <div class="category-delete-row">
+      <form method="post" action="/groceries/delete-category">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="category" value="{{ cat.name }}">
+        <button type="submit">Delete {{ cat.name }} category</button>
+      </form>
+    </div>
+
+  </details>
   {% endfor %}
 
   <div class="add-category">
@@ -665,6 +830,40 @@
     </form>
   </div>
 </main>
+
+<dialog id="organize-dialog">
+  <form method="post" action="/groceries/organize-item">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="category">
+    <input type="hidden" name="item">
+    <h2 data-organize-title>Organize item</h2>
+    <label for="organize-category">Category
+      <select id="organize-category" name="target_category" required>
+        {% for cat in category_views %}<option value="{{ cat.name }}">{{ cat.name }}</option>{% endfor %}
+        <option value="__new__">+ New category…</option>
+      </select>
+    </label>
+    <label for="organize-new-category" data-new-category-row hidden>New category name
+      <input id="organize-new-category" name="new_category" type="text" maxlength="60" autocomplete="off">
+    </label>
+    <label for="organize-type">Subcategory
+      <select id="organize-type" name="type">
+        <option value="">Uncategorized</option>
+        {% for type_name in type_options %}<option value="{{ type_name }}">{{ type_name }}</option>{% endfor %}
+        <option value="__new__">+ New subcategory…</option>
+      </select>
+    </label>
+    <label for="organize-new-type" data-new-type-row hidden>New subcategory name
+      <input id="organize-new-type" name="new_type" type="text" maxlength="60" autocomplete="off">
+    </label>
+    <p>Select an existing category and subcategory, or choose + New to create either one.</p>
+    <div class="dialog-actions">
+      <button type="button" data-dialog-close>Cancel</button>
+      <button type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+<script src="{{ url_for('static', filename='list-groups.js') }}" defer></script>
 
 </body>
 </html>

@@ -28,8 +28,10 @@ from clockwork.manifest import load_manifest
 from clockwork.render import _LAUNCHD_ENV_LOADER, render_launchd_plist, resolve_launchd_label
 
 try:
-    from web import media_library
+    from web import book_catalog, media_library, read_sources, release_sources
+    from web import personal_library as personal_media
     from web.library_pages import library_pages
+    from web.personal_library import personal_library
     from web.security import same_origin_host, validate_remote_bind
     from web.status_helpers import (
         build_cron_status,
@@ -39,8 +41,13 @@ try:
         select_next_run,
     )
 except ModuleNotFoundError:
+    import book_catalog
     import media_library
+    import personal_library as personal_media
+    import read_sources
+    import release_sources
     from library_pages import library_pages
+    from personal_library import personal_library
     from security import same_origin_host, validate_remote_bind
     from status_helpers import (
         build_cron_status,
@@ -239,6 +246,7 @@ app = Flask(
 )
 app.secret_key = os.environ.get("CLOCKWORK_WEB_SECRET") or secrets.token_hex(32)
 app.register_blueprint(library_pages)
+app.register_blueprint(personal_library)
 
 
 def _csrf_token() -> str:
@@ -1939,9 +1947,18 @@ def _sync_from_intake(
     # Merge AI-generated rules into a temporary alias table for this run
     ai_aliases: dict[str, tuple[str, ...]] = {}
     rules = load_grocery_rules()
+    rejected = {
+        (_norm_text(name), _norm_text(token))
+        for name, tokens in rules.get("rejected_aliases", {}).items()
+        for token in tokens
+    }
     for item_name, tokens in rules.get("aliases", {}).items():
         if isinstance(tokens, list):
-            ai_aliases[item_name.lower()] = tuple(str(t) for t in tokens)
+            ai_aliases[item_name.lower()] = tuple(
+                str(token)
+                for token in tokens
+                if (_norm_text(item_name), _norm_text(str(token))) not in rejected
+            )
 
     seen: dict[str, list[str]] = data.setdefault("seen_receipts", {})
 
@@ -2178,10 +2195,12 @@ Return ONLY a JSON object — no markdown, no explanation:
     return updated, _OLLAMA_MODEL
 
 
-def _ai_generate_rules(data: dict, db_path: Path, since: str | None = None) -> tuple[int, str]:
+def _ai_generate_rules(
+    data: dict, db_path: Path, since: str | None = None
+) -> tuple[int, str, dict[str, list[str]]]:
     """Ask the LLM to generate receipt-to-item alias rules from recent grocery receipts.
 
-    Saves results to GROCERY_RULES_FILE.  Returns (new_aliases_added, model_used).
+    Saves results to GROCERY_RULES_FILE. Returns (aliases_added, model_used, rejected_proposals).
     """
     import sqlite3
     from datetime import date, timedelta
@@ -2217,7 +2236,7 @@ def _ai_generate_rules(data: dict, db_path: Path, since: str | None = None) -> t
             pass
 
     if not descriptions:
-        return 0, _OLLAMA_MODEL
+        return 0, _OLLAMA_MODEL, {}
 
     all_item_names = [item["name"] for cat in data["categories"] for item in cat["items"]]
     items_csv = ", ".join(all_item_names)
@@ -2256,19 +2275,35 @@ Return ONLY a JSON object — no markdown, no explanation:
 
     rules = load_grocery_rules()
     existing = rules.get("aliases", {})
+    rejected = {
+        (_norm_text(name), _norm_text(token))
+        for name, tokens in rules.get("rejected_aliases", {}).items()
+        for token in tokens
+    }
+    rejected_proposals: dict[str, list[str]] = {}
     added = 0
     for item_name, tokens in new_aliases.items():
+        allowed = []
+        for token in tokens:
+            if (_norm_text(item_name), _norm_text(token)) in rejected:
+                proposed = rejected_proposals.setdefault(item_name, [])
+                if token not in proposed:
+                    proposed.append(token)
+            else:
+                allowed.append(token)
         prev = existing.get(item_name, [])
-        merged = list(dict.fromkeys([*prev, *tokens]))  # dedupe, preserve order
+        merged = list(dict.fromkeys([*prev, *allowed]))  # dedupe, preserve order
         if len(merged) > len(prev):
             added += len(merged) - len(prev)
-        existing[item_name] = merged
+        if merged:
+            existing[item_name] = merged
     rules["aliases"] = existing
+    rules["last_rejected_proposals"] = rejected_proposals
     rules["rules_generated_at"] = (
         __import__("datetime").datetime.now().isoformat(timespec="seconds")
     )
     save_grocery_rules(rules)
-    return added, _OLLAMA_MODEL
+    return added, _OLLAMA_MODEL, rejected_proposals
 
 
 def _ai_categorize_shopping(data: dict) -> tuple[int, str]:
@@ -2487,6 +2522,130 @@ def _find_category(data: dict, name: str) -> dict | None:
     return next((c for c in data["categories"] if c["name"] == name), None)
 
 
+def _list_category_views(data: dict, status_key: str) -> list[dict]:
+    """Group each top-level list category into sorted item-type sublists for display."""
+    views = []
+    for category in data["categories"]:
+        by_type: dict[str, dict] = {}
+        for item in category["items"]:
+            label = str(item.get("type") or "").strip() or "Uncategorized"
+            group = by_type.setdefault(label.casefold(), {"name": label, "items": []})
+            group["items"].append(item)
+        groups = sorted(
+            by_type.values(),
+            key=lambda group: (group["name"] == "Uncategorized", group["name"].casefold()),
+        )
+        for group in groups:
+            group["items"] = sorted(group["items"], key=lambda item: bool(item.get(status_key)))
+            group["remaining"] = sum(not item.get(status_key) for item in group["items"])
+        views.append({**category, "groups": groups})
+    return views
+
+
+_GROCERY_TYPE_OPTIONS = (
+    "Meat",
+    "Seafood",
+    "Produce",
+    "Dairy",
+    "Bakery",
+    "Beverages",
+    "Spirits",
+    "Spices",
+    "Condiments",
+    "Pantry",
+    "Snacks",
+    "Frozen",
+)
+_SHOPPING_TYPE_OPTIONS = (
+    "Tops",
+    "Bottoms",
+    "Outerwear",
+    "Footwear",
+    "Accessories",
+    "Underwear",
+    "Bedding",
+    "Bath",
+    "Cleaning",
+    "Lighting",
+    "Storage",
+    "Furniture",
+    "Fitness",
+    "Camping",
+    "Sports",
+    "Electronics",
+)
+
+
+def _list_type_options(category_views: list[dict], suggestions: tuple[str, ...]) -> list[str]:
+    names = {name.casefold(): name for name in suggestions}
+    for category in category_views:
+        for group in category["groups"]:
+            if group["name"] != "Uncategorized":
+                names[group["name"].casefold()] = group["name"]
+    return sorted(names.values(), key=str.casefold)
+
+
+def _visible_list_types(category_views: list[dict]) -> list[str]:
+    return sorted(
+        {group["name"] for category in category_views for group in category["groups"]},
+        key=str.casefold,
+    )
+
+
+def _organize_list_item(
+    data: dict, source_name: str, item_name: str, target_name: str, type_name: str
+) -> tuple[bool, str]:
+    """Move an item between broad categories and set its item-type subcategory."""
+    if len(type_name) > 60 or any(ord(char) < 32 for char in type_name):
+        raise ValueError("Subcategory must be at most 60 printable characters.")
+    source = _find_category(data, source_name)
+    target = _find_category(data, target_name)
+    if source is None or target is None:
+        raise ValueError("Category not found.")
+    item = next((entry for entry in source["items"] if entry["name"] == item_name), None)
+    if item is None:
+        raise ValueError("Item not found in its current category.")
+    if source is not target and any(
+        entry["name"].casefold() == item_name.casefold() for entry in target["items"]
+    ):
+        raise ValueError(f'"{item_name}" already exists in {target_name}.')
+    previous_type = str(item.get("type") or "")
+    if source is target and previous_type == type_name:
+        return False, previous_type
+    if type_name:
+        item["type"] = type_name
+    else:
+        item.pop("type", None)
+    if source is not target:
+        source["items"].remove(item)
+        target["items"].append(item)
+    return True, previous_type
+
+
+def _requested_subcategory() -> str:
+    selected = request.form.get("type", "").strip()
+    if selected == "__new__":
+        selected = request.form.get("new_type", "").strip()
+        if not selected:
+            raise ValueError("Enter a name for the new subcategory.")
+    return selected
+
+
+def _requested_target_category(data: dict) -> tuple[str, bool]:
+    selected = request.form.get("target_category", "").strip()
+    if selected != "__new__":
+        return selected, False
+    name = request.form.get("new_category", "").strip()
+    if not name:
+        raise ValueError("Enter a name for the new category.")
+    if len(name) > 60 or any(ord(char) < 32 for char in name):
+        raise ValueError("Category must be at most 60 printable characters.")
+    if any(category["name"].casefold() == name.casefold() for category in data["categories"]):
+        raise ValueError(f'Category "{name}" already exists; select it from the list.')
+    data["categories"].append({"name": name, "items": []})
+    return name, True
+
+
 def _backup_slot_info(path: Path) -> tuple[list[bool], list[str]]:
     """Return (exists_list, mtime_list) for hot/cold/archive slots."""
     slots = _backup_slots(path)
@@ -2504,20 +2663,49 @@ def _backup_slot_info(path: Path) -> tuple[list[bool], list[str]]:
 @app.get("/groceries")
 def groceries():
     data = load_groceries()
+    category_views = _list_category_views(data, "stocked")
     total = sum(len(c["items"]) for c in data["categories"])
     stocked = sum(1 for c in data["categories"] for i in c["items"] if i["stocked"])
+    favorites = sum(1 for c in data["categories"] for i in c["items"] if i.get("favorite"))
     rules = load_grocery_rules()
-    rules_count = sum(len(v) for v in rules.get("aliases", {}).values())
+    rule_aliases = sorted(
+        (
+            (name, tokens)
+            for name, tokens in rules.get("aliases", {}).items()
+            if isinstance(tokens, list)
+        ),
+        key=lambda entry: entry[0].casefold(),
+    )
+    rules_count = sum(len(tokens) for _, tokens in rule_aliases)
+    rejected_aliases = sorted(
+        rules.get("rejected_aliases", {}).items(), key=lambda entry: entry[0].casefold()
+    )
+    last_rejected_keys = {
+        (name.lower(), token.lower())
+        for name, tokens in rules.get("last_rejected_proposals", {}).items()
+        for token in tokens
+    }
+    active_items = {item["name"].casefold() for cat in data["categories"] for item in cat["items"]}
+    new_rule_tokens = {tuple(pair) for pair in session.pop("_new_grocery_rules", [])}
     backup_exists, backup_mtimes = _backup_slot_info(GROCERIES_FILE)
     return render_template(
         "groceries.html",
         data=data,
+        category_views=category_views,
+        type_options=_list_type_options(category_views, _GROCERY_TYPE_OPTIONS),
+        visible_types=_visible_list_types(category_views),
         total=total,
         stocked=stocked,
+        favorites=favorites,
         last_synced_at=data.get("last_synced_at"),
         intake_available=INTAKE_DB.exists(),
         ollama_available=_ollama_available(),
         rules_count=rules_count,
+        rule_aliases=rule_aliases,
+        rejected_aliases=rejected_aliases,
+        last_rejected_keys=last_rejected_keys,
+        active_items=active_items,
+        new_rule_tokens=new_rule_tokens,
         rules_generated_at=rules.get("rules_generated_at"),
         backup_slots_exist=backup_exists,
         backup_slots_mtime=backup_mtimes,
@@ -2564,7 +2752,7 @@ def groceries_add_item():
     if any(i["name"].lower() == item_name.lower() for i in cat["items"]):
         flash(f'"{item_name}" is already in {category}.', "error")
         return redirect(url_for("groceries"))
-    cat["items"].append({"name": item_name, "stocked": False})
+    cat["items"].append({"name": item_name, "stocked": False, "favorite": False})
     save_groceries(data)
     _log_event(GROCERIES_HISTORY_FILE, "add", item=item_name, category=category)
     return redirect(url_for("groceries") + f"#{_slug(category)}")
@@ -2592,6 +2780,55 @@ def groceries_toggle_item():
             category=category,
         )
     return redirect(url_for("groceries") + f"#{_slug(category)}")
+
+
+@app.post("/groceries/toggle-favorite")
+def groceries_toggle_favorite():
+    category = request.form.get("category", "").strip()
+    item_name = request.form.get("item", "").strip()
+    data = load_groceries()
+    cat = _find_category(data, category)
+    item = (
+        next((entry for entry in cat["items"] if entry["name"] == item_name), None) if cat else None
+    )
+    if item is None:
+        flash("Grocery item not found.", "error")
+        return redirect(url_for("groceries"))
+    item["favorite"] = not item.get("favorite", False)
+    save_groceries(data)
+    _log_event(
+        GROCERIES_HISTORY_FILE,
+        "favorite" if item["favorite"] else "unfavorite",
+        item=item_name,
+        category=category,
+    )
+    return redirect(url_for("groceries") + f"#{_slug(category)}")
+
+
+@app.post("/groceries/organize-item")
+def groceries_organize_item():
+    source = request.form.get("category", "").strip()
+    name = request.form.get("item", "").strip()
+    data = load_groceries()
+    try:
+        target, created_category = _requested_target_category(data)
+        type_name = _requested_subcategory()
+        changed, previous_type = _organize_list_item(data, source, name, target, type_name)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("groceries"))
+    if changed:
+        save_groceries(data)
+        if created_category:
+            _log_event(GROCERIES_HISTORY_FILE, "add-category", category=target)
+        _log_event(
+            GROCERIES_HISTORY_FILE,
+            "organize",
+            item=name,
+            category=target,
+            detail=f"{source} / {previous_type or 'Uncategorized'} → {target} / {type_name or 'Uncategorized'}",
+        )
+    return redirect(url_for("groceries") + f"#{_slug(target)}")
 
 
 @app.post("/groceries/delete-item")
@@ -2668,16 +2905,73 @@ def groceries_ai_rules():
         flash("Intake DB not found — set CLOCKWORK_INTAKE_DB.", "error")
         return redirect(url_for("groceries"))
     data = load_groceries()
+    old_aliases = load_grocery_rules().get("aliases", {})
     try:
-        added, model = _ai_generate_rules(data, INTAKE_DB)
+        added, model, rejected_proposals = _ai_generate_rules(data, INTAKE_DB)
     except Exception as exc:
         flash(f"AI rules generation failed: {exc}", "error")
         return redirect(url_for("groceries"))
     if added == 0:
-        flash("No new alias tokens generated — try after more receipts are scanned.", "success")
+        if rejected_proposals:
+            flash("No new alias tokens accepted; rejected suggestions were blocked.", "success")
+        else:
+            flash("No new alias tokens generated — try after more receipts are scanned.", "success")
     else:
+        new_aliases = load_grocery_rules().get("aliases", {})
+        session["_new_grocery_rules"] = [
+            [name, token]
+            for name, tokens in new_aliases.items()
+            for token in tokens
+            if token not in old_aliases.get(name, [])
+        ][:100]
         flash(f"Added {added} new alias token{'s' if added != 1 else ''} via {model}.", "success")
-    return redirect(url_for("groceries"))
+    blocked_count = sum(len(tokens) for tokens in rejected_proposals.values())
+    if blocked_count:
+        flash(
+            f"Blocked {blocked_count} previously rejected rule suggestion{'s' if blocked_count != 1 else ''}; review the flagged rules below.",
+            "error",
+        )
+    return redirect(url_for("groceries", show_rules=1) + "#rules")
+
+
+@app.post("/groceries/remove-rule")
+def groceries_remove_rule():
+    item_name = request.form.get("item", "")
+    token = request.form.get("token", "")
+    rules = load_grocery_rules()
+    aliases = rules.get("aliases", {})
+    tokens = aliases.get(item_name, [])
+    if not isinstance(tokens, list) or token not in tokens:
+        flash("Rule not found.", "error")
+    else:
+        aliases[item_name] = [existing for existing in tokens if existing != token]
+        if not aliases[item_name]:
+            del aliases[item_name]
+        rejected = rules.setdefault("rejected_aliases", {})
+        rejected.setdefault(item_name, [])
+        if token not in rejected[item_name]:
+            rejected[item_name].append(token)
+        save_grocery_rules(rules)
+        flash(f'Removed and rejected receipt rule "{token}" for {item_name}.', "success")
+    return redirect(url_for("groceries", show_rules=1) + "#rules")
+
+
+@app.post("/groceries/allow-rule")
+def groceries_allow_rule():
+    item_name = request.form.get("item", "")
+    token = request.form.get("token", "")
+    rules = load_grocery_rules()
+    rejected = rules.get("rejected_aliases", {})
+    tokens = rejected.get(item_name, [])
+    if not isinstance(tokens, list) or token not in tokens:
+        flash("Rejected rule not found.", "error")
+    else:
+        rejected[item_name] = [existing for existing in tokens if existing != token]
+        if not rejected[item_name]:
+            del rejected[item_name]
+        save_grocery_rules(rules)
+        flash(f'Allowed "{token}" for {item_name} in future suggestions.', "success")
+    return redirect(url_for("groceries", show_rules=1) + "#rules")
 
 
 @app.post("/groceries/restore")
@@ -2737,6 +3031,7 @@ def _find_shopping_category(data: dict, name: str) -> dict | None:
 @app.get("/shopping")
 def shopping():
     data = load_shopping()
+    category_views = _list_category_views(data, "owned")
     total = sum(len(c["items"]) for c in data["categories"])
     owned_count = sum(1 for c in data["categories"] for i in c["items"] if i.get("owned"))
     rules = load_shopping_rules()
@@ -2745,6 +3040,9 @@ def shopping():
     return render_template(
         "shopping.html",
         data=data,
+        category_views=category_views,
+        type_options=_list_type_options(category_views, _SHOPPING_TYPE_OPTIONS),
+        visible_types=_visible_list_types(category_views),
         total=total,
         owned_count=owned_count,
         last_synced_at=data.get("last_synced_at"),
@@ -2825,6 +3123,32 @@ def shopping_toggle_item():
             category=category,
         )
     return redirect(url_for("shopping") + f"#{_slug(category)}")
+
+
+@app.post("/shopping/organize-item")
+def shopping_organize_item():
+    source = request.form.get("category", "").strip()
+    name = request.form.get("item", "").strip()
+    data = load_shopping()
+    try:
+        target, created_category = _requested_target_category(data)
+        type_name = _requested_subcategory()
+        changed, previous_type = _organize_list_item(data, source, name, target, type_name)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("shopping"))
+    if changed:
+        save_shopping(data)
+        if created_category:
+            _log_event(SHOPPING_HISTORY_FILE, "add-category", category=target)
+        _log_event(
+            SHOPPING_HISTORY_FILE,
+            "organize",
+            item=name,
+            category=target,
+            detail=f"{source} / {previous_type or 'Uncategorized'} → {target} / {type_name or 'Uncategorized'}",
+        )
+    return redirect(url_for("shopping") + f"#{_slug(target)}")
 
 
 @app.post("/shopping/delete-item")
@@ -2967,6 +3291,9 @@ _TV_RE = re.compile(
     r"|\bs\d{2}\b",  # S01 (word-bounded season pack)
     re.IGNORECASE,
 )
+_SEASON_RANGE_RE = re.compile(
+    r"\bS(\d{1,2})\s*-\s*S?(\d{1,2})\b|\bSeason\s*(\d{1,2})\s*[-–]\s*(\d{1,2})\b", re.I
+)
 
 # Anime release groups / patterns common on Nyaa
 _ANIME_RE = re.compile(
@@ -3047,6 +3374,103 @@ def _sort_downloads_to_library() -> dict:
     return {"linked": linked, "skipped": skipped, "errors": errors}
 
 
+def _completed_local_torrents() -> list[dict]:
+    """Read Magneto's local RPC view before filing seeding-safe episode links."""
+    import urllib.request as _ur
+
+    with _ur.urlopen(f"{MAGNETO_URL.rstrip('/')}/api/torrents", timeout=8) as response:
+        payload = json.loads(response.read())
+    if not payload.get("ok") or not isinstance(payload.get("torrents"), list):
+        raise RuntimeError("Magneto could not provide Transmission torrent status.")
+    return payload["torrents"]
+
+
+def _build_series_library(title: str, year: int | None, torrents: list[dict]) -> dict:
+    """Link completed episode files into one show/season tree without moving seeds."""
+    normalized_title = _normalize_media_title(title)
+    if not normalized_title:
+        raise ValueError("A recognizable series title is required.")
+    destination = WATCH_DIR / media_library.SHOWS / media_library.title_folder(title, year)
+    linked: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+    indexed_seasons: dict[int, set[int]] = {}
+    for torrent in torrents:
+        if (
+            float(torrent.get("percentDone") or 0) < 1
+            or int(torrent.get("leftUntilDone") or 0)
+            or int(torrent.get("error") or 0)
+        ):
+            continue
+        name = str(torrent.get("name") or "")
+        if not name or Path(name).name != name:
+            continue
+        download_dir = str(torrent.get("downloadDir") or "")
+        source_dir = Path(download_dir)
+        if not source_dir.is_absolute() or source_dir == Path("/"):
+            continue
+        entry = source_dir / name
+        if entry.is_symlink() or not entry.exists() or _has_incomplete_files(entry):
+            continue
+        release = media_library.parse_release_name(name)
+        if _normalize_media_title(release.title) != normalized_title:
+            continue
+        try:
+            videos = media_library._video_files(entry)
+        except OSError as exc:
+            errors.append(f"{name}: {exc}")
+            continue
+        for video in videos:
+            if video.is_symlink():
+                skipped.append(f"{video.name}: symbolic-link source")
+                continue
+            episode = media_library.parse_release_name(video.name)
+            if episode.episode is None or episode.season is None:
+                skipped.append(f"{video.name}: no episode number")
+                continue
+            season_dir = destination / f"Season {episode.season:02d}"
+            existing = indexed_seasons.get(episode.season)
+            if existing is None:
+                existing = set()
+                if season_dir.is_dir():
+                    for current in season_dir.iterdir():
+                        if current.suffix.lower() not in media_library.VIDEO_EXTS:
+                            continue
+                        found = media_library.parse_release_name(current.name)
+                        if found.episode is not None:
+                            existing.update(
+                                range(found.episode, (found.episode_end or found.episode) + 1)
+                            )
+                indexed_seasons[episode.season] = existing
+            episode_numbers = set(
+                range(episode.episode, (episode.episode_end or episode.episode) + 1)
+            )
+            if existing & episode_numbers:
+                skipped.append(f"{video.name}: episode already filed")
+                continue
+            target = season_dir / video.name
+            if target.exists() or target.is_symlink():
+                skipped.append(f"{video.name}: already present")
+                continue
+            try:
+                season_dir.mkdir(parents=True, exist_ok=True)
+                target.symlink_to(video.resolve())
+                existing.update(episode_numbers)
+                linked.append(str(target.relative_to(WATCH_DIR)))
+                for companion in video.parent.glob(f"{video.stem}.*"):
+                    if (
+                        companion.is_symlink()
+                        or companion.suffix.lower() not in media_library.COMPANION_EXTS
+                    ):
+                        continue
+                    companion_target = season_dir / companion.name
+                    if not companion_target.exists() and not companion_target.is_symlink():
+                        companion_target.symlink_to(companion.resolve())
+            except OSError as exc:
+                errors.append(f"{video.name}: {exc}")
+    return {"linked": linked, "skipped": skipped, "errors": errors}
+
+
 def _normalize_media_title(s: str) -> str:
     s = s.lower()
     s = re.sub(r"[\._]", " ", s)  # dots/underscores → space
@@ -3094,6 +3518,38 @@ def _extract_quality(name: str) -> str:
     return ""
 
 
+def _series_release_details(name: str) -> dict:
+    """Expose episode and season-pack labels for the to-watch search UI."""
+    parsed = media_library.parse_release_name(name)
+    season_range = _SEASON_RANGE_RE.search(name)
+    if season_range:
+        start = int(season_range.group(1) or season_range.group(3))
+        end = int(season_range.group(2) or season_range.group(4))
+        if end > start:
+            return {
+                "season": start,
+                "season_end": end,
+                "episode": None,
+                "episode_end": None,
+                "release_type": "series_pack",
+            }
+    if parsed.kind != media_library.SHOWS or parsed.season is None:
+        return {
+            "season": None,
+            "season_end": None,
+            "episode": None,
+            "episode_end": None,
+            "release_type": "other",
+        }
+    return {
+        "season": parsed.season,
+        "season_end": None,
+        "episode": parsed.episode,
+        "episode_end": parsed.episode_end,
+        "release_type": "episode" if parsed.episode is not None else "season_pack",
+    }
+
+
 def _search_torrents_csv(query: str, limit: int = 20) -> list[dict]:
     """Search torrents-csv.com and return results sorted by seeders."""
     import urllib.parse as _up
@@ -3121,6 +3577,7 @@ def _search_torrents_csv(query: str, limit: int = 20) -> list[dict]:
                 "size_bytes": int(t.get("size_bytes") or 0),
                 "quality": _extract_quality(name),
                 "source": "torrents-csv",
+                **_series_release_details(name),
             }
         )
     return sorted(results, key=lambda r: r["seeders"], reverse=True)[:limit]
@@ -3163,6 +3620,7 @@ def _search_nyaa(query: str, limit: int = 20) -> list[dict]:
                 "size_str": str(item.findtext("nyaa:size", "", ns)),
                 "quality": _extract_quality(title),
                 "source": "nyaa",
+                **_series_release_details(title),
             }
         )
     return sorted(results, key=lambda r: r["seeders"], reverse=True)
@@ -4237,6 +4695,104 @@ def _watch_scan_dirs() -> list[Path]:
     return library + [d for d in _EXTRA_WATCH_DIRS if d not in library]
 
 
+def _watch_media_inventory(title: str, year: str, category: str) -> dict:
+    """Find playable local media for one watch-list title without relying on a stale catalog."""
+    wanted = _normalize_media_title(title)
+    series = bool(re.search(r"tv|show|series|anime", category, re.I))
+    inventory = {
+        "has_video": False,
+        "episodes": set(),
+        "seasons": set(),
+        "unknown": False,
+        "url": None,
+    }
+    if not wanted:
+        return inventory
+    for scan_dir in _watch_scan_dirs():
+        if not scan_dir.is_dir():
+            continue
+        with contextlib.suppress(OSError):
+            for entry in scan_dir.iterdir():
+                if entry.name.startswith(".") or entry.name in (
+                    media_library.MOVIES,
+                    media_library.SHOWS,
+                ):
+                    continue
+                if (
+                    scan_dir == WATCH_DIR / media_library.MOVIES
+                    and entry.name in media_library.GENRE_FOLDERS
+                ):
+                    continue
+                rel = entry.relative_to(WATCH_DIR) if entry.is_relative_to(WATCH_DIR) else None
+                parts = rel.parts if rel else ()
+                organized_kind = None
+                if entry.is_dir() and parts:
+                    if parts[0] == media_library.SHOWS and len(parts) == 2:
+                        organized_kind = media_library.SHOWS
+                    elif parts[0] == media_library.MOVIES and len(parts) in (2, 3):
+                        organized_kind = media_library.MOVIES
+                parsed = media_library.parse_release_name(entry.name)
+                entry_title = entry.name if organized_kind else parsed.title
+                if _normalize_media_title(entry_title) != wanted:
+                    continue
+                entry_year = parsed.year
+                if year and entry_year and str(entry_year) != year:
+                    continue
+                kind = organized_kind or parsed.kind
+                if series and kind != media_library.SHOWS:
+                    continue
+                if not series and kind == media_library.SHOWS:
+                    continue
+                videos = media_library._video_files(entry)
+                if not videos:
+                    continue
+                inventory["has_video"] = True
+                if organized_kind and inventory["url"] is None:
+                    inventory["url"] = url_for("library_pages.title_page", rel=str(rel))
+                if series:
+                    for video in videos:
+                        release = media_library.parse_release_name(video.name)
+                        season = release.season
+                        if season is None:
+                            parent = re.search(r"Season\s*(\d{1,2})", str(video.parent), re.I)
+                            season = int(parent.group(1)) if parent else None
+                        if season is None:
+                            inventory["unknown"] = True
+                            continue
+                        inventory["seasons"].add(season)
+                        if release.episode is None:
+                            inventory["unknown"] = True
+                        else:
+                            inventory["episodes"].update(
+                                (season, episode)
+                                for episode in range(
+                                    release.episode, (release.episode_end or release.episode) + 1
+                                )
+                            )
+    return inventory
+
+
+def _watch_release_conflict(inventory: dict, category: str, release_name: str) -> str | None:
+    """Explain when a torrent would duplicate playable media already on disk."""
+    if not inventory["has_video"]:
+        return None
+    if not re.search(r"tv|show|series|anime", category, re.I):
+        return "This title is already in the library."
+    release = _series_release_details(release_name)
+    season = release["season"]
+    if season is None or inventory["unknown"]:
+        return "This show is already in the library; episode overlap cannot be ruled out."
+    if release["release_type"] == "episode":
+        episodes = range(release["episode"], (release["episode_end"] or release["episode"]) + 1)
+        if any((season, episode) in inventory["episodes"] for episode in episodes):
+            return "One or more episodes in this release are already in the library."
+    elif release["release_type"] in ("season_pack", "series_pack"):
+        seasons = range(season, (release["season_end"] or season) + 1)
+        if any(existing in inventory["seasons"] for existing in seasons):
+            return "One or more seasons in this release are already in the library."
+    return None
+
+
 @app.get("/api/watch-check")
 def watch_check_status():
     """Describe the library check endpoint for tooling (the to-watch "Library API" link).
@@ -4249,7 +4805,7 @@ def watch_check_status():
         {
             "available": any(d["exists"] for d in dirs),
             "dirs": dirs,
-            "usage": 'POST {"titles": [{"title": "...", "year": "..."|null}, ...]}',
+            "usage": 'POST {"titles": [{"title": "...", "year": "..."|null, "category": "Movies"}, ...]}',
         }
     )
 
@@ -4258,8 +4814,7 @@ def watch_check_status():
 def watch_check():
     """Fuzzy-match a list of titles against entries in WATCH_DIR.
 
-    Request body: {"titles": [{"title": "...", "year": "..."|null}, ...]}
-    Response: {"available": bool, "matches": {"<title>": {"found": bool, "match": "<entry name>"|null}}}
+    Organized title matches include a URL for opening the library title page.
     """
     scan_dirs = _watch_scan_dirs()
     accessible = [d for d in scan_dirs if d.exists()]
@@ -4272,8 +4827,8 @@ def watch_check():
     except Exception:
         return jsonify({"available": False, "matches": {}}), 400
 
-    # Build normalised entry index across all accessible scan directories.
-    entries: list[tuple[str, str]] = []
+    # Include kind and year so identically named films and shows resolve separately.
+    entries: list[dict] = []
     for scan_dir in accessible:
         with contextlib.suppress(OSError):
             for entry in scan_dir.iterdir():
@@ -4287,22 +4842,66 @@ def watch_check():
                     and entry.name in media_library.GENRE_FOLDERS
                 ):
                     continue
-                entries.append((entry.name, _normalize_media_title(entry.name)))
+                rel = entry.relative_to(WATCH_DIR) if entry.is_relative_to(WATCH_DIR) else None
+                parts = rel.parts if rel else ()
+                kind = None
+                url = None
+                if entry.is_dir() and parts:
+                    if parts[0] == media_library.SHOWS and len(parts) == 2:
+                        kind = media_library.SHOWS
+                    elif parts[0] == media_library.MOVIES and len(parts) in (2, 3):
+                        kind = media_library.MOVIES
+                    if kind:
+                        url = url_for("library_pages.title_page", rel=str(rel))
+                year_match = re.search(r"\((\d{4})\)$", entry.name)
+                entries.append(
+                    {
+                        "name": entry.name,
+                        "norm": _normalize_media_title(entry.name),
+                        "year": int(year_match.group(1)) if year_match else None,
+                        "kind": kind,
+                        "url": url,
+                    }
+                )
 
     matches: dict[str, dict] = {}
+    results: list[dict] = []
     for item in items:
         title = str(item.get("title", "")).strip()
         if not title:
+            results.append({"found": False, "match": None, "url": None})
             continue
         norm = _normalize_media_title(title)
-        found_name: str | None = None
-        for raw_name, norm_name in entries:
-            if _titles_match(norm, norm_name):
-                found_name = raw_name
-                break
-        matches[title] = {"found": found_name is not None, "match": found_name}
+        year = str(item.get("year") or "").strip()
+        category = str(item.get("category") or "").lower()
+        wanted_kind = (
+            media_library.SHOWS if category in ("tv shows", "anime") else media_library.MOVIES
+        )
+        candidates = [
+            entry
+            for entry in entries
+            if _titles_match(norm, entry["norm"])
+            and (not year or entry["year"] is None or str(entry["year"]) == year)
+        ]
+        best = max(
+            candidates,
+            key=lambda entry: (
+                entry["norm"] == norm,
+                entry["kind"] == wanted_kind,
+                entry["year"] is not None and str(entry["year"]) == year,
+                bool(entry["url"]),
+            ),
+            default=None,
+        )
+        result = {
+            "found": best is not None,
+            "match": best["name"] if best else None,
+            "url": best["url"] if best else None,
+        }
+        matches[title] = result
+        results.append(result)
 
-    return jsonify({"available": True, "matches": matches})
+    return jsonify({"available": True, "matches": matches, "results": results})
 
 
 @app.post("/api/sort-downloads")
@@ -4316,6 +4915,27 @@ def sort_downloads_api():
     """
     result = _sort_downloads_to_library()
     return jsonify(result)
+
+
+@app.post("/api/series-build")
+def series_build_api():
+    """File completed local episodes for one to-watch title into season folders."""
+    payload = request.get_json(silent=True) or {}
+    title = str(payload.get("title") or "").strip()
+    year_raw = payload.get("year")
+    if not title or len(title) > 200:
+        return jsonify({"ok": False, "error": "A series title is required."}), 400
+    if year_raw in (None, ""):
+        year = None
+    elif str(year_raw).isdigit() and 1900 <= int(year_raw) <= 2100:
+        year = int(year_raw)
+    else:
+        return jsonify({"ok": False, "error": "Invalid series year."}), 400
+    try:
+        result = _build_series_library(title, year, _completed_local_torrents())
+    except (OSError, ValueError, RuntimeError) as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 503
+    return jsonify({"ok": True, **result})
 
 
 @app.post("/api/suggest-watch")
@@ -4929,6 +5549,34 @@ def api_shopping_delete_item():
     return jsonify({"ok": True, "data": data})
 
 
+@app.get("/api/books/search")
+def book_search():
+    title = request.args.get("title", "").strip()
+    year = request.args.get("year", "").strip()
+    if not title:
+        return jsonify({"results": []})
+    if len(title) > 200 or (year and not re.fullmatch(r"\d{4}", year)):
+        return jsonify({"error": "Invalid book title or year."}), 400
+    return jsonify({"results": book_catalog.search_books(title, year)})
+
+
+@app.get("/api/read-sources")
+def read_source_search():
+    title = request.args.get("title", "").strip()
+    category = request.args.get("category", "").strip()
+    year = request.args.get("year", "").strip()
+    if not title:
+        return jsonify({"results": []})
+    if len(title) > 200 or len(category) > 100 or (year and not re.fullmatch(r"\d{4}", year)):
+        return jsonify({"error": "Invalid reading title, category, or year."}), 400
+    results = read_sources.search_read_sources(title, category)
+    match = personal_media.match_title("read", title, year)
+    for result in results:
+        result["in_library"] = match["found"]
+        result["library_url"] = match["url"]
+    return jsonify({"results": results})
+
+
 @app.get("/api/torrent-search")
 def torrent_search():
     """Search for torrents matching a title.
@@ -4938,12 +5586,74 @@ def torrent_search():
     """
     q = request.args.get("q", "").strip()
     cat = request.args.get("cat", "").strip().lower()
+    title = request.args.get("title", "").strip()
+    year = request.args.get("year", "").strip()
+    media_kind = request.args.get("media_kind", "").strip()
+    if media_kind and media_kind not in ("read", "listen"):
+        return jsonify({"error": "Unknown media library."}), 400
+    if media_kind and not title:
+        return jsonify({"error": "A list title is required for library checking."}), 400
+    if media_kind and personal_media.root_for(media_kind) is None:
+        return jsonify({"error": "The read or listen library folder is not configured."}), 503
+    season_raw = request.args.get("season", "").strip()
+    episode_raw = request.args.get("episode", "").strip()
+    if (season_raw or episode_raw) and (not season_raw.isdigit() or not episode_raw.isdigit()):
+        return jsonify({"error": "Season and episode must be positive numbers."}), 400
+    season = int(season_raw) if season_raw else None
+    episode = int(episode_raw) if episode_raw else None
+    if season is not None and (season < 1 or episode < 1):
+        return jsonify({"error": "Season and episode must be positive numbers."}), 400
     if not q:
         return jsonify({"results": []})
     if cat == "anime":
         results = _search_nyaa(q)
     else:
         results = _search_torrents_csv(q)
+    if media_kind in ("read", "listen"):
+        from urllib.parse import parse_qs
+
+        def release_key(result: dict) -> str:
+            magnet = result.get("magnet", "")
+            query = magnet.partition("?")[2]
+            xt = parse_qs(query).get("xt", [""])[0].casefold()
+            return xt or magnet.casefold()
+
+        seen = {release_key(result) for result in results}
+        for result in release_sources.search_prowlarr(q, media_kind):
+            key = release_key(result)
+            if key not in seen:
+                seen.add(key)
+                results.append(result)
+        results = sorted(results, key=lambda result: result.get("seeders", 0), reverse=True)[:40]
+    if season is not None:
+        wanted = _normalize_media_title(title)
+        selected = []
+        for result in results:
+            release = _series_release_details(result["name"])
+            parsed = media_library.parse_release_name(result["name"])
+            if _normalize_media_title(parsed.title) != wanted or release["season"] is None:
+                continue
+            start, end = release["season"], release["season_end"] or release["season"]
+            if not start <= season <= end:
+                continue
+            if release["release_type"] == "episode" and not (
+                release["episode"] <= episode <= (release["episode_end"] or release["episode"])
+            ):
+                continue
+            selected.append(result)
+        results = selected
+    if media_kind and title:
+        match = personal_media.match_title(media_kind, title, year)
+        for result in results:
+            result["library_conflict"] = (
+                "This title is already in the library." if match["found"] else None
+            )
+            result["library_url"] = match["url"]
+    elif title:
+        inventory = _watch_media_inventory(title, year, cat)
+        for result in results:
+            result["library_conflict"] = _watch_release_conflict(inventory, cat, result["name"])
+            result["library_url"] = inventory["url"]
     return jsonify({"results": results})
 
 
@@ -4960,10 +5670,40 @@ def torrent_add():
         payload = request.get_json(force=True) or {}
         magnet = str(payload.get("magnet") or "").strip()
         host = str(payload.get("host") or "").strip() or None
+        title = str(payload.get("title") or "").strip()
+        year = str(payload.get("year") or "").strip()
+        category = str(payload.get("category") or "").strip()
+        release_name = str(payload.get("name") or "").strip()
+        media_kind = str(payload.get("media_kind") or "").strip()
     except Exception:
         return jsonify({"ok": False, "error": "Invalid request body."}), 400
     if not magnet.startswith("magnet:"):
         return jsonify({"ok": False, "error": "Not a valid magnet link."}), 400
+    if media_kind:
+        if media_kind not in ("read", "listen"):
+            return jsonify({"ok": False, "error": "Unknown media library."}), 400
+        if not title:
+            return jsonify({"ok": False, "error": "A list title is required."}), 400
+        if personal_media.root_for(media_kind) is None:
+            return jsonify({"ok": False, "error": "The library folder is not configured."}), 503
+        if title:
+            match = personal_media.match_title(media_kind, title, year)
+            if match["found"]:
+                return (
+                    jsonify(
+                        {
+                            "ok": False,
+                            "error": "This title is already in the library.",
+                            "library_url": match["url"],
+                        }
+                    ),
+                    409,
+                )
+    elif title and release_name:
+        inventory = _watch_media_inventory(title, year, category)
+        conflict = _watch_release_conflict(inventory, category, release_name)
+        if conflict:
+            return jsonify({"ok": False, "error": conflict, "library_url": inventory["url"]}), 409
     ok, err = _proxy_to_magneto(magnet, host)
     if ok:
         return jsonify({"ok": True})

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ 'Listen' if kind == 'listen' else 'Read' }} Library - Clockwork</title>
+  <style>
+    :root { color-scheme:dark; --bg:#0f1117; --panel:#1a1d27; --border:#2e3250; --text:#e2e4f0; --muted:#8890b0; --accent:#5b9eff; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:14px/1.55 system-ui,sans-serif; }
+    header { padding:14px 20px; background:var(--panel); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+    h1 { margin:0; font-size:18px; }
+    main { max-width:900px; margin:auto; padding:18px 14px; }
+    a { color:var(--accent); text-decoration:none; }
+    a:hover { text-decoration:underline; }
+    .panel { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:12px 14px; }
+    .row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid var(--border); overflow-wrap:anywhere; }
+    .row:last-child { border-bottom:0; }
+    .muted { color:var(--muted); }
+  </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
+</head>
+<body>
+{% include "_site_nav.html" %}
+<header>
+  <a href="/to-{{ kind }}">← To {{ 'Listen' if kind == 'listen' else 'Read' }}</a>
+  <h1>{{ '🎧' if kind == 'listen' else '📚' }} {{ 'Listen' if kind == 'listen' else 'Read' }} Library</h1>
+</header>
+<main>
+  {% if not available %}
+    <div class="panel muted">Set <code>CLOCKWORK_{{ kind|upper }}_LIBRARY_DIR</code> to a readable local folder to enable this library.</div>
+  {% else %}
+    {% if rel %}<p><a href="{{ url_for('personal_library.browse', kind=kind, rel=rel.rsplit('/', 1)[0]) if '/' in rel else url_for('personal_library.browse', kind=kind) }}">← Parent folder</a></p>{% endif %}
+    <p class="muted">{{ rel or 'Library root' }}{% if playable and rel %} · <a href="{{ url_for('personal_library.play', rel=rel) }}">▶ Play folder</a>{% endif %}</p>
+    <div class="panel">
+      {% for dir in dirs %}
+        <div class="row"><a href="{{ url_for('personal_library.browse', kind=kind, rel=dir.rel) }}">📁 {{ dir.name }}</a></div>
+      {% endfor %}
+      {% for file in files %}<div class="row"><a href="{{ file.url }}">{{ '🎵' if kind == 'listen' else '📄' }} {{ file.name }}</a></div>{% endfor %}
+      {% if not dirs and not files %}<p class="muted">No supported files in this folder.</p>{% endif %}
+    </div>
+  {% endif %}
+</main>
+</body>
+</html>
