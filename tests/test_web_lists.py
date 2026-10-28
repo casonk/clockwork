@@ -464,6 +464,24 @@ def test_series_build_api_uses_completed_magneto_status(client, tmp_path, monkey
     ]
 
 
+def test_list_categories_offer_collapsible_open_and_completed_sections(client):
+    csrf = _csrf(client, "/api/todo")
+    for title, done in (("Open task", False), ("Finished task", True)):
+        added = client.post(
+            "/api/todo/add-item",
+            json={"category": "Home", "item": title, "done": done},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert added.status_code == 200
+
+    html = client.get("/to-do").get_data(as_text=True)
+
+    assert 'data-group-toggle="open"' in html and "Open (1)" in html
+    assert 'data-group-toggle="done"' in html and "Completed (1)" in html
+    assert html.count('class="item" data-group="open"') == 1
+    assert html.count('class="item" data-group="done"') == 1
+
+
 def test_other_lists_do_not_render_torrent_controls(client):
     html = client.get("/to-do").get_data(as_text=True)
 

@@ -54,6 +54,10 @@
     .delete-btn, .cat-delete-btn { border:1px solid transparent; background:transparent; color:var(--muted); cursor:pointer; border-radius:5px; width:24px; height:24px; }
     .delete-btn:hover, .cat-delete-btn:hover { color:var(--red); border-color:var(--red-dim); background:var(--red-dim); }
     .empty-item { color:var(--muted); font-size:12px; font-style:italic; }
+    .group-toggle { display:block; width:100%; text-align:left; padding:6px 14px; background:var(--surface3); border:0; border-bottom:1px solid var(--border); color:var(--muted); font:inherit; font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; cursor:pointer; }
+    .group-toggle::before { content:"\25BE "; }
+    .group-toggle[aria-expanded="false"]::before { content:"\25B8 "; }
+    .group-collapsed { display:none !important; }
     .add-item-row, .add-category { display:flex; gap:8px; padding:10px 14px; background:var(--surface3); border-top:1px solid var(--border); }
     .add-category { border:1px solid var(--border); border-radius:8px; background:var(--surface); margin-top:16px; }
     input[type="text"] { flex:1; min-width:0; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px; color:var(--text); outline:none; }
@@ -187,9 +191,13 @@
       <div class="items">
         {% for item in active + completed %}
           {% set value = item[cfg.primary] %}
+          {% set grp = "done" if item[cfg.status] else "open" %}
+          {% if loop.first or loop.previtem[cfg.status] != item[cfg.status] %}
+          <button class="group-toggle" type="button" data-group-toggle="{{ grp }}" aria-expanded="true">{{ "Completed" if grp == "done" else "Open" }} ({{ (completed if grp == "done" else active)|length }})</button>
+          {% endif %}
           {% set find_torrent = cfg.key == "watch" and not item[cfg.status] %}
           {% set find_media = cfg.key in ("read", "listen") and not item[cfg.status] %}
-          <div class="item"{% if cfg.key in ("watch", "read", "listen") %} data-title="{{ value }}" data-year="{{ item.year or '' }}" data-category="{{ cat.name }}"{% endif %}>
+          <div class="item" data-group="{{ grp }}"{% if cfg.key in ("watch", "read", "listen") %} data-title="{{ value }}" data-year="{{ item.year or '' }}" data-category="{{ cat.name }}"{% endif %}>
             <form method="post" action="/{{ cfg.page }}/toggle-item">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <input type="hidden" name="category" value="{{ cat.name }}">
@@ -219,7 +227,7 @@
               <button class="delete-btn" type="submit" title="Remove">x</button>
             </form>
           </div>
-          {% if find_torrent or find_media %}<div class="search-panel" hidden></div>{% endif %}
+          {% if find_torrent or find_media %}<div class="search-panel" data-group="{{ grp }}" hidden></div>{% endif %}
         {% else %}
           <div class="item empty-item">Nothing here yet.</div>
         {% endfor %}
@@ -239,6 +247,31 @@
     <button class="add-btn" type="submit">+ {{ cfg.name_label }}</button>
   </form>
 </main>
+<script>
+// Collapse a category's open or completed list; the choice lasts for this tab so it survives the reload after each action.
+(function () {
+  const key = "clockwork:{{ cfg.key }}:collapsed-groups";
+  let saved = {};
+  try { saved = JSON.parse(sessionStorage.getItem(key) || "{}") || {}; } catch (_) { /* start expanded */ }
+  for (const button of document.querySelectorAll("[data-group-toggle]")) {
+    const group = button.dataset.groupToggle;
+    const id = button.closest(".category").id + "|" + group;
+    const apply = (collapsed) => {
+      button.setAttribute("aria-expanded", String(!collapsed));
+      for (const node of button.closest(".items").querySelectorAll('[data-group="' + group + '"]')) {
+        node.classList.toggle("group-collapsed", collapsed);
+      }
+    };
+    apply(Boolean(saved[id]));
+    button.addEventListener("click", () => {
+      const collapsed = button.getAttribute("aria-expanded") === "true";
+      apply(collapsed);
+      if (collapsed) saved[id] = true; else delete saved[id];
+      try { sessionStorage.setItem(key, JSON.stringify(saved)); } catch (_) { /* collapse still works */ }
+    });
+  }
+})();
+</script>
 {% if cfg.key == "watch" %}
 <script>
 (() => {

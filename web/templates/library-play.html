@@ -9,6 +9,11 @@
   #stream-status:empty { display:none; }
   .nav-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
   .nav-row .spacer { flex:1; }
+  /* Fullscreen the stage, not the <video>, so the next/autoplay controls stay reachable. */
+  .stage:fullscreen { background:#000; display:flex; flex-direction:column; justify-content:center; }
+  .stage:fullscreen .player { max-height:none; flex:1; min-height:0; border-radius:0; }
+  .stage:fullscreen .nav-row { margin:0; padding:8px 12px; }
+  .stage:fullscreen #stream-status { margin:0 12px 8px; }
   .versions td { padding:6px 8px; vertical-align:middle; }
   .versions form { display:inline; }
 </style>
@@ -17,7 +22,8 @@
 {% endif %}
 {% endblock %}
 {% block content %}
-<video id="player" class="player" controls preload="metadata" playsinline
+<div id="stage" class="stage">
+<video id="player" class="player" controls controlslist="nofullscreen" preload="metadata" playsinline
   {% if following %}data-next="{{ url_for('library_pages.play_page', rel=following.rel) }}" data-next-label="{{ following.label }}"{% endif %}
   {% if previous %}data-previous="{{ url_for('library_pages.play_page', rel=previous.rel) }}"{% endif %}
   data-hls="{{ url_for('library_pages.stream_playlist', rel=info.rel) }}"
@@ -34,12 +40,14 @@
 <div class="nav-row">
   {% if previous %}<a class="btn" href="{{ url_for('library_pages.play_page', rel=previous.rel) }}" title="{{ previous.name }} (Shift+P)">⏮ {{ previous.label }}</a>{% endif %}
   <span class="spacer"></span>
+  <button class="btn" type="button" id="fullscreen" title="Fullscreen with next and autoplay controls (double-click the video)">⛶ Fullscreen</button>
   {% if following %}
   <button class="btn" type="button" id="autoplay" aria-pressed="true" title="Play the next one when this ends">⏵ Autoplay: on</button>
   <a class="btn" href="{{ url_for('library_pages.play_page', rel=following.rel) }}" title="{{ following.name }} (Shift+N)">{{ following.label }} ⏭</a>
   {% endif %}
 </div>
 <div id="stream-status" class="flash" style="margin-top:10px"></div>
+</div>
 <div class="panel" style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center">
   <label class="small muted" style="display:inline-flex; gap:6px; align-items:center">Quality
     <select id="quality">
@@ -103,6 +111,7 @@
 <script>
 (function () {
   const video = document.getElementById("player");
+  const stage = document.getElementById("stage");
   const status = document.getElementById("stream-status");
   const select = document.getElementById("quality");
   const badge = document.getElementById("mode-badge");
@@ -334,16 +343,18 @@
   }
 
   function toggleFullscreen() {
-    if (document.fullscreenElement === video) {
+    if (document.fullscreenElement) {
       Promise.resolve(document.exitFullscreen()).catch(function () {});
     } else if (video.webkitDisplayingFullscreen && video.webkitExitFullscreen) {
       video.webkitExitFullscreen();
-    } else if (!document.fullscreenElement && video.requestFullscreen) {
-      Promise.resolve(video.requestFullscreen()).catch(function () {});
+    } else if (!document.fullscreenElement && stage.requestFullscreen) {
+      Promise.resolve(stage.requestFullscreen()).catch(function () {});
     } else if (!document.fullscreenElement && video.webkitEnterFullscreen) {
       video.webkitEnterFullscreen();
     }
   }
+
+  document.getElementById("fullscreen").addEventListener("click", toggleFullscreen);
 
   video.addEventListener("dblclick", function (event) {
     event.preventDefault();

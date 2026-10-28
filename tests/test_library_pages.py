@@ -272,6 +272,15 @@ def test_play_page_plays_mp4_directly_and_streams_mkv(client, probed):
     assert "Breaking Bad (2008)" in mkv
 
 
+def test_play_page_fullscreens_the_stage_so_next_controls_stay_reachable(client, probed):
+    html = client.get(
+        "/library/play/shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E01_1080p.mkv"
+    ).get_data(as_text=True)
+    stage = html.split('id="stage"', 1)[1].split("</div>\n", 1)[0]
+    assert 'id="player"' in stage and 'id="autoplay"' in stage and 'id="fullscreen"' in stage
+    assert 'controlslist="nofullscreen"' in html and "stage.requestFullscreen" in html
+
+
 def test_stream_routes_serve_playlist_segments_and_subtitles(client, probed, tmp_path, monkeypatch):
     segment_file = tmp_path / "seg_1.ts"
     segment_file.write_bytes(b"\x47" * 188)
@@ -526,7 +535,7 @@ def test_player_links_previous_and_next_episode(client, probed, ai_files):
     assert 'new URLSearchParams(window.location.search).get("autoplay") === "1"' in first
     assert 'video.addEventListener("canplay"' in first
     assert 'video.addEventListener("dblclick"' in first
-    assert "video.requestFullscreen()" in first and "document.exitFullscreen()" in first
+    assert "stage.requestFullscreen()" in first and "document.exitFullscreen()" in first
     assert 'video.addEventListener("volumechange", rememberVolume)' in first
     assert 'const volumeKey = "clockwork-library-volume"' in first
     assert "restoreVolume(volume, muted)" in first
