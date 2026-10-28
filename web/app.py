@@ -5985,6 +5985,16 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
     )
     groups["Clockwork"].append(
         {
+            "name": "clockwork-ecu",
+            "display": "Machine load",
+            "url": "/ecu",
+            "hostname": "",
+            "access_mode": "shared-mtls",
+            "icon": "🖥️",
+        }
+    )
+    groups["Clockwork"].append(
+        {
             "name": "clockwork-to-code",
             "display": "To Code",
             "url": "/to-code",
