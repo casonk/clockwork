@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Refer to the engine control unit generically in the upscaler README and
+  `upscale.env.example` instead of naming its private repository.
+
 - Stop naming a private repository in the To Code source: the add form's extra
   repository suggestions come from `CLOCKWORK_CODE_EXTRA_REPOS` (comma-separated,
   empty by default), and the placeholder and tests use synthetic names.
