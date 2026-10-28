@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1, user-scalable=yes">
+  <title>Machine load — Clockwork</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2e3250;
+      --accent: #5b7fff; --green: #3ecf6e; --amber: #e0a752; --red: #e05252;
+      --text: #e2e4f0; --muted: #8890b0;
+      --mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+    }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; min-height: 100vh; }
+    main { max-width: 1000px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+    h1 { font-size: 18px; }
+    h2 { font-size: 14px; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+    section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+    .error { border-color: var(--red); color: var(--red); }
+    dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; }
+    dt { color: var(--muted); }
+    dd, td, th { font-family: var(--mono); font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 600; }
+    .run { color: var(--green); } .defer { color: var(--amber); } .skip { color: var(--red); }
+    .muted { color: var(--muted); }
+    @media (max-width: 600px) { td, th { padding: 4px 4px; } }
+  </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
+</head>
+<body>
+{% include "_site_nav.html" %}
+<main>
+  <h1>Machine load</h1>
+  {% if ecu is none %}
+  <section class="error" role="alert">Lease state is unavailable: {{ error }}</section>
+  {% else %}
+  {% set lease = ecu.lease %}
+  <section>
+    <h2>Lease</h2>
+    {% if lease %}
+    <dl>
+      <dt>Command</dt><dd>{{ lease.command or '—' }}</dd>
+      <dt>Priority</dt><dd>{{ lease.priority or '—' }}</dd>
+      <dt>Mode</dt><dd>{{ lease.mode or '—' }}</dd>
+      <dt>GPU size</dt><dd>{% if lease.gpu_mib %}{{ lease.gpu_mib }} MiB{% else %}—{% endif %}</dd>
+      <dt>PID</dt><dd>{{ lease.pid or '—' }}</dd>
+    </dl>
+    {% else %}
+    <p class="muted">No lease is held. Heavy jobs may start.</p>
+    {% endif %}
+  </section>
+  <section>
+    <h2>GPU</h2>
+    {% if ecu.gpu %}
+    <dl>
+      <dt>Memory</dt><dd>{{ ecu.gpu.used_mib }} / {{ ecu.gpu.total_mib }} MiB used ({{ ecu.gpu.free_mib }} free)</dd>
+    </dl>
+    {% if ecu.gpu.processes %}
+    <table>
+      <thead><tr><th>PID</th><th>Process</th><th>MiB</th><th>Owner</th></tr></thead>
+      <tbody>
+      {% for p in ecu.gpu.processes %}
+        <tr><td>{{ p.pid }}</td><td>{{ p.name }}</td><td>{{ p.used_mib }}</td><td>{{ p.owner or '—' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% else %}
+    <p class="muted">No GPU reading.</p>
+    {% endif %}
+  </section>
+  <section>
+    <h2>Timer jobs</h2>
+    <table>
+      <thead><tr><th>Unit</th><th>Class</th><th>Verdict</th><th>Reason</th></tr></thead>
+      <tbody>
+      {% for job in ecu.jobs %}
+        <tr>
+          <td>{{ job.unit }}</td><td>{{ job.class }}</td>
+          <td class="{{ 'run' if job.verdict == 'run' else 'defer' if job.verdict == 'defer' else 'skip' }}">{{ job.verdict }}{% if job.running %} (running){% endif %}</td>
+          <td>{{ job.reason }}{% if job.deferrals %} · deferred {{ job.deferrals }}×{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+</main>
+</body>
+</html>

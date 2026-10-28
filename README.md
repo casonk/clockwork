@@ -439,6 +439,14 @@ default so importing or launching the web process cannot mutate tracked
 manifests; set `CLOCKWORK_WEB_AUTOGENERATE_CRON=1` only for an explicit,
 reviewed migration.
 
+### Machine load (`/ecu`)
+
+The Services menu links **Machine load**, which renders `ecu status --json`:
+the held lease with its priority, mode and GPU size, GPU memory and processes,
+and whether each guarded timer job would run or defer. `/api/ecu` returns the
+same document (503 with an `error` when unavailable). The page finds `ecu` via
+`CLOCKWORK_ECU_BIN`, then `PATH`, then `~/.local/bin/ecu`.
+
 ### Optional external personal-list authority
 
 Clockwork's **To Code** list is available from `/home` and the Lists menu at
