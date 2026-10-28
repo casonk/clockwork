@@ -3256,6 +3256,10 @@ def _proxy_to_magneto(magnet: str, host_id: str | None = None) -> tuple[bool, st
 # Routes - server-backed personal lists
 # ---------------------------------------------------------------------------
 
+# Boolean triage flags on a To Code item, stored as "yes" when set. Items with
+# none of them are ready for an unattended agent to work on.
+CODE_FLAGS = ("in_person", "requires_human", "requires_sudo")
+
 SIMPLE_LIST_CONFIGS = {
     "todo": {
         "page": "to-do",
@@ -3374,7 +3378,7 @@ SIMPLE_LIST_CONFIGS = {
         "item_placeholder": "Add backlog item...",
         "category_placeholder": "New repo group...",
         "name_label": "Repo group",
-        "extras": ["repo", "priority", "in_person"],
+        "extras": ["repo", "priority", *CODE_FLAGS],
     },
 }
 
@@ -3395,14 +3399,14 @@ def _clean_code_priority(value) -> str:
     return text if text in CODE_PRIORITIES else ""
 
 
-def _clean_code_in_person(value) -> str:
-    """Return "yes" when the item needs in-person work at a machine, else ""."""
+def _clean_code_flag(value) -> str:
+    """Return "yes" when a triage flag is set, else ""."""
     if isinstance(value, str):
         return "yes" if value.strip().lower() in ("1", "true", "yes", "on") else ""
     return "yes" if value else ""
 
 
-def _apply_code_triage(item: dict, *, priority=None, in_person=None) -> None:
+def _apply_code_triage(item: dict, *, priority=None, **flags) -> None:
     """Set or clear the triage fields; ``None`` leaves a field unchanged."""
     if priority is not None:
         cleaned = _clean_code_priority(priority)
@@ -3410,12 +3414,25 @@ def _apply_code_triage(item: dict, *, priority=None, in_person=None) -> None:
             item["priority"] = cleaned
         else:
             item.pop("priority", None)
-    if in_person is not None:
-        cleaned = _clean_code_in_person(in_person)
+    for flag in CODE_FLAGS:
+        if flags.get(flag) is None:
+            continue
+        cleaned = _clean_code_flag(flags[flag])
         if cleaned:
-            item["in_person"] = cleaned
+            item[flag] = cleaned
         else:
-            item.pop("in_person", None)
+            item.pop(flag, None)
+
+
+def _code_triage_detail(item: dict) -> str:
+    labels = {
+        "in_person": "in person",
+        "requires_human": "requires human",
+        "requires_sudo": "requires sudo",
+    }
+    return ", ".join(
+        [item.get("priority", "unrated"), *(labels[f] for f in CODE_FLAGS if item.get(f))]
+    )
 
 
 def _simple_list_config(key: str) -> dict:
@@ -3485,8 +3502,8 @@ def _normalize_simple_list_data(data: dict, cfg: dict) -> dict:
             for field in cfg.get("extras", []):
                 if field == "priority":
                     cleaned = _clean_code_priority(item.get(field))
-                elif field == "in_person":
-                    cleaned = _clean_code_in_person(item.get(field))
+                elif field in CODE_FLAGS:
+                    cleaned = _clean_code_flag(item.get(field))
                 else:
                     cleaned = str(item.get(field) or "").strip()
                 if cleaned:
@@ -3663,11 +3680,20 @@ def _render_simple_list(key: str):
             known_repos=["personal-finance"],
             priorities=CODE_PRIORITIES,
             priority_labels=CODE_PRIORITY_LABELS,
-            in_person_count=sum(
+            flag_counts={
+                flag: sum(
+                    1
+                    for c in data["categories"]
+                    for item in c["items"]
+                    if item.get(flag) and not item.get(cfg["status"])
+                )
+                for flag in CODE_FLAGS
+            },
+            ready_count=sum(
                 1
                 for c in data["categories"]
                 for item in c["items"]
-                if item.get("in_person") and not item.get(cfg["status"])
+                if not item.get(cfg["status"]) and not any(item.get(f) for f in CODE_FLAGS)
             ),
             total=total,
             done_count=done_count,
@@ -3837,7 +3863,7 @@ def simple_list_add_item(page):
         _apply_code_triage(
             item,
             priority=request.form.get("priority", ""),
-            in_person=request.form.get("in_person", ""),
+            **{flag: request.form.get(flag, "") for flag in CODE_FLAGS},
         )
     value = _simple_item_value(item, cfg)
     if _find_simple_item(cat, value, cfg, repo=repo if key == "code" else None):
@@ -3893,7 +3919,7 @@ def simple_list_update_item(page):
     _apply_code_triage(
         item,
         priority=request.form.get("priority") if "priority" in request.form else None,
-        in_person=request.form.get("in_person") if "in_person" in request.form else None,
+        **{flag: request.form.get(flag) if flag in request.form else None for flag in CODE_FLAGS},
     )
     save_simple_list(key, data)
     _log_event(
@@ -3901,7 +3927,7 @@ def simple_list_update_item(page):
         "triage",
         item=value,
         category=category,
-        detail=f"{item.get('priority', 'unrated')}{', in person' if item.get('in_person') else ''}",
+        detail=_code_triage_detail(item),
     )
     return redirect(url_for(_simple_list_endpoint(key)) + f"#{_slug(category)}")
 
@@ -4057,7 +4083,7 @@ def api_simple_add_item(list_key):
             return jsonify({"ok": False, "error": "repo required"}), 400
         item["repo"] = repo
         _apply_code_triage(
-            item, priority=payload.get("priority"), in_person=payload.get("in_person")
+            item, priority=payload.get("priority"), **{f: payload.get(f) for f in CODE_FLAGS}
         )
     if cfg["primary"] == "ticker" and payload.get("name"):
         item["name"] = str(payload["name"]).strip()
@@ -4123,21 +4149,27 @@ def api_simple_update_item(list_key):
     repo = str(payload.get("repo") or "").strip()
     if not repo:
         return jsonify({"ok": False, "error": "repo required"}), 400
-    if str(payload.get("priority") or "").strip() and not _clean_code_priority(payload["priority"]):
+    if (
+        "priority" in payload
+        and str(payload["priority"] or "").strip()
+        and not (_clean_code_priority(payload["priority"]))
+    ):
         return jsonify({"ok": False, "error": "priority must be P1-P4 or empty"}), 400
     data = load_simple_list(key)
     cat = _find_simple_category(data, category)
     item = _find_simple_item(cat, value, cfg, repo=repo) if cat else None
     if item is None:
         return jsonify({"ok": False, "error": "item not found"}), 404
-    _apply_code_triage(item, priority=payload.get("priority"), in_person=payload.get("in_person"))
+    _apply_code_triage(
+        item, priority=payload.get("priority"), **{f: payload.get(f) for f in CODE_FLAGS}
+    )
     save_simple_list(key, data)
     _log_event(
         cfg["history_file"],
         "triage",
         item=value,
         category=category,
-        detail=f"{item.get('priority', 'unrated')}{', in person' if item.get('in_person') else ''}",
+        detail=_code_triage_detail(item),
     )
     return jsonify({"ok": True, "data": data})
 
