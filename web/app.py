@@ -3849,6 +3849,17 @@ CODE_PRIORITY_LABELS = {
 }
 
 
+def _extra_code_repos() -> list[str]:
+    """Repositories to suggest on the To Code add form beyond the discovered ones.
+
+    Comes from ``CLOCKWORK_CODE_EXTRA_REPOS`` (comma-separated) so a repository
+    that cannot be discovered, such as a private one, is named in the local
+    service environment rather than in this public source.
+    """
+    raw = os.environ.get("CLOCKWORK_CODE_EXTRA_REPOS", "")
+    return [name for name in (part.strip() for part in raw.split(",")) if name]
+
+
 def _clean_code_priority(value) -> str:
     """Return a canonical P1-P4 rating, or "" when unrated or unrecognised."""
     text = str(value or "").strip().upper()
@@ -4135,7 +4146,7 @@ def _render_simple_list(key: str):
             data=data,
             category_views=category_views,
             visible_repos=sorted(visible_repos, key=str.casefold),
-            known_repos=["personal-finance"],
+            known_repos=_extra_code_repos(),
             priorities=CODE_PRIORITIES,
             priority_labels=CODE_PRIORITY_LABELS,
             flag_counts={
