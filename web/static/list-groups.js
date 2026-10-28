@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const favoritesOnly = root.querySelector('[data-favorites-only]');
   const priorityFilter = root.querySelector('[data-priority-filter]');
   const inPersonOnly = root.querySelector('[data-in-person-only]');
+  const readyOnly = root.querySelector('[data-ready-only]');
   const empty = root.querySelector('[data-filter-empty]');
   const status = root.querySelector('[data-filter-status]');
   const storageKey = `clockwork:${root.dataset.listGroups}:open-groups`;
@@ -24,6 +25,59 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Row actions are full-page posts; keep the filters across the reload.
+  const filterKey = `clockwork:${root.dataset.listGroups}:filters`;
+  const textFilters = { category: categoryFilter, type: typeFilter, query: search, priority: priorityFilter };
+  const checkFilters = { starred: favoritesOnly, inPerson: inPersonOnly, ready: readyOnly };
+
+  function saveFilters() {
+    const state = {};
+    for (const [name, el] of Object.entries(textFilters)) if (el?.value) state[name] = el.value;
+    for (const [name, el] of Object.entries(checkFilters)) if (el?.checked) state[name] = true;
+    try { sessionStorage.setItem(filterKey, JSON.stringify(state)); } catch (_) { /* filters just reset */ }
+  }
+
+  function restoreFilters() {
+    let state = {};
+    try { state = JSON.parse(sessionStorage.getItem(filterKey) || '{}') || {}; } catch (_) { return; }
+    for (const [name, el] of Object.entries(textFilters)) {
+      if (el && state[name] && [...(el.options || [{ value: state[name] }])].some(o => o.value === state[name])) {
+        el.value = state[name];
+      }
+    }
+    for (const [name, el] of Object.entries(checkFilters)) if (el) el.checked = Boolean(state[name]);
+  }
+
+  // The add form follows the active filters so a new item lands where you are looking.
+  const addForm = root.dataset.listGroups === 'code' ? root.querySelector('form.add-item') : null;
+  const addCategory = addForm?.elements.namedItem('category');
+  const addRepo = addForm?.elements.namedItem('repo');
+  const repoList = addRepo ? document.getElementById(addRepo.getAttribute('list')) : null;
+  const allRepoOptions = repoList ? [...repoList.options].map(o => o.value) : [];
+  let autoRepo = '';
+
+  function syncAddForm(selectedCategory, selectedType) {
+    if (!addForm) return;
+    let category = selectedCategory;
+    if (selectedType) {
+      const owner = categories.find(c => [...c.querySelectorAll(':scope > .subcategory')]
+        .some(g => g.dataset.type === selectedType && (!selectedCategory || c.dataset.category === selectedCategory)));
+      category = owner?.dataset.category || category;
+    }
+    if (category) addCategory.value = category;
+    if (!addRepo.value || addRepo.value === autoRepo) {
+      autoRepo = selectedType || '';
+      addRepo.value = autoRepo;
+    }
+    const scoped = category
+      ? [...categories.find(c => c.dataset.category === category).querySelectorAll(':scope > .subcategory')]
+          .map(g => g.dataset.type)
+      : allRepoOptions;
+    repoList.replaceChildren(...scoped.map(value => Object.assign(document.createElement('option'), { value })));
+  }
+
+  if (addCategory) addCategory.addEventListener('change', () => syncAddForm(addCategory.value, ''));
+
   function applyFilters() {
     const selectedCategory = categoryFilter.value;
     const selectedType = typeFilter.value;
@@ -31,8 +85,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const starred = favoritesOnly?.checked || false;
     const selectedPriority = priorityFilter ? priorityFilter.value : '';
     const inPerson = inPersonOnly?.checked || false;
-    const active = Boolean(selectedCategory || selectedType || query || starred || selectedPriority || inPerson);
-    const narrowItems = Boolean(selectedType || query || starred || selectedPriority || inPerson);
+    const ready = readyOnly?.checked || false;
+    const active = Boolean(selectedCategory || selectedType || query || starred || selectedPriority || inPerson || ready);
+    const narrowItems = Boolean(selectedType || query || starred || selectedPriority || inPerson || ready);
     let visible = 0;
 
     for (const category of categories) {
@@ -49,7 +104,8 @@ document.addEventListener('DOMContentLoaded', () => {
           const show = categoryAllowed && typeAllowed && textMatches &&
             (!starred || item.dataset.favorite === 'true') &&
             (!selectedPriority || item.dataset.priority === selectedPriority) &&
-            (!inPerson || item.dataset.inPerson === 'true');
+            (!inPerson || item.dataset.inPerson === 'true') &&
+            (!ready || item.dataset.ready === 'true');
           item.hidden = !show;
           if (show) groupVisible += 1;
         }
@@ -65,6 +121,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     empty.hidden = !narrowItems || visible !== 0;
     status.textContent = active ? `${visible} of ${root.dataset.total} items` : '';
+    saveFilters();
+    syncAddForm(selectedCategory, selectedType);
   }
 
   function updateTypeOptions() {
@@ -85,9 +143,11 @@ document.addEventListener('DOMContentLoaded', () => {
   if (favoritesOnly) favoritesOnly.addEventListener('change', applyFilters);
   if (priorityFilter) priorityFilter.addEventListener('change', applyFilters);
   if (inPersonOnly) inPersonOnly.addEventListener('change', applyFilters);
+  if (readyOnly) readyOnly.addEventListener('change', applyFilters);
   for (const select of root.querySelectorAll('form[data-autosubmit] select')) {
     select.addEventListener('change', () => select.form.requestSubmit());
   }
+  restoreFilters();
   updateTypeOptions();
   applyFilters();
 
