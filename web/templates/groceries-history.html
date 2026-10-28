@@ -63,6 +63,9 @@
     .action-remove   { background: var(--red-dim); color: var(--red); }
     .action-stocked  { background: var(--accent-dim); color: var(--accent); }
     .action-unstocked { background: #22263a; color: var(--muted); border: 1px solid var(--border); }
+    .action-favorite { background: #4d3d0a; color: var(--yellow); }
+    .action-unfavorite { background: #22263a; color: var(--muted); border: 1px solid var(--border); }
+    .action-organize { background: var(--accent-dim); color: var(--accent); }
     .action-reset    { background: #3d2000; color: #ff9a40; }
     .action-sync     { background: var(--green-dim); color: var(--green); }
     .action-restore  { background: #1a0a3d; color: #a07bff; }
@@ -119,6 +122,9 @@
     <option value="remove">remove</option>
     <option value="stocked">stocked</option>
     <option value="unstocked">unstocked</option>
+    <option value="favorite">favorite</option>
+    <option value="unfavorite">unfavorite</option>
+    <option value="organize">organize</option>
     <option value="reset">reset</option>
     <option value="sync">sync</option>
     <option value="restore">restore</option>
@@ -141,7 +147,7 @@
     <tr data-action="{{ e.action }}" data-item="{{ e.item or '' }}" data-cat="{{ e.category or '' }}">
       <td class="ts-cell">{{ e.ts | replace('T', ' ') }}</td>
       <td><span class="action-badge action-{{ e.action | lower | replace('_', '-') }}
-        {%- if e.action not in ('add','remove','stocked','unstocked','reset','sync','restore','add-category','delete-category') %} action-other{% endif %}">
+        {%- if e.action not in ('add','remove','stocked','unstocked','favorite','unfavorite','organize','reset','sync','restore','add-category','delete-category') %} action-other{% endif %}">
         {{ e.action }}</span></td>
       <td class="cat-cell">{{ e.category or '—' }}</td>
       <td class="item-cell">{{ e.item or '' }}</td>

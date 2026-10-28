@@ -67,11 +67,16 @@
     .lib-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
     .lib-dot.found { background:var(--green); box-shadow:0 0 5px var(--green); }
     .lib-dot.missing { background:var(--border); }
+    .lib-link { color:var(--green); font-size:11px; font-weight:700; text-decoration:none; white-space:nowrap; }
+    .lib-link:hover { text-decoration:underline; }
     .lib-check-btn:disabled { opacity:.5; cursor:progress; }
     .search-panel { padding:8px 14px 10px 48px; background:var(--surface3); border-bottom:1px solid var(--border); }
     .search-panel[hidden] { display:none; }
     .search-panel-header { color:var(--muted); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; }
     .search-note { color:var(--muted); font-size:12px; font-style:italic; padding:4px 0; }
+    .series-season { color:var(--text); font-size:12px; font-weight:700; padding:9px 0 3px; }
+    .series-bundle { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:8px 0; }
+    .series-select { width:18px; height:18px; flex-shrink:0; accent-color:var(--accent); }
     .torrent-result { display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid rgba(46,50,80,.4); font-size:12px; }
     .torrent-result:last-child { border-bottom:none; }
     .torrent-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; }
@@ -84,6 +89,17 @@
     .add-torrent-btn { padding:3px 9px; border-radius:5px; border:1px solid var(--green-dim); background:transparent; color:var(--green); font-weight:700; cursor:pointer; white-space:nowrap; }
     .add-torrent-btn:hover:not(:disabled) { background:var(--green-dim); }
     .add-torrent-btn:disabled { opacity:.5; cursor:not-allowed; }
+    .torrent-owned { color:var(--yellow); font-size:11px; }
+    .book-match { display:flex; align-items:center; gap:9px; padding:5px 0; font-size:12px; }
+    .book-match img { width:32px; height:46px; object-fit:cover; background:var(--surface2); }
+    .book-match a { color:var(--accent); text-decoration:none; font-weight:600; }
+    .book-match a:hover { text-decoration:underline; }
+    .book-match .book-details { color:var(--muted); }
+    .reading-source { padding:8px 0; border-top:1px solid var(--border); font-size:12px; }
+    .reading-source a { color:var(--accent); text-decoration:none; font-weight:600; }
+    .reading-source a:hover { text-decoration:underline; }
+    .reading-source .source-meta, .reading-source .source-summary { color:var(--muted); }
+    .reading-source .source-actions { display:flex; gap:10px; margin-top:3px; }
     @media (max-width: 640px) {
       header { align-items:flex-start; flex-direction:column; padding:10px 14px; }
       .actions { justify-content:flex-start; }
@@ -110,6 +126,9 @@
     {% if cfg.key == "watch" %}
       <button class="action-btn lib-check-btn" type="button" id="lib-check-btn" title="Check which titles are already in the watch folder">📚 Check Library</button>
       <a class="action-btn" href="/library" title="Search the organized library by director, year, quality and more">🎬 Library</a>
+    {% elif cfg.key in ("read", "listen") %}
+      <button class="action-btn lib-check-btn" type="button" id="media-check-btn" title="Check which titles are available as local files">📁 Check Files</button>
+      <a class="action-btn" href="{{ url_for('personal_library.browse', kind=cfg.key) }}" title="Browse local {{ cfg.title|lower }} files">{{ '🎧' if cfg.key == 'listen' else '📚' }} Library</a>
     {% endif %}
     {% if cfg.get("holdings_sync") %}
       <a class="action-btn" href="/api/invest-holdings" title="Tooling endpoint for holdings sync">↻ Holdings API</a>
@@ -124,6 +143,7 @@
 <div class="progress-bar">
   <div class="progress-fill" style="width:{% if total %}{{ (done_count / total * 100)|round|int }}{% else %}0{% endif %}%"></div>
 </div>
+{% if cfg.key in ("read", "listen") %}<div id="media-status" style="max-width:760px; margin:8px auto 0; padding:0 14px; color:var(--muted); font-size:12px">Checking local files…</div>{% endif %}
 
 {% with messages = get_flashed_messages(with_categories=true) %}
   {% if messages %}
@@ -168,7 +188,8 @@
         {% for item in active + completed %}
           {% set value = item[cfg.primary] %}
           {% set find_torrent = cfg.key == "watch" and not item[cfg.status] %}
-          <div class="item"{% if cfg.key == "watch" %} data-title="{{ value }}"{% endif %}>
+          {% set find_media = cfg.key in ("read", "listen") and not item[cfg.status] %}
+          <div class="item"{% if cfg.key in ("watch", "read", "listen") %} data-title="{{ value }}" data-year="{{ item.year or '' }}" data-category="{{ cat.name }}"{% endif %}>
             <form method="post" action="/{{ cfg.page }}/toggle-item">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <input type="hidden" name="category" value="{{ cat.name }}">
@@ -183,6 +204,12 @@
             {% if find_torrent %}
               <button class="find-btn" type="button" title="Find torrent"
                       data-query="{{ value }}{% if item.year %} {{ item.year }}{% endif %}"
+                      data-title="{{ value }}" data-year="{{ item.year or '' }}"
+                      data-category="{{ cat.name }}">🔍</button>
+            {% elif find_media %}
+              <button class="find-btn media-find-btn" type="button" title="Find a download"
+                      data-query="{{ value }}{% if item.year %} {{ item.year }}{% endif %}"
+                      data-title="{{ value }}" data-year="{{ item.year or '' }}"
                       data-category="{{ cat.name }}">🔍</button>
             {% endif %}
             <form method="post" action="/{{ cfg.page }}/delete-item">
@@ -192,7 +219,7 @@
               <button class="delete-btn" type="submit" title="Remove">x</button>
             </form>
           </div>
-          {% if find_torrent %}<div class="search-panel" hidden></div>{% endif %}
+          {% if find_torrent or find_media %}<div class="search-panel" hidden></div>{% endif %}
         {% else %}
           <div class="item empty-item">Nothing here yet.</div>
         {% endfor %}
@@ -250,32 +277,163 @@
     return '';
   }
 
+  async function sendTorrent(result, panel) {
+    const resp = await fetch('/api/torrent-add', {
+      method: 'POST', headers: jsonHeaders, body: JSON.stringify({
+        magnet: result.magnet, name: result.name, title: panel.dataset.title,
+        year: panel.dataset.year, category: panel.dataset.category,
+      }),
+    });
+    const json = await resp.json();
+    if (!json.ok) {
+      const error = new Error(json.error || `HTTP ${resp.status}`);
+      error.status = resp.status;
+      throw error;
+    }
+  }
+
   async function addTorrent(result, btn) {
     btn.disabled = true;
     btn.textContent = '…';
     try {
-      const resp = await fetch('/api/torrent-add', {
-        method: 'POST', headers: jsonHeaders, body: JSON.stringify({ magnet: result.magnet }),
+      await sendTorrent(result, btn.closest('.search-panel'));
+      result.added = true;
+      btn.textContent = '✓ Added';
+      const checkbox = btn.closest('.torrent-result').querySelector('.series-select');
+      if (checkbox) { checkbox.checked = false; checkbox.disabled = true; checkbox.dispatchEvent(new Event('change')); }
+      flash(`Added "${result.name}" to Transmission via Magneto.`);
+    } catch (e) {
+      btn.disabled = e.status === 409;
+      btn.textContent = e.status === 409 ? 'In Library' : '+ Add';
+      flash(e.status === 409 ? e.message : `Magneto error: ${e.message}`, 'error');
+    }
+  }
+
+  function bundleConflict(results) {
+    const episodes = new Set();
+    const packs = new Set();
+    for (const result of results) {
+      if (result.season == null) continue;
+      if (result.release_type === 'season_pack' || result.release_type === 'series_pack') {
+        for (let season = result.season; season <= (result.season_end || result.season); season++) {
+          if (packs.has(season)) return 'Two selected releases cover the same season.';
+          packs.add(season);
+        }
+      }
+      if (result.release_type === 'episode') {
+        const end = result.episode_end || result.episode;
+        for (let episode = result.episode; episode <= end; episode++) {
+          const key = `${result.season}:${episode}`;
+          if (episodes.has(key)) return 'Two selected releases contain the same episode.';
+          episodes.add(key);
+        }
+      }
+    }
+    if ([...episodes].some(key => packs.has(Number(key.split(':')[0])))) {
+      return 'Select either a season pack or its individual episodes.';
+    }
+    return '';
+  }
+
+  async function addBundle(panel, button) {
+    const selected = [...panel.querySelectorAll('.series-select:checked')];
+    const results = selected.map(input => input.result);
+    const conflict = bundleConflict(results);
+    if (conflict) { flash(conflict, 'error'); return; }
+    button.disabled = true;
+    let added = 0;
+    let failed = 0;
+    for (const input of selected) {
+      const result = input.result;
+      try {
+        await sendTorrent(result, panel);
+        result.added = true;
+        added += 1;
+        input.checked = false;
+        input.disabled = true;
+        const add = input.closest('.torrent-result').querySelector('.add-torrent-btn');
+        add.disabled = true;
+        add.textContent = '✓ Added';
+      } catch (error) {
+        if (error.status === 409) {
+          input.checked = false;
+          input.disabled = true;
+          const add = input.closest('.torrent-result').querySelector('.add-torrent-btn');
+          add.disabled = true;
+          add.textContent = 'In Library';
+        }
+        failed += 1;
+      }
+      button.textContent = `Adding… ${added + failed}/${selected.length}`;
+    }
+    button.textContent = 'Add selected episodes';
+    button.disabled = !panel.querySelector('.series-select:checked');
+    flash(`Added ${added} release${added === 1 ? '' : 's'} to Transmission${failed ? `; ${failed} failed and remain selected` : ''}.`, failed ? 'error' : 'success');
+  }
+
+  async function buildSeries(panel, button) {
+    button.disabled = true;
+    try {
+      const resp = await fetch('/api/series-build', {
+        method: 'POST', headers: jsonHeaders,
+        body: JSON.stringify({ title: panel.dataset.title, year: panel.dataset.year }),
       });
       const json = await resp.json();
       if (!json.ok) throw new Error(json.error || `HTTP ${resp.status}`);
-      btn.textContent = '✓ Added';
-      flash(`Added "${result.name}" to Transmission via Magneto.`);
+      const count = json.linked.length;
+      flash(`Filed ${count} completed episode${count === 1 ? '' : 's'} under shows/${panel.dataset.title}; ${json.skipped.length} skipped${json.errors.length ? `; ${json.errors.length} errors` : ''}.`, json.errors.length ? 'error' : 'success');
     } catch (e) {
-      btn.disabled = false;
-      btn.textContent = '+ Add';
-      flash(`Magneto error: ${e.message}`, 'error');
+      flash(`Series library build failed: ${e.message}`, 'error');
+    } finally {
+      button.disabled = false;
     }
   }
 
   function renderResults(panel, source, results) {
     panel.replaceChildren(el('div', 'search-panel-header', `Torrent search · ${source}`));
+    const isSeries = panel.dataset.series === '1';
+    let bundleButton;
+    if (isSeries) {
+      const controls = el('div', 'series-bundle');
+      bundleButton = el('button', 'add-torrent-btn', 'Add selected episodes');
+      bundleButton.type = 'button';
+      bundleButton.disabled = true;
+      bundleButton.addEventListener('click', () => addBundle(panel, bundleButton));
+      controls.append(bundleButton, el('span', 'search-note', 'Choose episodes or a season pack; duplicate episodes are blocked.'));
+      const buildButton = el('button', 'add-torrent-btn', 'File completed episodes');
+      buildButton.type = 'button';
+      buildButton.title = 'Link finished local downloads into shows/Title/Season folders without moving seeding files';
+      buildButton.addEventListener('click', () => buildSeries(panel, buildButton));
+      controls.append(buildButton);
+      panel.append(controls);
+    }
     if (!results.length) {
       panel.append(el('div', 'search-note', 'No torrents found.'));
       return;
     }
-    for (const r of results) {
+    const ordered = isSeries ? [...results].sort((a, b) => {
+      const season = (a.season ?? 999) - (b.season ?? 999);
+      if (season) return season;
+      const rank = r => r.release_type === 'series_pack' ? 0 : r.release_type === 'season_pack' ? 1 : 2;
+      const pack = rank(a) - rank(b);
+      return pack || (a.episode ?? 999) - (b.episode ?? 999) || b.seeders - a.seeders;
+    }) : results;
+    let currentSeason;
+    for (const r of ordered) {
+      if (isSeries) {
+        const season = r.season == null ? 'Other releases' : r.season_end ? `Seasons ${r.season}–${r.season_end}` : `Season ${r.season}`;
+        if (season !== currentSeason) { panel.append(el('div', 'series-season', season)); currentSeason = season; }
+      }
       const row = el('div', 'torrent-result');
+      if (isSeries && r.release_type !== 'other') {
+        const select = el('input', 'series-select');
+        select.type = 'checkbox';
+        select.title = `Select ${r.name}`;
+        select.result = r;
+        select.disabled = Boolean(r.library_conflict);
+        select.addEventListener('change', () => { bundleButton.disabled = !panel.querySelector('.series-select:checked'); });
+        row.append(select);
+      }
       const name = el('span', 'torrent-name', r.name);
       name.title = 'Click to expand';
       name.addEventListener('click', () => name.classList.toggle('expanded'));
@@ -287,9 +445,23 @@
       if (size) row.append(el('span', 'torrent-meta', size));
       const add = el('button', 'add-torrent-btn', '+ Add');
       add.type = 'button';
-      add.title = 'Send to Magneto / Transmission';
+      add.title = r.library_conflict || 'Send to Magneto / Transmission';
+      if (r.library_conflict) {
+        add.disabled = true;
+        add.textContent = 'In Library';
+      }
       add.addEventListener('click', () => addTorrent(r, add));
       row.append(add);
+      if (r.library_conflict) {
+        const note = el('span', 'torrent-owned', r.library_conflict);
+        row.append(note);
+        if (r.library_url) {
+          const link = el('a', 'lib-link', 'Open');
+          link.href = r.library_url;
+          link.title = 'Open the matching library title';
+          row.append(link);
+        }
+      }
       panel.append(row);
     }
   }
@@ -305,9 +477,16 @@
     btn.classList.add('active');
     if (panel.dataset.loaded) return;
     const source = btn.dataset.category.toLowerCase() === 'anime' ? 'Nyaa.si' : 'torrents-csv';
+    panel.dataset.series = /tv|show|series|anime/i.test(btn.dataset.category) ? '1' : '0';
+    panel.dataset.title = btn.dataset.title;
+    panel.dataset.year = btn.dataset.year;
+    panel.dataset.category = btn.dataset.category;
     panel.replaceChildren(el('div', 'search-note', 'Searching…'));
     try {
-      const params = new URLSearchParams({ q: btn.dataset.query, cat: btn.dataset.category });
+      const params = new URLSearchParams({
+        q: btn.dataset.query, cat: btn.dataset.category,
+        title: btn.dataset.title, year: btn.dataset.year,
+      });
       const resp = await fetch(`/api/torrent-search?${params}`);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const json = await resp.json();
@@ -318,10 +497,12 @@
     }
   }
 
-  async function checkLibrary(btn) {
+  async function checkLibrary(btn, announce = true) {
     const items = [...document.querySelectorAll('.item[data-title]')];
-    if (!items.length) { flash('No items to check.', 'error'); return; }
-    const titles = items.map(item => ({ title: item.dataset.title }));
+    if (!items.length) { if (announce) flash('No items to check.', 'error'); return; }
+    const titles = items.map(item => ({
+      title: item.dataset.title, year: item.dataset.year, category: item.dataset.category,
+    }));
     btn.disabled = true;
     try {
       const resp = await fetch('/api/watch-check', {
@@ -330,12 +511,12 @@
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const json = await resp.json();
       if (!json.available) {
-        flash('Watch folder not accessible — check CLOCKWORK_WATCH_DIR.', 'error');
+        if (announce) flash('Watch folder not accessible — check CLOCKWORK_WATCH_DIR.', 'error');
         return;
       }
       let found = 0;
-      for (const item of items) {
-        const match = json.matches[item.dataset.title];
+      for (const [index, item] of items.entries()) {
+        const match = json.results?.[index] || json.matches?.[item.dataset.title];
         if (!match) continue;
         if (match.found) found += 1;
         let dot = item.querySelector('.lib-dot');
@@ -345,10 +526,21 @@
         }
         dot.className = `lib-dot ${match.found ? 'found' : 'missing'}`;
         dot.title = match.found ? `In library: ${match.match}` : 'Not in library';
+        let link = item.querySelector('.lib-link');
+        if (match.url) {
+          if (!link) {
+            link = el('a', 'lib-link', '▶ Library');
+            item.querySelector('.item-body').append(link);
+          }
+          link.href = match.url;
+          link.title = `Open ${match.match} in Library`;
+        } else if (link) {
+          link.remove();
+        }
       }
-      flash(`Library: ${found} of ${titles.length} titles found in watch folder.`, found ? 'success' : 'error');
+      if (announce) flash(`Library: ${found} of ${titles.length} titles found in watch folder.`, found ? 'success' : 'error');
     } catch (e) {
-      flash(`Library check failed: ${e.message}`, 'error');
+      if (announce) flash(`Library check failed: ${e.message}`, 'error');
     } finally {
       btn.disabled = false;
     }
@@ -356,7 +548,227 @@
 
   document.querySelectorAll('.find-btn').forEach(btn => btn.addEventListener('click', () => toggleSearch(btn)));
   const libBtn = document.getElementById('lib-check-btn');
-  if (libBtn) libBtn.addEventListener('click', () => checkLibrary(libBtn));
+  if (libBtn) {
+    libBtn.addEventListener('click', () => checkLibrary(libBtn));
+    checkLibrary(libBtn, false);
+  }
+})();
+</script>
+{% endif %}
+{% if cfg.key in ("read", "listen") %}
+<script>
+(() => {
+  const kind = {{ cfg.key|tojson }};
+  const csrfToken = {{ csrf_token|tojson }};
+  const checkButton = document.getElementById('media-check-btn');
+  const status = document.getElementById('media-status');
+  const findButtons = [...document.querySelectorAll('.media-find-btn')];
+
+  function el(tag, className, value) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (value !== undefined) node.textContent = value;
+    return node;
+  }
+
+  function message(value, error = false) {
+    let list = document.getElementById('flash-list');
+    if (!list) {
+      list = el('div');
+      list.id = 'flash-list';
+      document.querySelector('main').before(list);
+    }
+    const note = el('div', `flash ${error ? 'error' : 'success'}`, value);
+    list.append(note);
+    setTimeout(() => note.remove(), 6000);
+  }
+
+  async function checkFiles(announce = false) {
+    const items = [...document.querySelectorAll('.item[data-title]')];
+    if (!items.length) { status.textContent = 'Add a title to check the local library.'; return; }
+    checkButton.disabled = true;
+    try {
+      const response = await fetch(`/api/media/${kind}/check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({ titles: items.map(item => ({ title: item.dataset.title, year: item.dataset.year })) }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      if (!data.available) {
+        findButtons.forEach(button => {
+          button.disabled = kind !== 'read';
+          button.title = kind === 'read' ? 'Look up book details' : 'Configure the library folder first';
+        });
+        status.textContent = `Set CLOCKWORK_${kind.toUpperCase()}_LIBRARY_DIR to enable library checks and downloads.`;
+        if (announce) message(status.textContent, true);
+        return;
+      }
+      let found = 0;
+      items.forEach((item, index) => {
+        const result = data.results[index];
+        if (!result) return;
+        if (result.found) found += 1;
+        let dot = item.querySelector('.lib-dot');
+        if (!dot) {
+          dot = el('span', 'lib-dot');
+          item.querySelector('.item-body').after(dot);
+        }
+        dot.className = `lib-dot ${result.found ? 'found' : 'missing'}`;
+        dot.title = result.found ? `Local file: ${result.match}` : 'No local file found';
+        let link = item.querySelector('.lib-link');
+        if (result.url) {
+          if (!link) { link = el('a', 'lib-link', kind === 'listen' ? '▶ Play' : '📖 Read'); item.querySelector('.item-body').append(link); }
+          link.href = result.url;
+          link.title = `Open ${result.match}`;
+        } else if (link) link.remove();
+        const find = item.querySelector('.media-find-btn');
+        if (find) {
+          find.disabled = result.found && kind !== 'read';
+          find.title = result.found ? (kind === 'read' ? 'Book details' : 'Already in the library') : 'Find a download';
+        }
+      });
+      status.textContent = `${found} of ${items.length} titles found in local files.`;
+      if (announce) message(`${found} of ${items.length} titles found in local files.`);
+    } catch (error) {
+      status.textContent = `Library check failed: ${error.message}`;
+      message(`Library check failed: ${error.message}`, true);
+    } finally {
+      checkButton.disabled = false;
+    }
+  }
+
+  async function search(button) {
+    const panel = button.closest('.item').nextElementSibling;
+    if (!panel.hidden) { panel.hidden = true; button.classList.remove('active'); return; }
+    panel.hidden = false;
+    button.classList.add('active');
+    if (panel.dataset.loaded) return;
+    panel.replaceChildren(el('p', 'search-note', 'Searching…'));
+    const params = new URLSearchParams({
+      q: button.dataset.query, cat: button.dataset.category,
+      title: button.dataset.title, year: button.dataset.year, media_kind: kind,
+    });
+    try {
+      const response = await fetch(`/api/torrent-search?${params}`);
+      const data = await response.json();
+      if (response.status === 503 && kind === 'read') {
+        panel.replaceChildren(el('p', 'search-note', 'Set CLOCKWORK_READ_LIBRARY_DIR to enable download search.'));
+        panel.dataset.loaded = '1';
+        return;
+      }
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      panel.replaceChildren(el('div', 'search-panel-header', 'Download search'));
+      if (!data.results.length) panel.append(el('p', 'search-note', 'No releases found.'));
+      for (const result of data.results) {
+        const row = el('div', 'torrent-result');
+        row.append(el('span', 'torrent-name', result.name));
+        row.append(el('span', 'torrent-meta', `↑${result.seeders || 0}`));
+        row.append(el('span', 'torrent-meta', result.source || 'torrent'));
+        const add = el('button', 'add-torrent-btn', result.library_conflict ? 'In Library' : '+ Add');
+        add.type = 'button';
+        add.disabled = Boolean(result.library_conflict);
+        add.title = result.library_conflict || 'Send to Magneto / Transmission';
+        add.addEventListener('click', async () => {
+          add.disabled = true;
+          add.textContent = 'Adding…';
+          try {
+            const response = await fetch('/api/torrent-add', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+              body: JSON.stringify({ magnet: result.magnet, name: result.name, title: button.dataset.title,
+                year: button.dataset.year, category: button.dataset.category, media_kind: kind }),
+            });
+            const data = await response.json();
+            if (!response.ok || !data.ok) throw new Error(data.error || `HTTP ${response.status}`);
+            add.textContent = '✓ Added';
+            message(`Sent ${result.name} to Magneto.`);
+          } catch (error) {
+            add.disabled = false;
+            add.textContent = '+ Add';
+            message(`Could not add release: ${error.message}`, true);
+          }
+        });
+        row.append(add);
+        panel.append(row);
+      }
+      panel.dataset.loaded = '1';
+    } catch (error) {
+      panel.replaceChildren(el('p', 'search-note', `Search failed: ${error.message}`));
+    } finally {
+      if (kind === 'read') {
+        const bookParams = new URLSearchParams({ title: button.dataset.title, year: button.dataset.year });
+        fetch(`/api/books/search?${bookParams}`).then(response => response.json()).then(data => {
+          if (!data.results?.length) return;
+          const matches = el('div', 'book-matches');
+          matches.append(el('div', 'search-panel-header', 'Open Library matches'));
+          for (const book of data.results) {
+            const row = el('div', 'book-match');
+            if (book.cover_url) {
+              const cover = el('img');
+              cover.src = book.cover_url;
+              cover.alt = '';
+              cover.loading = 'lazy';
+              row.append(cover);
+            }
+            const details = el('div');
+            const link = el('a', '', book.title);
+            link.href = book.url;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            details.append(link, el('div', 'book-details', [book.authors.join(', '), book.year].filter(Boolean).join(' · ')));
+            row.append(details);
+            matches.append(row);
+          }
+          panel.prepend(matches);
+        }).catch(() => {});
+        const sourceParams = new URLSearchParams({
+          title: button.dataset.title, year: button.dataset.year,
+          category: button.dataset.category,
+        });
+        fetch(`/api/read-sources?${sourceParams}`).then(response => response.json()).then(data => {
+          const section = el('div', 'reading-sources');
+          section.append(el('div', 'search-panel-header', 'arXiv and Internet Archive'));
+          if (!data.results?.length) section.append(el('p', 'search-note', 'No matching open reading sources found.'));
+          for (const source of data.results || []) {
+            const row = el('div', 'reading-source');
+            const title = el('a', '', source.title);
+            title.href = source.url;
+            title.target = '_blank';
+            title.rel = 'noopener noreferrer';
+            row.append(title);
+            row.append(el('div', 'source-meta', [source.source, source.authors.join(', '), source.year].filter(Boolean).join(' · ')));
+            if (source.summary) row.append(el('div', 'source-summary', source.summary));
+            const actions = el('div', 'source-actions');
+            const open = el('a', '', source.source === 'Internet Archive' ? 'View options' : 'Abstract');
+            open.href = source.url;
+            open.target = '_blank';
+            open.rel = 'noopener noreferrer';
+            actions.append(open);
+            if (source.download_url) {
+              const pdf = el('a', '', 'PDF');
+              pdf.href = source.download_url;
+              pdf.target = '_blank';
+              pdf.rel = 'noopener noreferrer';
+              actions.append(pdf);
+            }
+            if (source.library_url) {
+              const local = el('a', '', 'In library');
+              local.href = source.library_url;
+              actions.append(local);
+            }
+            row.append(actions);
+            section.append(row);
+          }
+          panel.append(section);
+        }).catch(() => {});
+      }
+    }
+  }
+
+  findButtons.forEach(button => button.addEventListener('click', () => search(button)));
+  checkButton.addEventListener('click', () => checkFiles(true));
+  checkFiles();
 })();
 </script>
 {% endif %}

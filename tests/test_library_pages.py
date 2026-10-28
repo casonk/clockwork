@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import subprocess
@@ -113,7 +114,93 @@ def test_show_page_groups_episodes_by_season(client):
 
     assert "Season 1" in html and "2 episodes" in html
     assert "S01E02" in html
+    assert "Episode guide" in html and "/api/library/episodes/shows/Breaking" in html
+    assert "TVmaze" in html and "/api/torrent-search" in html
     assert "Genre folder" not in html
+
+
+def test_episode_guide_reports_owned_missing_new_and_upcoming(client, monkeypatch):
+    today = datetime.date.today()
+    show = {
+        "id": 169,
+        "name": "Breaking Bad",
+        "premiered": "2008-01-20",
+        "url": "https://www.tvmaze.com/shows/169/breaking-bad",
+        "summary": "<p>A <b>teacher</b> changes course.</p>",
+        "rating": {"average": 9.2},
+    }
+    episodes = [
+        {"season": 1, "number": 1, "name": "Pilot", "airdate": "2008-01-20"},
+        {"season": 1, "number": 2, "name": "Cat's in the Bag", "airdate": "2008-01-27"},
+        {"season": 1, "number": 3, "name": "Old gap", "airdate": "2008-02-03"},
+        {"season": 1, "number": 4, "name": "Just aired", "airdate": today.isoformat()},
+        {
+            "season": 1,
+            "number": 5,
+            "name": "Next week",
+            "airdate": (today + datetime.timedelta(days=7)).isoformat(),
+        },
+    ]
+    monkeypatch.setattr(
+        pages.episode_guide,
+        "_fetch_json",
+        lambda path: [{"show": show}] if path.startswith("/search/shows?") else episodes,
+    )
+
+    resp = client.get("/api/library/episodes/shows/Breaking Bad (2008)")
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["counts"] == {"owned": 2, "missing": 1, "new": 1, "upcoming": 1}
+    assert [item["status"] for item in data["episodes"]] == [
+        "owned",
+        "owned",
+        "missing",
+        "new",
+        "upcoming",
+    ]
+    assert data["show"]["summary"] == "A teacher changes course."
+    assert data["show"]["rating"] == 9.2
+    assert client.get("/api/library/episodes/movies/Thriller/Seven (1995)").status_code == 404
+
+
+def test_episode_guide_refuses_ambiguous_show_match(monkeypatch):
+    shows = [
+        {"id": 1, "name": "Top Gear", "premiered": "1977-01-01"},
+        {"id": 2, "name": "Top Gear", "premiered": "2002-01-01"},
+    ]
+    monkeypatch.setattr(
+        pages.episode_guide, "_fetch_json", lambda _path: [{"show": show} for show in shows]
+    )
+
+    match = pages.episode_guide.find_show("Top Gear", None)
+
+    assert match["ambiguous"] is True
+    assert [candidate["year"] for candidate in match["candidates"]] == [1977, 2002]
+    assert pages.episode_guide.find_show("Top Gear", None, show_id=2)["id"] == 2
+    assert pages.episode_guide.find_show("Top Gear", 2020)["ambiguous"] is True
+    assert pages.episode_guide.find_show("Top Gear", 2020, show_id=2)["id"] == 2
+
+
+def test_show_summary_api_and_browse_fallback(client, monkeypatch):
+    monkeypatch.setattr(
+        pages.episode_guide,
+        "find_show",
+        lambda title, year: {
+            "name": title,
+            "rating": {"average": 9.2},
+            "summary": "<p>A chemistry teacher changes course.</p>",
+            "url": "https://www.tvmaze.com/shows/169/breaking-bad",
+        },
+    )
+
+    data = client.get("/api/library/show-summary/shows/Breaking Bad (2008)").get_json()
+    browse = client.get("/library/browse/shows").get_data(as_text=True)
+
+    assert data["rating"] == 9.2
+    assert data["description"] == "A chemistry teacher changes course."
+    assert 'data-guide-api="/api/library/show-summary/shows/Breaking%20Bad%20(2008)"' in browse
+    assert client.get("/api/library/show-summary/movies/Thriller/Seven (1995)").status_code == 404
 
 
 def test_paths_outside_or_hidden_are_refused(client):
@@ -231,6 +318,22 @@ def test_browse_lists_folders_and_hides_release_clutter(client):
     assert "Seven_1995_1080p_David_Fincher.mp4" in title
     assert ".release" not in title
     assert "Details" in title
+
+
+def test_browse_exposes_catalog_rating_and_description(client):
+    conn = ml.connect(ml.CATALOG_DB)
+    conn.execute(
+        "UPDATE titles SET rating = ?, plot = ? WHERE title = ?",
+        (8.6, "A detective pursues a serial killer.", "Seven"),
+    )
+    conn.commit()
+    conn.close()
+
+    genre = client.get("/library/browse/movies/Thriller").get_data(as_text=True)
+    title = client.get("/library/browse/movies/Thriller/Seven (1995)").get_data(as_text=True)
+
+    assert "★ 8.6" in genre and "A detective pursues a serial killer." in genre
+    assert "★ 8.6" in title and "A detective pursues a serial killer." in title
 
 
 def test_change_genre_moves_folder_and_keeps_catalog(client, library):

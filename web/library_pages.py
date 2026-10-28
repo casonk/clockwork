@@ -18,6 +18,7 @@ from flask import (
     Response,
     abort,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -26,9 +27,10 @@ from flask import (
 )
 
 try:
+    from web import episode_guide, streaming, upscale
     from web import media_library as ml
-    from web import streaming, upscale
 except ModuleNotFoundError:
+    import episode_guide
     import media_library as ml
     import streaming
     import upscale
@@ -219,6 +221,63 @@ def _breadcrumbs(rel: str) -> list[dict[str, str]]:
 # ---------------------------------------------------------------------------
 # Title details
 # ---------------------------------------------------------------------------
+
+
+@library_pages.get("/api/library/episodes/<path:rel>")
+def show_episodes(rel: str):
+    """Compare the aired episode guide with videos already filed for one show."""
+    parts = Path(rel).parts
+    if len(parts) != 2 or parts[0] != ml.SHOWS:
+        abort(404)
+    folder = _resolve(rel)
+    if not folder.is_dir():
+        abort(404)
+    match = re.match(r"^(?P<title>.+?)(?: \((?P<year>\d{4})\))?$", folder.name)
+    assert match is not None
+    show_id = request.args.get("show_id", "").strip()
+    if show_id and not show_id.isdigit():
+        return jsonify({"error": "Invalid show ID."}), 400
+    try:
+        result = episode_guide.episode_guide(
+            folder,
+            match.group("title"),
+            int(match.group("year")) if match.group("year") else None,
+            show_id=int(show_id) if show_id else None,
+        )
+    except episode_guide.GuideError as exc:
+        return jsonify({"error": str(exc)}), 503
+    response = jsonify(result)
+    response.cache_control.max_age = 300
+    return response
+
+
+@library_pages.get("/api/library/show-summary/<path:rel>")
+def show_summary(rel: str):
+    """Lightweight show description for folder browsing when the catalog lacks one."""
+    parts = Path(rel).parts
+    if len(parts) != 2 or parts[0] != ml.SHOWS or not _resolve(rel).is_dir():
+        abort(404)
+    match = re.match(r"^(?P<title>.+?)(?: \((?P<year>\d{4})\))?$", parts[1])
+    assert match is not None
+    try:
+        show = episode_guide.find_show(
+            match.group("title"),
+            int(match.group("year")) if match.group("year") else None,
+        )
+    except episode_guide.GuideError as exc:
+        return jsonify({"error": str(exc)}), 503
+    if show.get("ambiguous"):
+        return jsonify({"ambiguous": True})
+    rating = show.get("rating") or {}
+    response = jsonify(
+        {
+            "rating": rating.get("average") if isinstance(rating, dict) else None,
+            "description": episode_guide.plain_text(show.get("summary")),
+            "source_url": show.get("url") or "",
+        }
+    )
+    response.cache_control.max_age = 3600
+    return response
 
 
 @library_pages.get("/library/title/<path:rel>")
@@ -556,8 +615,18 @@ def browse(rel: str = ""):
         abort(404)
     conn = _catalog()
     try:
-        title_folders = (
-            {row["folder"] for row in conn.execute("SELECT folder FROM titles")} if conn else set()
+        title_rows = (
+            {
+                row["folder"]: {
+                    "rating": row["rating"],
+                    "description": row["plot"] or ", ".join(json.loads(row["genres"] or "[]")[:4]),
+                    "has_plot": bool(row["plot"]),
+                    "kind": row["kind"],
+                }
+                for row in conn.execute("SELECT folder, kind, rating, plot, genres FROM titles")
+            }
+            if conn
+            else {}
         )
     finally:
         if conn is not None:
@@ -572,7 +641,8 @@ def browse(rel: str = ""):
                 {
                     "name": child.name,
                     "rel": child_rel,
-                    "is_title": str(_root() / child_rel) in title_folders,
+                    "is_title": str(_root() / child_rel) in title_rows,
+                    "meta": title_rows.get(str(_root() / child_rel)),
                     "count": sum(1 for c in child.iterdir() if not c.name.startswith(".")),
                 }
             )
@@ -585,13 +655,15 @@ def browse(rel: str = ""):
                     "video": child.suffix.lower() in ml.VIDEO_EXTS,
                 }
             )
-    is_title = str(_root() / rel) in title_folders if rel else False
+    current_meta = title_rows.get(str(_root() / rel)) if rel else None
+    is_title = current_meta is not None
     return render_template(
         "library-browse.html",
         rel=rel,
         dirs=dirs,
         files=files,
         is_title=is_title,
+        current_meta=current_meta,
         breadcrumbs=_breadcrumbs(rel),
     )
 

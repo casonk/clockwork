@@ -363,6 +363,36 @@ def test_sync_uses_ai_rules(sample_data, intake_db, rules_file):
     assert "Bread" in names
 
 
+def test_sync_ignores_rejected_alias_even_if_still_in_active_rules(
+    sample_data, intake_db, rules_file
+):
+    sample_data["categories"][0]["items"].append({"name": "Cherries", "stocked": False})
+    rules_file.write_text(
+        json.dumps(
+            {
+                "aliases": {"Cherries": ["red grapes"]},
+                "rejected_aliases": {"Cherries": ["red grapes"]},
+            }
+        )
+    )
+    conn = sqlite3.connect(str(intake_db))
+    conn.execute(
+        "INSERT INTO receipts VALUES (?, ?, ?, ?, ?)",
+        (
+            "grapes.jpg",
+            (date.today() - timedelta(days=1)).isoformat(),
+            "market",
+            "grocery/supermarket",
+            json.dumps([{"description": "RED GRAPES"}]),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    _, marked = web_app._sync_from_intake(intake_db, sample_data)
+    assert "Food: Cherries" not in marked
+    assert sample_data["categories"][0]["items"][-1]["stocked"] is False
+
+
 # ---------------------------------------------------------------------------
 # _ai_categorize
 # ---------------------------------------------------------------------------
@@ -433,8 +463,9 @@ _RULES_RESPONSE = json.dumps({"aliases": {"Beer": ["bud", "coors"], "Eggs": ["eg
 
 def test_ai_generate_rules_saves_aliases(sample_data, intake_db, rules_file, monkeypatch):
     monkeypatch.setattr(web_app, "_ollama_generate", lambda *a, **kw: _RULES_RESPONSE)
-    added, model = web_app._ai_generate_rules(sample_data, intake_db, since="2026-01-01")
+    added, model, rejected = web_app._ai_generate_rules(sample_data, intake_db, since="2026-01-01")
     assert added >= 2
+    assert rejected == {}
     rules = web_app.load_grocery_rules()
     assert "bud" in rules["aliases"]["Beer"]
     assert "eggs 6ct" in rules["aliases"]["Eggs"]
@@ -452,7 +483,7 @@ def test_ai_generate_rules_merges_with_existing(sample_data, intake_db, rules_fi
 def test_ai_generate_rules_deduplicates_tokens(sample_data, intake_db, rules_file, monkeypatch):
     rules_file.write_text(json.dumps({"aliases": {"Beer": ["bud", "coors"]}, "types": {}}))
     monkeypatch.setattr(web_app, "_ollama_generate", lambda *a, **kw: _RULES_RESPONSE)
-    added, _ = web_app._ai_generate_rules(sample_data, intake_db, since="2026-01-01")
+    added, _, _ = web_app._ai_generate_rules(sample_data, intake_db, since="2026-01-01")
     rules = web_app.load_grocery_rules()
     assert rules["aliases"]["Beer"].count("bud") == 1
     assert rules["aliases"]["Beer"].count("coors") == 1
@@ -468,9 +499,34 @@ def test_ai_generate_rules_returns_zero_on_empty_db(sample_data, tmp_path, rules
     conn.close()
     called = []
     monkeypatch.setattr(web_app, "_ollama_generate", lambda *a, **kw: called.append(1) or "{}")
-    added, _ = web_app._ai_generate_rules(sample_data, db, since="2026-01-01")
+    added, _, rejected = web_app._ai_generate_rules(sample_data, db, since="2026-01-01")
     assert added == 0
+    assert rejected == {}
     assert called == []
+
+
+def test_ai_generate_rules_blocks_rejected_pairs(sample_data, intake_db, rules_file, monkeypatch):
+    rules_file.write_text(
+        json.dumps(
+            {
+                "aliases": {},
+                "rejected_aliases": {"Cherries": ["red grapes"], "Milk": ["kro distilled"]},
+            }
+        )
+    )
+    monkeypatch.setattr(
+        web_app,
+        "_ollama_generate",
+        lambda *a, **kw: json.dumps(
+            {"aliases": {"CHERRIES": ["Red Grapes"], "Milk": ["KRO DISTILLED"], "Beer": ["bud"]}}
+        ),
+    )
+    added, _, rejected = web_app._ai_generate_rules(sample_data, intake_db, since="2026-01-01")
+    rules = web_app.load_grocery_rules()
+    assert added == 1
+    assert rules["aliases"] == {"Beer": ["bud"]}
+    assert rejected == {"CHERRIES": ["red grapes"], "Milk": ["kro distilled"]}
+    assert rules["last_rejected_proposals"] == rejected
 
 
 def test_ai_generate_rules_raises_on_bad_response(sample_data, intake_db, rules_file, monkeypatch):
@@ -521,6 +577,30 @@ def test_get_groceries_shows_items(client):
     resp = client.get("/groceries")
     assert b"Eggs" in resp.data
     assert b"Beer" in resp.data
+    assert b"Favorites only" in resp.data
+    assert b"/groceries/toggle-favorite" in resp.data
+    assert b'aria-label="Add Eggs to favorites"' in resp.data
+    assert b'data-list-groups="groceries"' in resp.data
+    assert b'<details class="category"' in resp.data
+    assert b'<details class="subcategory" data-type="Uncategorized"' in resp.data
+    assert b"list-groups.js" in resp.data
+
+
+def test_category_views_group_by_type_with_needed_items_first(sample_data):
+    items = sample_data["categories"][0]["items"]
+    items[0]["type"] = "Dairy"
+    items[1]["type"] = "Dairy"
+    items[3]["type"] = "Dairy"
+    views = web_app._list_category_views(sample_data, "stocked")
+    assert [group["name"] for group in views[0]["groups"]] == ["Dairy", "Uncategorized"]
+    assert [item["name"] for item in views[0]["groups"][0]["items"]] == ["Eggs", "Milk", "Chicken"]
+    assert views[0]["groups"][0]["remaining"] == 2
+    assert [item["name"] for item in sample_data["categories"][0]["items"]] == [
+        "Eggs",
+        "Milk",
+        "Bread",
+        "Chicken",
+    ]
 
 
 def test_add_category(client, groceries_file):
@@ -566,6 +646,159 @@ def test_toggle_item_flips_stocked(client, groceries_file):
     food = next(c for c in data["categories"] if c["name"] == "Food")
     eggs = next(i for i in food["items"] if i["name"] == "Eggs")
     assert eggs["stocked"] is True
+
+
+def test_toggle_favorite_persists_and_reset_preserves_it(
+    client, groceries_file, tmp_path, monkeypatch
+):
+    history = tmp_path / "groceries-history.jsonl"
+    monkeypatch.setattr(web_app, "GROCERIES_HISTORY_FILE", history)
+    response = client.post(
+        "/groceries/toggle-favorite",
+        data={"category": "Food", "item": "Eggs"},
+        headers={"Origin": "http://localhost"},
+        follow_redirects=True,
+    )
+    eggs = web_app.load_groceries()["categories"][0]["items"][0]
+    assert eggs["favorite"] is True
+    assert eggs["stocked"] is False
+    assert b'aria-label="Remove Eggs from favorites"' in response.data
+    assert b"1 starred" in response.data
+
+    client.post("/groceries/reset", headers={"Origin": "http://localhost"})
+    assert web_app.load_groceries()["categories"][0]["items"][0]["favorite"] is True
+
+    client.post(
+        "/groceries/toggle-favorite",
+        data={"category": "Food", "item": "Eggs"},
+        headers={"Origin": "http://localhost"},
+    )
+    assert web_app.load_groceries()["categories"][0]["items"][0]["favorite"] is False
+    actions = [json.loads(line)["action"] for line in history.read_text().splitlines()]
+    assert actions == ["favorite", "reset", "unfavorite"]
+
+
+def test_toggle_favorite_unknown_item_does_not_write(client, groceries_file):
+    original = groceries_file.read_text()
+    response = client.post(
+        "/groceries/toggle-favorite",
+        data={"category": "Food", "item": "Absent"},
+        headers={"Origin": "http://localhost"},
+        follow_redirects=True,
+    )
+    assert b"Grocery item not found" in response.data
+    assert groceries_file.read_text() == original
+
+
+def test_organize_grocery_item_moves_category_and_preserves_favorite(
+    client, groceries_file, tmp_path, monkeypatch
+):
+    history = tmp_path / "groceries-history.jsonl"
+    monkeypatch.setattr(web_app, "GROCERIES_HISTORY_FILE", history)
+    data = json.loads(groceries_file.read_text())
+    data["categories"][0]["items"][0]["favorite"] = True
+    groceries_file.write_text(json.dumps(data))
+    response = client.post(
+        "/groceries/organize-item",
+        data={"category": "Food", "item": "Eggs", "target_category": "Drinks", "type": "Dairy"},
+        headers={"Origin": "http://localhost"},
+        follow_redirects=True,
+    )
+    updated = web_app.load_groceries()
+    assert not any(item["name"] == "Eggs" for item in updated["categories"][0]["items"])
+    moved = next(item for item in updated["categories"][1]["items"] if item["name"] == "Eggs")
+    assert moved["favorite"] is True
+    assert moved["stocked"] is False
+    assert moved["type"] == "Dairy"
+    assert b'data-type="Dairy"' in response.data
+    assert json.loads(history.read_text().splitlines()[-1])["action"] == "organize"
+
+
+def test_organize_grocery_item_rejects_duplicate_in_target(client, groceries_file):
+    data = json.loads(groceries_file.read_text())
+    data["categories"][1]["items"].append({"name": "Eggs", "stocked": False})
+    groceries_file.write_text(json.dumps(data))
+    before = groceries_file.read_text()
+    response = client.post(
+        "/groceries/organize-item",
+        data={"category": "Food", "item": "Eggs", "target_category": "Drinks", "type": "Dairy"},
+        headers={"Origin": "http://localhost"},
+        follow_redirects=True,
+    )
+    assert b"already exists" in response.data
+    assert groceries_file.read_text() == before
+
+
+def test_organize_grocery_item_creates_category_and_subcategory(
+    client, groceries_file, tmp_path, monkeypatch
+):
+    history = tmp_path / "history.jsonl"
+    monkeypatch.setattr(web_app, "GROCERIES_HISTORY_FILE", history)
+    response = client.post(
+        "/groceries/organize-item",
+        data={
+            "category": "Food",
+            "item": "Bread",
+            "target_category": "__new__",
+            "new_category": "Market",
+            "type": "__new__",
+            "new_type": "Grains",
+        },
+        headers={"Origin": "http://localhost"},
+        follow_redirects=True,
+    )
+    data = web_app.load_groceries()
+    market = next(category for category in data["categories"] if category["name"] == "Market")
+    assert market["items"][0]["name"] == "Bread"
+    assert market["items"][0]["type"] == "Grains"
+    assert b'data-type="Grains"' in response.data
+    assert [json.loads(line)["action"] for line in history.read_text().splitlines()] == [
+        "add-category",
+        "organize",
+    ]
+
+
+def test_organize_grocery_item_requires_new_names(client, groceries_file):
+    before = groceries_file.read_text()
+    response = client.post(
+        "/groceries/organize-item",
+        data={
+            "category": "Food",
+            "item": "Eggs",
+            "target_category": "Food",
+            "type": "__new__",
+            "new_type": "",
+        },
+        headers={"Origin": "http://localhost"},
+        follow_redirects=True,
+    )
+    assert b"Enter a name for the new subcategory" in response.data
+    assert groceries_file.read_text() == before
+
+
+def test_organize_grocery_item_with_spaces_within_same_category(
+    client, groceries_file, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(web_app, "GROCERIES_HISTORY_FILE", tmp_path / "history.jsonl")
+    data = json.loads(groceries_file.read_text())
+    data["categories"].append(
+        {"name": "General", "items": [{"name": "Paper Towel", "stocked": True, "favorite": True}]}
+    )
+    groceries_file.write_text(json.dumps(data))
+    response = client.post(
+        "/groceries/organize-item",
+        data={
+            "category": "General",
+            "item": "Paper Towel",
+            "target_category": "General",
+            "type": "General",
+        },
+        headers={"Origin": "http://localhost"},
+        follow_redirects=True,
+    )
+    item = web_app.load_groceries()["categories"][-1]["items"][0]
+    assert item == {"name": "Paper Towel", "stocked": True, "favorite": True, "type": "General"}
+    assert b'data-type="General"' in response.data
 
 
 def test_delete_item(client, groceries_file):
@@ -720,6 +953,60 @@ def test_ai_rules_route_saves_aliases(client, rules_file, intake_db, monkeypatch
     rules = web_app.load_grocery_rules()
     assert "bud" in rules["aliases"].get("Beer", [])
     assert b"token" in resp.data or b"alias" in resp.data.lower() or b"Added" in resp.data
+    assert b"Receipt matching rules" in resp.data
+    assert b"rule-token new" in resp.data
+    assert b"bud" in resp.data
+
+
+def test_remove_rule_only_removes_selected_token(client, rules_file):
+    rules_file.write_text(json.dumps({"aliases": {"Beer": ["bud", "coors"]}, "types": {}}))
+    resp = client.post(
+        "/groceries/remove-rule",
+        data={"item": "Beer", "token": "bud"},
+        headers={"Origin": "http://localhost"},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert b"Receipt matching rules" in resp.data
+    assert web_app.load_grocery_rules()["aliases"] == {"Beer": ["coors"]}
+    assert web_app.load_grocery_rules()["rejected_aliases"] == {"Beer": ["bud"]}
+
+
+def test_rejected_rule_is_flagged_when_suggested_again(client, rules_file, intake_db, monkeypatch):
+    rules_file.write_text(json.dumps({"aliases": {}, "rejected_aliases": {"Beer": ["bud"]}}))
+    monkeypatch.setattr(web_app, "_ollama_available", lambda: True)
+    monkeypatch.setattr(web_app, "INTAKE_DB", intake_db)
+    monkeypatch.setattr(web_app, "_ollama_generate", lambda *a, **kw: _RULES_RESPONSE)
+    resp = client.post(
+        "/groceries/ai-rules",
+        headers={"Origin": "http://localhost"},
+        follow_redirects=True,
+    )
+    assert b"Blocked 1 previously rejected rule suggestion" in resp.data
+    assert b"suggested again" in resp.data
+    assert web_app.load_grocery_rules()["aliases"]["Beer"] == ["coors"]
+
+
+def test_allow_rule_removes_rejection(client, rules_file):
+    rules_file.write_text(json.dumps({"aliases": {}, "rejected_aliases": {"Beer": ["bud"]}}))
+    resp = client.post(
+        "/groceries/allow-rule",
+        data={"item": "Beer", "token": "bud"},
+        headers={"Origin": "http://localhost"},
+        follow_redirects=True,
+    )
+    assert resp.status_code == 200
+    assert web_app.load_grocery_rules()["rejected_aliases"] == {}
+
+
+def test_remove_rule_rejects_unknown_token(client, rules_file):
+    rules_file.write_text(json.dumps({"aliases": {"Beer": ["bud"]}, "types": {}}))
+    client.post(
+        "/groceries/remove-rule",
+        data={"item": "Beer", "token": "unknown"},
+        headers={"Origin": "http://localhost"},
+    )
+    assert web_app.load_grocery_rules()["aliases"] == {"Beer": ["bud"]}
 
 
 def test_ai_rules_route_ollama_down(client, monkeypatch):
@@ -771,6 +1058,10 @@ def test_get_groceries_passes_rules_count(client, rules_file, monkeypatch):
     monkeypatch.setattr(web_app, "_ollama_available", lambda: False)
     resp = client.get("/groceries")
     assert b"3 AI rules" in resp.data
+    assert b"Search groceries" in resp.data
+    assert b'data-search-item="Beer' in resp.data
+    assert b"Receipt matching rules (3)" in resp.data
+    assert b"coors" in resp.data
 
 
 def test_get_groceries_shows_type_badge_after_categorize(client, groceries_file, monkeypatch):

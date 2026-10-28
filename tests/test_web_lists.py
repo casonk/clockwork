@@ -353,13 +353,131 @@ def test_to_watch_renders_torrent_and_library_controls(client, list_files):
     assert 'data-query="Brazil' not in html
     assert html.count('class="search-panel"') == 1
     assert "/api/torrent-add" in html
+    assert "/api/series-build" in html
+    assert "Add selected episodes" in html
+    assert 'data-year="2004" data-category="Movies"' in html
+    assert "checkLibrary(libBtn, false)" in html
+    assert "link.href = match.url" in html
+
+
+def test_torrent_search_labels_episodes_and_season_packs():
+    episode = web_app._series_release_details("Breaking.Bad.S01E02.1080p.mkv")
+    pack = web_app._series_release_details("Breaking.Bad.S01.1080p")
+    series = web_app._series_release_details("Breaking.Bad.S01-S05.1080p")
+    movie = web_app._series_release_details("Hunting.Season.2006.1080p.mkv")
+
+    assert episode == {
+        "season": 1,
+        "season_end": None,
+        "episode": 2,
+        "episode_end": None,
+        "release_type": "episode",
+    }
+    assert pack["season"] == 1 and pack["release_type"] == "season_pack"
+    assert series["season_end"] == 5 and series["release_type"] == "series_pack"
+    assert movie["release_type"] == "other"
+
+
+def test_build_series_library_links_completed_episodes_without_moving(tmp_path, monkeypatch):
+    downloads = tmp_path / "downloads"
+    library = tmp_path / "watch"
+    pack = downloads / "Breaking.Bad.S01.1080p"
+    pack.mkdir(parents=True)
+    first = pack / "Breaking.Bad.S01E01.mkv"
+    second = pack / "Breaking.Bad.S01E02.mkv"
+    subtitle = pack / "Breaking.Bad.S01E02.srt"
+    for path in (first, second, subtitle):
+        path.write_bytes(b"video")
+    unfinished = downloads / "Breaking.Bad.S01E03.mkv"
+    unfinished.write_bytes(b"partial")
+    duplicate = downloads / "Breaking.Bad.S01E02.720p.mkv"
+    duplicate.write_bytes(b"duplicate")
+    filed = tmp_path / "magneto-library"
+    filed.mkdir()
+    moved_episode = filed / "Breaking.Bad.S02E01.mkv"
+    moved_episode.write_bytes(b"moved")
+    other = downloads / "Other.Show.S01E01.mkv"
+    other.write_bytes(b"other")
+    monkeypatch.setattr(web_app, "WATCH_DIR", library)
+    monkeypatch.setattr(web_app, "_EXTRA_WATCH_DIRS", [downloads])
+    torrents = [
+        {"name": pack.name, "downloadDir": str(downloads), "percentDone": 1},
+        {"name": unfinished.name, "downloadDir": str(downloads), "percentDone": 0.5},
+        {"name": duplicate.name, "downloadDir": str(downloads), "percentDone": 1},
+        {"name": moved_episode.name, "downloadDir": str(filed), "percentDone": 1},
+        {"name": other.name, "downloadDir": str(downloads), "percentDone": 1},
+    ]
+
+    first_run = web_app._build_series_library("Breaking Bad", 2008, torrents)
+    second_run = web_app._build_series_library("Breaking Bad", 2008, torrents)
+
+    season = library / "shows" / "Breaking Bad (2008)" / "Season 01"
+    assert len(first_run["linked"]) == 3
+    assert (season / first.name).is_symlink()
+    assert (season / second.name).resolve() == second
+    assert (season / subtitle.name).resolve() == subtitle
+    assert first.exists() and second.exists()
+    assert not (season / unfinished.name).exists()
+    assert not (season / duplicate.name).exists()
+    assert (
+        library / "shows" / "Breaking Bad (2008)" / "Season 02" / moved_episode.name
+    ).resolve() == moved_episode
+    assert any("episode already filed" in item for item in first_run["skipped"])
+    assert not (library / "shows" / "Other Show").exists()
+    assert second_run["linked"] == []
+    media = web_app.media_library
+    conn = media.connect(tmp_path / "catalog.sqlite")
+    try:
+        media.scan_library(
+            library, conn, prober=lambda _path: media.StreamInfo(width=1920, height=1080)
+        )
+        assert conn.execute("SELECT COUNT(*) FROM titles WHERE kind = 'shows'").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM files WHERE season = 1").fetchone()[0] == 2
+        assert conn.execute("SELECT COUNT(*) FROM files WHERE season = 2").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_series_build_api_uses_completed_magneto_status(client, tmp_path, monkeypatch):
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    episode = downloads / "Example.Show.S02E03.mkv"
+    episode.write_bytes(b"video")
+    monkeypatch.setattr(web_app, "WATCH_DIR", tmp_path / "watch")
+    monkeypatch.setattr(web_app, "_EXTRA_WATCH_DIRS", [downloads])
+    monkeypatch.setattr(
+        web_app,
+        "_completed_local_torrents",
+        lambda: [{"name": episode.name, "downloadDir": str(downloads), "percentDone": 1}],
+    )
+
+    response = client.post(
+        "/api/series-build",
+        json={"title": "Example Show", "year": 2020},
+        headers={"X-CSRF-Token": _csrf(client, "/api/watch")},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["ok"] is True
+    assert response.get_json()["linked"] == [
+        "shows/Example Show (2020)/Season 02/Example.Show.S02E03.mkv"
+    ]
 
 
 def test_other_lists_do_not_render_torrent_controls(client):
-    html = client.get("/to-read").get_data(as_text=True)
+    html = client.get("/to-do").get_data(as_text=True)
 
     assert "find-btn" not in html.split("</style>")[1]
     assert "lib-check-btn" not in html.split("</style>")[1]
+
+
+@pytest.mark.parametrize("page", ["to-read", "to-listen"])
+def test_read_and_listen_render_library_controls(client, page):
+    html = client.get(f"/{page}").get_data(as_text=True)
+
+    assert 'id="media-check-btn"' in html
+    assert "media-find-btn" in html
+    assert "/api/media/" in html
 
 
 def test_watch_check_finds_titles_filed_under_movies(client, tmp_path, monkeypatch):
@@ -375,8 +493,148 @@ def test_watch_check_finds_titles_filed_under_movies(client, tmp_path, monkeypat
     )
 
     matches = resp.get_json()["matches"]
-    assert matches["Napoleon Dynamite"] == {"found": True, "match": "Napoleon Dynamite (2004)"}
+    assert matches["Napoleon Dynamite"] == {
+        "found": True,
+        "match": "Napoleon Dynamite (2004)",
+        "url": "/library/title/movies/Napoleon%20Dynamite%20(2004)",
+    }
     assert matches["Movies"]["found"] is False
+
+
+def test_watch_check_links_same_named_movie_and_show_to_the_right_library_title(
+    client, tmp_path, monkeypatch
+):
+    movie = tmp_path / "movies" / "Sci-Fi" / "Stargate (1994)"
+    show = tmp_path / "shows" / "Stargate (1997)"
+    movie.mkdir(parents=True)
+    show.mkdir(parents=True)
+    monkeypatch.setattr(web_app, "WATCH_DIR", tmp_path)
+    monkeypatch.setattr(web_app, "_EXTRA_WATCH_DIRS", [])
+
+    resp = client.post(
+        "/api/watch-check",
+        json={
+            "titles": [
+                {"title": "Stargate", "year": 1994, "category": "Movies"},
+                {"title": "Stargate", "year": 1997, "category": "TV Shows"},
+                {"title": "Stargate", "year": 2004, "category": "Movies"},
+            ]
+        },
+        headers={"X-CSRF-Token": _csrf(client, "/api/watch")},
+    )
+
+    assert resp.status_code == 200
+    movie_result, show_result, missing_result = resp.get_json()["results"]
+    assert movie_result["url"] == "/library/title/movies/Sci-Fi/Stargate%20(1994)"
+    assert show_result["url"] == "/library/title/shows/Stargate%20(1997)"
+    assert missing_result == {"found": False, "match": None, "url": None}
+
+
+def test_torrent_search_marks_library_duplicates_and_add_rechecks_before_magneto(
+    client, tmp_path, monkeypatch
+):
+    movie = tmp_path / "movies" / "Sci-Fi" / "Stargate (1994)"
+    show = tmp_path / "shows" / "Stargate (1997)" / "Season 01"
+    movie.mkdir(parents=True)
+    show.mkdir(parents=True)
+    (movie / "Stargate.1994.mkv").write_bytes(b"video")
+    (show / "Stargate.S01E01.mkv").write_bytes(b"video")
+    monkeypatch.setattr(web_app, "WATCH_DIR", tmp_path)
+    monkeypatch.setattr(web_app, "_EXTRA_WATCH_DIRS", [])
+    sent = []
+    monkeypatch.setattr(
+        web_app, "_proxy_to_magneto", lambda magnet, host: (sent.append(magnet) or True, "")
+    )
+
+    def fake_search(query):
+        return [
+            {"name": "Stargate.S01E01.1080p", "magnet": "magnet:?xt=one"},
+            {"name": "Stargate.S01E02.1080p", "magnet": "magnet:?xt=two"},
+            {"name": "Stargate.S01.1080p", "magnet": "magnet:?xt=season"},
+        ]
+
+    monkeypatch.setattr(web_app, "_search_torrents_csv", fake_search)
+    movie_results = client.get(
+        "/api/torrent-search?q=Stargate&cat=Movies&title=Stargate&year=1994"
+    ).get_json()["results"]
+    assert all(result["library_conflict"] for result in movie_results)
+
+    show_results = client.get(
+        "/api/torrent-search?q=Stargate&cat=TV%20Shows&title=Stargate&year=1997"
+    ).get_json()["results"]
+    assert show_results[0]["library_conflict"]
+    assert show_results[1]["library_conflict"] is None
+    assert show_results[2]["library_conflict"]
+    assert show_results[0]["library_url"] == "/library/title/shows/Stargate%20(1997)"
+
+    headers = {"X-CSRF-Token": _csrf(client, "/api/watch")}
+    movie_duplicate = client.post(
+        "/api/torrent-add",
+        json={
+            "magnet": "magnet:?xt=movie",
+            "name": "Stargate.1994.1080p",
+            "title": "Stargate",
+            "year": "1994",
+            "category": "Movies",
+        },
+        headers=headers,
+    )
+    assert movie_duplicate.status_code == 409
+    duplicate = client.post(
+        "/api/torrent-add",
+        json={
+            "magnet": "magnet:?xt=one",
+            "name": "Stargate.S01E01.1080p",
+            "title": "Stargate",
+            "year": "1997",
+            "category": "TV Shows",
+        },
+        headers=headers,
+    )
+    assert duplicate.status_code == 409
+    assert sent == []
+
+    missing = client.post(
+        "/api/torrent-add",
+        json={
+            "magnet": "magnet:?xt=two",
+            "name": "Stargate.S01E02.1080p",
+            "title": "Stargate",
+            "year": "1997",
+            "category": "TV Shows",
+        },
+        headers=headers,
+    )
+    assert missing.status_code == 200
+    assert sent == ["magnet:?xt=two"]
+
+
+def test_episode_search_returns_only_releases_covering_the_requested_episode(
+    client, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(web_app, "WATCH_DIR", tmp_path)
+    monkeypatch.setattr(web_app, "_EXTRA_WATCH_DIRS", [])
+    names = [
+        "Stargate.S01E01.1080p",
+        "Stargate.S01E02.1080p",
+        "Stargate.S01.1080p",
+        "Stargate.Atlantis.S01E02.1080p",
+    ]
+    monkeypatch.setattr(
+        web_app,
+        "_search_torrents_csv",
+        lambda _query: [
+            {"name": name, "magnet": f"magnet:?xt={index}"} for index, name in enumerate(names)
+        ],
+    )
+
+    resp = client.get(
+        "/api/torrent-search?q=Stargate%20S01E02&cat=TV%20Shows&title=Stargate&season=1&episode=2"
+    )
+
+    assert resp.status_code == 200
+    assert [result["name"] for result in resp.get_json()["results"]] == names[1:3]
+    assert client.get("/api/torrent-search?q=x&season=1").status_code == 400
 
 
 def test_library_page_and_search_api(client, tmp_path, monkeypatch):
