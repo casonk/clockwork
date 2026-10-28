@@ -129,7 +129,12 @@ def render_service_unit(job: JobSpec) -> str:
         lines.append(f"EnvironmentFile={environment_file}")
     for key in sorted(job.environment):
         lines.append(_quote_systemd_environment(key, job.environment[key]))
+    for command in job.start_condition:
+        lines.append(f"ExecCondition={command}")
     lines.append(f"ExecStart={job.exec_start}")
+    if job.time_limit:
+        key = "TimeoutStartSec" if job.service_type == "oneshot" else "RuntimeMaxSec"
+        lines.append(f"{key}={job.time_limit}")
     if job.restart:
         lines.append(f"Restart={job.restart}")
     if job.restart_sec:
@@ -308,6 +313,11 @@ def _validate_launchd_job(job: JobSpec) -> None:
     if job.start_limit_interval_sec:
         raise ValueError(
             f"job {job.name!r} uses start_limit_interval_sec, which launchd-user cannot map"
+        )
+    if job.start_condition or job.time_limit:
+        raise ValueError(
+            f"job {job.name!r} uses start_condition/time_limit, which launchd-user cannot "
+            "map -- clear them for this target with [jobs.launchd]"
         )
     if job.service_install_wanted_by and job.service_install_wanted_by != ("default.target",):
         raise ValueError(
@@ -549,6 +559,11 @@ def _validate_windows_job(job: JobSpec) -> None:
     if job.start_limit_interval_sec:
         raise ValueError(
             f"job {job.name!r} uses start_limit_interval_sec, which windows-user cannot map"
+        )
+    if job.start_condition or job.time_limit:
+        raise ValueError(
+            f"job {job.name!r} uses start_condition/time_limit, which windows-user cannot "
+            "map -- clear them for this target with [jobs.windows]"
         )
     if job.service_install_wanted_by and job.service_install_wanted_by != ("default.target",):
         raise ValueError(

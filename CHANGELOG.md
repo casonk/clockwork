@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add `start_condition` and `time_limit` job fields, rendered as systemd
+  `ExecCondition=` and `TimeoutStartSec=`/`RuntimeMaxSec=`, so a start guard and
+  run limit travel with the rendered unit. launchd and Windows refuse them until
+  a per-target override clears them.
+
 - Add a P1-P4 priority rating and "in person", "needs a human" and "needs sudo"
   flags to To Code items. Items sort by priority within each repository, can be
   filtered by priority or flag, and are editable through `/to-code/update-item`
