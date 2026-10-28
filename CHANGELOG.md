@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add a P1-P4 priority rating and an "in person" flag (work that needs hands on
+  a specific machine) to To Code items. Items sort by priority within each
+  repository, can be filtered by either field, and are editable through
+  `/to-code/update-item` and `/api/code/update-item`.
+
 - Add a To Code portfolio backlog list grouped by repository family and
   repository, with explicit family selection, local history, and a Home link.
 - Cancel a waiting per-render ECU lease when an external pause request arrives,
