@@ -524,6 +524,15 @@ Supported manifest sections:
   the same resolver.
 - `launchd_run_at_load`: optional explicit launchd login-start behavior. It
   does not make `on_boot_sec` portable; that field remains fail-closed.
+- `start_condition`: optional command, or list of commands, rendered as systemd
+  `ExecCondition=`. A condition that exits 1-254 skips the run without failing
+  it, so a guard such as traction-control's `job_guard.py check` travels with
+  the rendered unit instead of through a drop-in.
+- `time_limit`: optional wall-clock bound for one run, rendered as
+  `TimeoutStartSec=` for a oneshot service and `RuntimeMaxSec=` otherwise.
+  launchd and Task Scheduler have no equivalent for either field, so those
+  targets refuse them until `[jobs.launchd]` or `[jobs.windows]` clears them
+  (`start_condition = []`, `time_limit = ""`).
 - `environment_files`: optional systemd `EnvironmentFile=` paths; use `-...`
   when the file is local-only and may not exist on every machine
 - `poll_interval`: optional UI hint for long-running daemons with an internal poll loop
