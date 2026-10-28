@@ -158,12 +158,30 @@ python3 web/media_library.py search --director fincher --year-from 1990
 - The catalog (`config/media-library.sqlite`) and rename journal
   (`config/media-library-renames.jsonl`) are local and gitignored.
 
+On **To Watch**, searching a TV series groups torrent results by season and
+labels full-season and multi-season packs. Select several distinct episodes and use **Add
+selected episodes** to send their magnet links to the local Magneto in one
+action. Each release stays a separate Transmission torrent; the picker blocks
+overlapping episodes and season packs. After the downloads finish, **File
+completed episodes** uses Magneto's local torrent status and links matching
+videos into `watch/shows/Title (Year)/Season NN/`. It links subtitles with
+matching stems, leaves Transmission's source files in place for seeding, and
+skips incomplete torrents and episodes already filed. It uses each completed
+torrent's current directory, including files Magneto moved to its configured
+library directory. The action is explicit and does not move or rename data.
+
 Library pages (`web/library_pages.py`):
 
 - `/library/title/<path>`: one page per movie or show with director/creator,
   cast, genres, IMDb/Wikidata links, every file's quality, codecs, runtime,
   subtitle and audio tracks, episodes grouped by season, extras, and a
   genre-folder dropdown that moves a movie (journaled; sync keeps the choice).
+  Show pages also compare local files with TVmaze's aired episode guide, label
+  gaps aired in the last 30 days as new and older gaps as missing, and search
+  matching releases through Magneto. The
+  backing `GET /api/library/episodes/shows/<title-folder>` endpoint returns
+  show details, per-episode status, and counts. Ambiguous show names require
+  choosing a TVmaze show ID; future episodes are counted but not downloadable.
 - `/library/play/<file>`: plays a video in the browser with its `.srt`
   subtitles (and embedded text subtitles) converted to WebVTT. MP4 with
   H.264/AAC plays directly with HTTP range seeking. Everything else (MKV,
@@ -189,11 +207,50 @@ Library pages (`web/library_pages.py`):
   wait for playback or preempt their command when opted in with
   `--preemptible`.
 - `/library/browse/`: the folder tree as it is on disk, hidden `.release/`
-  folders excluded, with play and download links.
+  folders excluded, with play and download links. Catalog ratings and short
+  descriptions appear beside title folders when available. Show folders use
+  TVmaze as a read-only fallback when those catalog fields are empty.
 - `/library/manage`: start a sync (`systemctl --user start` of
   `clockwork-media-library.service`), see its recent log and timer state,
   the items needing attention (still seeding, duplicate copies, no metadata),
   and the recent rename batches with the undo command.
+
+### Read and listen libraries
+
+Set `CLOCKWORK_READ_LIBRARY_DIR` and `CLOCKWORK_LISTEN_LIBRARY_DIR` in the
+Clockwork web service environment to readable local folders. The folders are
+optional and can be configured independently. To Read and To Listen then check
+for matching local titles when opened, link directly to a viewer or player,
+and offer a Magneto search for missing titles. The search and add APIs recheck
+the configured library before sending a magnet, so a title acquired between
+search and click is blocked. Without a configured root, downloads from these
+list pages are disabled because duplicate detection is unavailable.
+
+To Read also looks up exact title matches in the Open Library Search API and
+shows author, first publication year, cover, and a catalog link. These details
+remain available even when the read library is not configured. Download search
+still uses torrents-csv by default. To add more torrent indexers for To Read and
+To Listen, configure `CLOCKWORK_PROWLARR_URL` and
+`CLOCKWORK_PROWLARR_API_KEY` in the web service environment. Clockwork asks
+Prowlarr for book or music results, merges magnet links with torrents-csv by
+info hash, labels their sources, and passes a selected magnet to Magneto.
+Only magnet results are shown; direct book files and Usenet releases cannot
+be sent through Magneto's current add endpoint. An unavailable Prowlarr or
+Open Library response leaves the existing torrent search usable.
+
+To Read also searches arXiv for items in the Papers and Articles lists and
+Internet Archive text items for any reading list. arXiv matches link to the
+abstract and PDF. Internet Archive matches link to the item page, where the
+Archive shows the item's actual read, borrow, and download options. These
+sources are available without a local library folder; they do not pass
+through Magneto or automatically save files into the local library.
+
+`/media/read/` browses PDF, EPUB, TXT, and Markdown files. PDFs and text open
+in the browser; EPUB uses pinned JSZip and epub.js bundles with scripted book
+content disabled. `/media/listen/` browses MP3, M4A, AAC, FLAC, OGG, Opus,
+and WAV files. It plays an audio file or a folder playlist with HTML audio;
+browser codec support varies, and every file has a download fallback. File
+routes refuse hidden paths, symlinks, and paths outside the configured root.
 
 ### AI super-resolution (experimental)
 

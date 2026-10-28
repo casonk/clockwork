@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }} - Clockwork</title>
+  <style>
+    :root { color-scheme:dark; --bg:#0f1117; --panel:#1a1d27; --border:#2e3250; --text:#e2e4f0; --muted:#8890b0; --accent:#5b9eff; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 system-ui,sans-serif; }
+    header { padding:12px 18px; background:var(--panel); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+    h1 { margin:0; font-size:17px; flex:1; min-width:180px; overflow-wrap:anywhere; }
+    a { color:var(--accent); text-decoration:none; }
+    a:hover { text-decoration:underline; }
+    main { max-width:1100px; margin:auto; padding:16px; }
+    .panel { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:12px; }
+    .muted { color:var(--muted); }
+    button { background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:7px 12px; cursor:pointer; }
+    button:hover { border-color:var(--accent); }
+    iframe { width:100%; height:calc(100vh - 120px); min-height:480px; border:0; background:white; }
+    #epub-area { width:100%; height:calc(100vh - 190px); min-height:480px; background:white; }
+    audio { width:100%; margin:12px 0; }
+    .track { display:block; width:100%; text-align:left; margin:5px 0; }
+    .track.active { border-color:var(--accent); color:var(--accent); }
+  </style>
+  {% if media_type == '.epub' %}
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js" integrity="sha384-ZqmkDa/1AGF4SKdSmXgEG+3G+Gsb6yNqUSq2Mqp0jDf1GWk+UY5eNbEd7hgwiywI" crossorigin="anonymous"></script>
+  {% endif %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
+</head>
+<body>
+{% include "_site_nav.html" %}
+<header>
+  <a href="{{ url_for('personal_library.browse', kind=kind) }}">← Library</a>
+  <h1>{{ '🎧' if kind == 'listen' else '📚' }} {{ title }}</h1>
+  <a href="{{ download_url }}">⬇ Download</a>
+</header>
+<main>
+  {% if kind == 'listen' %}
+    <div class="panel">
+      <p id="now-playing" class="muted">{{ playlist[0].name }}</p>
+      <audio id="audio-player" controls preload="metadata" src="{{ file_url }}">Your browser cannot play this audio file.</audio>
+      {% if playlist|length > 1 %}
+        <div id="track-list">
+          {% for track in playlist %}<button class="track{% if loop.first %} active{% endif %}" type="button" data-url="{{ track.url }}" data-name="{{ track.name }}">{{ loop.index }}. {{ track.name }}</button>{% endfor %}
+        </div>
+      {% endif %}
+    </div>
+    <script>
+    (() => {
+      const player = document.getElementById('audio-player');
+      const tracks = [...document.querySelectorAll('.track')];
+      let current = 0;
+      function select(index, play) {
+        if (!tracks[index]) return;
+        current = index;
+        tracks.forEach((track, n) => track.classList.toggle('active', n === index));
+        player.src = tracks[index].dataset.url;
+        document.getElementById('now-playing').textContent = tracks[index].dataset.name;
+        if (play) player.play();
+      }
+      tracks.forEach((track, index) => track.addEventListener('click', () => select(index, true)));
+      player.addEventListener('ended', () => select(current + 1, true));
+    })();
+    </script>
+  {% elif media_type == '.pdf' or media_type == '.txt' or media_type == '.md' %}
+    <div class="panel"><iframe src="{{ file_url }}" title="{{ title }}"></iframe></div>
+  {% elif media_type == '.epub' %}
+    <div class="panel">
+      <div style="display:flex; justify-content:space-between; margin-bottom:8px"><button id="epub-prev" type="button">← Previous</button><span id="epub-status" class="muted">Opening book…</span><button id="epub-next" type="button">Next →</button></div>
+      <div id="epub-area"></div>
+    </div>
+    <script>
+    (() => {
+      const status = document.getElementById('epub-status');
+      if (typeof ePub !== 'function') { status.textContent = 'EPUB viewer could not load. Use Download.'; return; }
+      const book = ePub({{ file_url|tojson }});
+      const rendition = book.renderTo('epub-area', { width: '100%', height: '100%', allowScriptedContent: false });
+      rendition.display().then(() => { status.textContent = 'Ready'; }).catch(error => { status.textContent = `Could not open EPUB: ${error.message}`; });
+      document.getElementById('epub-prev').addEventListener('click', () => rendition.prev());
+      document.getElementById('epub-next').addEventListener('click', () => rendition.next());
+    })();
+    </script>
+  {% endif %}
+</main>
+</body>
+</html>

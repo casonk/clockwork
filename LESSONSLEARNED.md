@@ -18,6 +18,29 @@ should change how future sessions work in this repo.
   an explicit repository family and repository for each entry; reject unknown
   families in the API, and reconcile each repo's tracked `BACKLOG.md` when work
   is completed because the local list does not write back.
+- Separate book identity from download availability: use a catalog API for
+  title, author, and edition context, then merge magnet search sources by info
+  hash. Keep Magneto handoff limited to magnet links it can accept, and retain
+  the existing search source when an optional provider is unavailable.
+- Treat archive item discovery as distinct from file availability. Link to the
+  item's access page when borrowing or download permissions vary; link a direct
+  PDF only when the source itself exposes it.
+
+- Optional personal-media libraries need explicit readable roots. Serve only
+  supported files inside those roots, reject hidden or symlinked paths, and
+  disable Magneto adds when the root is unavailable because duplicate checks
+  cannot be trusted.
+
+- Match external episode guides by exact normalized show title and premiere
+  year; ask for a selection when multiple editions remain. Compare only aired
+  numbered episodes with playable local files, and recheck library overlap
+  when a Magneto add is submitted, not only when search results are rendered.
+
+- Build series library entries from completed Transmission status, then link
+  episode files into show/season folders without moving seeding sources.
+  De-duplicate by season and episode number so separate releases do not create
+  duplicate playable episodes; follow each torrent's current RPC directory
+  because post-download filing can move it. Keep search bundles explicit.
 
 - Configure the ECU to recognize active HLS `ffmpeg` processes at live
   priority; it observes process activity rather than requiring an app token
