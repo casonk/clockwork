@@ -14,6 +14,17 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
+- When a public-code privacy refactor replaces a private checkout path with a
+  neutral placeholder and an environment override, migrate every ignored
+  host manifest and reinstall/restart the live service in the same rollout.
+  Validate the consumer endpoint against the real generated file; changing the
+  tracked default alone can leave a healthy service returning missing-file
+  errors indefinitely.
+- When consolidating a dedicated page into a shared server-backed list
+  template, preserve each action's behavior rather than replacing a mutation
+  button with a link to its diagnostic JSON endpoint. List updates should use a
+  CSRF-protected POST through the canonical load/save adapter, with regression
+  coverage for both the rendered control and the resulting stored state.
 - Keep the shared To Code list as an operational view of repo backlogs. Require
   an explicit repository family and repository for each entry; reject unknown
   families in the API, and reconcile each repo's tracked `BACKLOG.md` when work

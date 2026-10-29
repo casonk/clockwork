@@ -4129,6 +4129,73 @@ def _find_simple_item(cat: dict, value: str, cfg: dict, *, repo: str | None = No
     return None
 
 
+INVEST_ASSET_CLASS_CATEGORIES = {
+    "Stocks": "Stocks",
+    "Mutual Funds": "ETFs",
+    "ETFs": "ETFs",
+    "Bonds": "Bonds",
+    "Fixed Income": "Bonds",
+    "REITs": "REITs",
+    "Crypto": "Crypto",
+}
+
+
+def _load_invest_holdings_payload() -> dict:
+    if not HOLDINGS_AGGREGATE_FILE.exists():
+        raise FileNotFoundError(f"Holdings file not found: {HOLDINGS_AGGREGATE_FILE}")
+    payload = json.loads(HOLDINGS_AGGREGATE_FILE.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or not isinstance(payload.get("holdings"), list):
+        raise ValueError("Holdings file does not contain a holdings list")
+    return payload
+
+
+def _merge_invest_holdings(data: dict, holdings: list) -> tuple[int, int, int, int]:
+    """Mark current tickers as held and add new ones without deleting watchlist items."""
+
+    known: dict[str, dict] = {}
+    for category in data["categories"]:
+        for item in category["items"]:
+            ticker = str(item.get("ticker") or "").upper().strip()
+            if ticker and ticker not in known:
+                known[ticker] = item
+
+    marked = added = named = skipped = 0
+    for holding in holdings:
+        if not isinstance(holding, dict):
+            skipped += 1
+            continue
+        ticker = str(holding.get("ticker") or "").upper().strip()
+        asset_class = str(holding.get("asset_class") or "").strip()
+        if not ticker or asset_class == "Core Account":
+            skipped += 1
+            continue
+        description = str(holding.get("description") or "").strip()
+
+        existing = known.get(ticker)
+        if existing is not None:
+            if not existing.get("holding", False):
+                existing["holding"] = True
+                marked += 1
+            if description and not existing.get("name"):
+                existing["name"] = description
+                named += 1
+            continue
+
+        category_name = INVEST_ASSET_CLASS_CATEGORIES.get(asset_class, "Stocks")
+        category = _find_simple_category(data, category_name)
+        if category is None:
+            category = {"name": category_name, "items": []}
+            data["categories"].append(category)
+        item = {"ticker": ticker, "holding": True}
+        if description:
+            item["name"] = description
+        category["items"].append(item)
+        known[ticker] = item
+        added += 1
+
+    return marked, added, named, skipped
+
+
 def load_todo() -> dict:
     return load_simple_list("todo")
 
@@ -4472,6 +4539,38 @@ def simple_list_reset(page):
     _log_event(cfg["history_file"], "reset")
     flash(f"All items marked as {cfg['reset_label']}.", "success")
     return redirect(url_for(_simple_list_endpoint(key)))
+
+
+@app.post("/to-invest/sync-holdings")
+def sync_invest_holdings():
+    cfg = _simple_list_config("invest")
+    try:
+        payload = _load_invest_holdings_payload()
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        flash(f"Holdings sync failed: {exc}", "error")
+        return redirect(url_for("to_invest"))
+
+    data = load_simple_list("invest")
+    marked, added, named, skipped = _merge_invest_holdings(data, payload["holdings"])
+    if marked or added or named:
+        save_simple_list("invest", data)
+    _log_event(
+        cfg["history_file"],
+        "sync-holdings",
+        detail=f"marked={marked}, added={added}, named={named}, skipped={skipped}",
+    )
+
+    changes = []
+    if marked:
+        changes.append(f"{marked} marked as holding")
+    if added:
+        changes.append(f"{added} new tickers added")
+    if named:
+        changes.append(f"{named} names filled")
+    if skipped:
+        changes.append(f"{skipped} cash or invalid positions skipped")
+    flash(f"Synced: {', '.join(changes)}." if changes else "Holdings are already up to date.")
+    return redirect(url_for("to_invest"))
 
 
 @app.post("/<page>/restore")
@@ -5345,7 +5444,9 @@ def api_invest_holdings():
     Response: the raw JSON payload written by aggregate_accounts.py, or
     {"ok": False, "error": ...} when the file is missing or unreadable.
     """
-    if not HOLDINGS_AGGREGATE_FILE.exists():
+    try:
+        data = _load_invest_holdings_payload()
+    except FileNotFoundError:
         return (
             jsonify(
                 {
@@ -5356,9 +5457,7 @@ def api_invest_holdings():
             ),
             404,
         )
-    try:
-        data = json.loads(HOLDINGS_AGGREGATE_FILE.read_text(encoding="utf-8"))
-    except Exception as exc:
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
     data["ok"] = True
     return jsonify(data)
