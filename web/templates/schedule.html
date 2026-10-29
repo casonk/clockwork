@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1, user-scalable=yes">
+  <title>Schedule — Clockwork</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --border: #2e3250;
+      --green: #3ecf6e; --amber: #e0a752; --red: #e05252; --blue: #5b7fff;
+      --text: #e2e4f0; --muted: #8890b0;
+      --mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+    }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; min-height: 100vh; }
+    main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+    h1 { font-size: 18px; }
+    section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); font-size: 13px; white-space: nowrap; }
+    td.unit, th { font-family: var(--mono); }
+    th { color: var(--muted); font-weight: 600; }
+    .ok { color: var(--green); } .running { color: var(--blue); } .failed { color: var(--red); }
+    .never { color: var(--amber); } .muted { color: var(--muted); }
+    @media (max-width: 600px) { th, td { padding: 4px 4px; } }
+  </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
+</head>
+<body>
+{% include "_site_nav.html" %}
+<main>
+  <h1>Schedule</h1>
+  <section>
+    {% macro span(seconds) -%}
+      {%- set s = seconds|abs -%}
+      {%- if s < 90 %}{{ s }} s{% elif s < 5400 %}{{ (s / 60)|round|int }} min{% elif s < 172800 %}{{ (s / 3600)|round(1) }} h{% else %}{{ (s / 86400)|round(1) }} d{% endif -%}
+    {%- endmacro %}
+    <table>
+      <thead><tr><th>Next run</th><th>In</th><th>Job</th><th>Scope</th><th>Last run</th><th>Last status</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>{% if r.next_epoch %}{{ r.next_label }}{% else %}<span class="muted">not scheduled</span>{% endif %}</td>
+          <td>{% if r.in_seconds is not none %}{% if r.in_seconds >= 0 %}{{ span(r.in_seconds) }}{% else %}overdue {{ span(r.in_seconds) }}{% endif %}{% else %}—{% endif %}</td>
+          <td class="unit"><a href="/logs/{{ r.unit }}?scope={{ r.scope }}" style="color:inherit">{{ r.unit.removesuffix('.service') }}</a></td>
+          <td class="muted">{{ r.scope }}</td>
+          <td>{% if r.ago_seconds is not none %}{{ span(r.ago_seconds) }} ago{% else %}—{% endif %}</td>
+          <td class="{{ 'never' if r.status == 'never run' else r.status }}">{{ r.status }}{% if r.status == 'failed' and r.result %} ({{ r.result }}){% endif %}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6" class="muted">No timers found.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</main>
+</body>
+</html>
