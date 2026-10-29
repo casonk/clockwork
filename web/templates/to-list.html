@@ -135,7 +135,10 @@
       <a class="action-btn" href="{{ url_for('personal_library.browse', kind=cfg.key) }}" title="Browse local {{ cfg.title|lower }} files">{{ '🎧' if cfg.key == 'listen' else '📚' }} Library</a>
     {% endif %}
     {% if cfg.get("holdings_sync") %}
-      <a class="action-btn" href="/api/invest-holdings" title="Tooling endpoint for holdings sync">↻ Holdings API</a>
+      <form method="post" action="/to-invest/sync-holdings">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="action-btn" type="submit" title="Update this list from current portfolio holdings">↻ Sync Holdings</button>
+      </form>
     {% endif %}
     <a class="action-btn" href="/{{ cfg.page }}/history" title="View JSON history">📋 History</a>
     <form method="post" action="/{{ cfg.page }}/reset">

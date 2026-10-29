@@ -34,6 +34,7 @@ def list_files(tmp_path, monkeypatch):
         "LISTEN_LIST_HISTORY_FILE": tmp_path / "to-listen-history.jsonl",
         "INVEST_LIST_FILE": tmp_path / "to-invest.json",
         "INVEST_LIST_HISTORY_FILE": tmp_path / "to-invest-history.jsonl",
+        "HOLDINGS_AGGREGATE_FILE": tmp_path / "holdings-aggregate.json",
         "CODE_LIST_FILE": tmp_path / "to-code.json",
         "CODE_LIST_HISTORY_FILE": tmp_path / "to-code-history.jsonl",
         "GROCERIES_FILE": tmp_path / "groceries.json",
@@ -111,6 +112,90 @@ def test_to_list_api_add_toggle_delete_item(client, page, api_path, category, pa
     page_resp = client.get(f"/{page}")
     assert page_resp.status_code == 200
     assert "localStorage" not in page_resp.get_data(as_text=True)
+
+
+def test_to_invest_sync_updates_server_backed_list(client, list_files):
+    list_files["INVEST_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {
+                        "name": "Stocks",
+                        "items": [{"ticker": "AMD", "holding": False}],
+                    },
+                    {"name": "ETFs", "items": []},
+                    {"name": "Crypto", "items": []},
+                ]
+            }
+        )
+    )
+    list_files["HOLDINGS_AGGREGATE_FILE"].write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-10-29T00:24:23Z",
+                "holdings": [
+                    {
+                        "ticker": "AMD",
+                        "description": "Advanced Micro Devices",
+                        "asset_class": "Stocks",
+                    },
+                    {
+                        "ticker": "VTI",
+                        "description": "Total Stock Market ETF",
+                        "asset_class": "ETFs",
+                    },
+                    {
+                        "ticker": "VTI",
+                        "description": "Duplicate account position",
+                        "asset_class": "ETFs",
+                    },
+                    {"ticker": "BTC", "description": "Bitcoin", "asset_class": "Crypto"},
+                    {
+                        "ticker": "CASH",
+                        "description": "Cash sweep",
+                        "asset_class": "Core Account",
+                    },
+                ],
+            }
+        )
+    )
+
+    page = client.get("/to-invest")
+    html = page.get_data(as_text=True)
+    assert 'action="/to-invest/sync-holdings"' in html
+    assert "↻ Sync Holdings" in html
+    assert 'href="/api/invest-holdings"' not in html
+
+    csrf = _csrf(client, "/api/invest")
+    response = client.post(
+        "/to-invest/sync-holdings",
+        data={"csrf_token": csrf},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "1 marked as holding" in response.get_data(as_text=True)
+    assert "2 new tickers added" in response.get_data(as_text=True)
+
+    data = client.get("/api/invest").get_json()["data"]
+    by_category = {category["name"]: category["items"] for category in data["categories"]}
+    amd = next(item for item in by_category["Stocks"] if item["ticker"] == "AMD")
+    assert amd == {"ticker": "AMD", "name": "Advanced Micro Devices", "holding": True}
+    assert [item["ticker"] for item in by_category["ETFs"]] == ["VTI"]
+    assert [item["ticker"] for item in by_category["Crypto"]] == ["BTC"]
+    assert all(item["ticker"] != "CASH" for items in by_category.values() for item in items)
+
+
+def test_to_invest_sync_reports_missing_holdings_file_without_mutating_list(client, list_files):
+    csrf = _csrf(client, "/api/invest")
+    response = client.post(
+        "/to-invest/sync-holdings",
+        data={"csrf_token": csrf},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert "Holdings sync failed: Holdings file not found" in response.get_data(as_text=True)
+    assert not list_files["INVEST_LIST_FILE"].exists()
 
 
 def test_to_code_list_renders_grouped_repositories_and_accepts_backlog_items(client, list_files):
