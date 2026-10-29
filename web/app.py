@@ -17,6 +17,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -1722,6 +1723,82 @@ def api_ecu():
 def ecu_page():
     document, error = _ecu_status()
     return render_template("ecu.html", ecu=document, error=error)
+
+
+_SCHEDULE_UNIT_PROPS = ("Id", "ActiveState", "Result", "ExecMainStatus")
+
+
+def _timer_rows(scope: str, now: float) -> list[dict]:
+    """Every timer in one scope with the last outcome of the service it starts."""
+    flags = ["--user"] if scope == "user" else []
+    rc, out = _run("systemctl", *flags, "list-timers", "--all", "--output=json", timeout=20)
+    try:
+        timers = json.loads(out)
+    except ValueError:
+        return []
+    if rc != 0 or not isinstance(timers, list):
+        return []
+    units = sorted({t.get("activates") for t in timers if t.get("activates")})
+    props: dict[str, dict[str, str]] = {}
+    if units:
+        show = ["systemctl", *flags, "show", *units]
+        for name in _SCHEDULE_UNIT_PROPS:
+            show += ["-p", name]
+        _, shown = _run(*show, timeout=20)
+        for block in shown.split("\n\n"):
+            fields = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
+            if fields.get("Id"):
+                props[fields["Id"]] = fields
+    rows = []
+    for timer in timers:
+        unit = timer.get("activates") or ""
+        fields = props.get(unit, {})
+        next_us, last_us = timer.get("next") or 0, timer.get("last") or 0
+        state, result = fields.get("ActiveState", ""), fields.get("Result", "")
+        if state in {"active", "activating"}:
+            status = "running"
+        elif state == "failed" or result not in {"", "success"}:
+            status = "failed"
+        elif not last_us:
+            status = "never run"
+        else:
+            status = "ok"
+        rows.append(
+            {
+                "scope": scope,
+                "timer": timer.get("unit", ""),
+                "unit": unit,
+                "next_epoch": next_us / 1e6 if next_us else None,
+                "next_label": (
+                    datetime.datetime.fromtimestamp(next_us / 1e6).strftime("%a %b %d %H:%M")
+                    if next_us
+                    else ""
+                ),
+                "in_seconds": round(next_us / 1e6 - now) if next_us else None,
+                "last_epoch": last_us / 1e6 if last_us else None,
+                "ago_seconds": round(now - last_us / 1e6) if last_us else None,
+                "status": status,
+                "result": result,
+            }
+        )
+    return rows
+
+
+def _schedule() -> list[dict]:
+    """All timers, soonest first; timers with no next run go last."""
+    now = time.time()
+    rows = _timer_rows("user", now) + _timer_rows("system", now)
+    return sorted(rows, key=lambda r: (r["next_epoch"] is None, r["next_epoch"] or 0, r["timer"]))
+
+
+@app.get("/api/schedule")
+def api_schedule():
+    return jsonify({"generated_at": time.time(), "rows": _schedule()})
+
+
+@app.get("/schedule")
+def schedule_page():
+    return render_template("schedule.html", rows=_schedule())
 
 
 @app.get("/logs/<unit>")
@@ -6080,6 +6157,16 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
             "hostname": "",
             "access_mode": "shared-mtls",
             "icon": "✅",
+        }
+    )
+    groups["Clockwork"].append(
+        {
+            "name": "clockwork-schedule",
+            "display": "Schedule",
+            "url": "/schedule",
+            "hostname": "",
+            "access_mode": "shared-mtls",
+            "icon": "🗓️",
         }
     )
     groups["Clockwork"].append(

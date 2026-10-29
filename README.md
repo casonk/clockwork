@@ -439,6 +439,15 @@ default so importing or launching the web process cannot mutate tracked
 manifests; set `CLOCKWORK_WEB_AUTOGENERATE_CRON=1` only for an explicit,
 reviewed migration.
 
+### Schedule (`/schedule`)
+
+The Services menu and Home link **Schedule**: every systemd timer, user and
+system scope, soonest first, with when it fires next, how long that is from now,
+when it last ran, and the outcome of the service it starts (`ok`, `running`,
+`failed (exit-code)`, or `never run`). Each job links to its log. `/api/schedule`
+returns the same rows as JSON. It reads `systemctl list-timers` and `show`, so it
+needs no elevation. macOS (launchd) hosts are not covered yet.
+
 ### Machine load (`/ecu`)
 
 The Services menu links **Machine load**, which renders `ecu status --json`:
