@@ -3,6 +3,9 @@
 ## Unreleased
 
 - Link **Machine load** from the Home page's Clockwork group.
+- Add a **Schedule** page (`/schedule`, JSON at `/api/schedule`): all user and
+  system timers in one list ordered by next run, with time until it fires, the
+  last run and the last outcome of each job, plus a Home badge and nav link.
 - Add a **Machine load** page (`/ecu`, JSON at `/api/ecu`) showing the held lease
   (command, priority, mode, GPU size), GPU memory and processes, and each
   timer job's run/defer verdict from `ecu status --json`. It degrades to an
