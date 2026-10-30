@@ -211,6 +211,9 @@ def test_to_invest_sync_updates_server_backed_list(client, list_files):
     assert 'action="/to-invest/update-targets"' in html
     assert "Save all targets" in html
     assert "allocation-target-input" in html
+    sticky_header = html.split("</header>", 1)[0]
+    assert 'id="allocation-targets-form"' in sticky_header
+    assert "Save all targets" in sticky_header
 
 
 def test_to_invest_targets_are_saved_as_one_validated_batch(client, list_files):
