@@ -121,7 +121,7 @@ def test_to_invest_sync_updates_server_backed_list(client, list_files):
                 "categories": [
                     {
                         "name": "Stocks",
-                        "items": [{"ticker": "AMD", "holding": False}],
+                        "items": [{"ticker": "AMD", "holding": False, "target_pct": "25"}],
                     },
                     {"name": "ETFs", "items": []},
                     {"name": "Crypto", "items": []},
@@ -138,22 +138,31 @@ def test_to_invest_sync_updates_server_backed_list(client, list_files):
                         "ticker": "AMD",
                         "description": "Advanced Micro Devices",
                         "asset_class": "Stocks",
+                        "total_ending_value": 30,
                     },
                     {
                         "ticker": "VTI",
                         "description": "Total Stock Market ETF",
                         "asset_class": "ETFs",
+                        "total_ending_value": 40,
                     },
                     {
                         "ticker": "VTI",
                         "description": "Duplicate account position",
                         "asset_class": "ETFs",
+                        "total_ending_value": 10,
                     },
-                    {"ticker": "BTC", "description": "Bitcoin", "asset_class": "Crypto"},
+                    {
+                        "ticker": "BTC",
+                        "description": "Bitcoin",
+                        "asset_class": "Crypto",
+                        "total_ending_value": 10,
+                    },
                     {
                         "ticker": "CASH",
                         "description": "Cash sweep",
                         "asset_class": "Core Account",
+                        "total_ending_value": 10,
                     },
                 ],
             }
@@ -175,14 +184,93 @@ def test_to_invest_sync_updates_server_backed_list(client, list_files):
     assert response.status_code == 200
     assert "1 marked as holding" in response.get_data(as_text=True)
     assert "2 new tickers added" in response.get_data(as_text=True)
+    assert "3 allocations refreshed" in response.get_data(as_text=True)
 
     data = client.get("/api/invest").get_json()["data"]
     by_category = {category["name"]: category["items"] for category in data["categories"]}
     amd = next(item for item in by_category["Stocks"] if item["ticker"] == "AMD")
-    assert amd == {"ticker": "AMD", "name": "Advanced Micro Devices", "holding": True}
+    assert amd == {
+        "ticker": "AMD",
+        "name": "Advanced Micro Devices",
+        "holding": True,
+        "allocation_pct": "30",
+        "target_pct": "25",
+    }
     assert [item["ticker"] for item in by_category["ETFs"]] == ["VTI"]
+    assert by_category["ETFs"][0]["allocation_pct"] == "50"
+    assert by_category["Crypto"][0]["allocation_pct"] == "10"
     assert [item["ticker"] for item in by_category["Crypto"]] == ["BTC"]
     assert all(item["ticker"] != "CASH" for items in by_category.values() for item in items)
+
+    page = client.get("/to-invest")
+    html = page.get_data(as_text=True)
+    assert "Listed now <strong>90.00%</strong>" in html
+    assert "Targets assigned <strong>25.00%</strong>" in html
+    assert "Current percentages use the latest aggregate market value" in html
+    assert "30.000%" in html
+    assert 'action="/to-invest/update-target"' in html
+
+
+def test_to_invest_target_can_be_set_validated_and_cleared(client, list_files):
+    list_files["INVEST_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {
+                        "name": "Stocks",
+                        "items": [{"ticker": "AMD", "holding": True, "allocation_pct": "12.5"}],
+                    }
+                ]
+            }
+        )
+    )
+    csrf = _csrf(client, "/api/invest")
+
+    response = client.post(
+        "/to-invest/update-target",
+        data={
+            "csrf_token": csrf,
+            "category": "Stocks",
+            "item": "AMD",
+            "target_pct": "15.25",
+        },
+        follow_redirects=True,
+    )
+    html = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "Set AMD target to 15.25%." in html
+    assert "Target 15.250%" in html
+    assert "2.750% under" in html
+    data = client.get("/api/invest").get_json()["data"]
+    assert data["categories"][0]["items"][0]["target_pct"] == "15.25"
+
+    invalid = client.post(
+        "/to-invest/update-target",
+        data={
+            "csrf_token": csrf,
+            "category": "Stocks",
+            "item": "AMD",
+            "target_pct": "101",
+        },
+        follow_redirects=True,
+    )
+    assert "Target must be a number from 0 to 100." in invalid.get_data(as_text=True)
+    data = client.get("/api/invest").get_json()["data"]
+    assert data["categories"][0]["items"][0]["target_pct"] == "15.25"
+
+    cleared = client.post(
+        "/to-invest/update-target",
+        data={
+            "csrf_token": csrf,
+            "category": "Stocks",
+            "item": "AMD",
+            "target_pct": "",
+        },
+        follow_redirects=True,
+    )
+    assert "Cleared AMD target." in cleared.get_data(as_text=True)
+    data = client.get("/api/invest").get_json()["data"]
+    assert "target_pct" not in data["categories"][0]["items"][0]
 
 
 def test_to_invest_sync_reports_missing_holdings_file_without_mutating_list(client, list_files):

@@ -94,6 +94,20 @@ sudoers drop-in (`config/sudoers/clockwork-web`) and a wrapper script
 (`config/scripts/clockwork-system-install`) so only the specific commands needed
 run as root.
 
+### Investment allocation targets
+
+The `/to-invest` page can sync a private holdings aggregate selected with
+`CLOCKWORK_HOLDINGS_FILE`. Sync marks current positions, adds missing tickers,
+and calculates each visible position's percentage of the full aggregate market
+value. Core-account cash stays out of the ticker list but remains in the
+percentage denominator, so the page reports how much of the complete portfolio
+each position represents.
+
+Each ticker accepts an optional target percentage. The page shows current versus
+target allocation, the over/under difference, category totals, and the total
+percentage still unassigned. Targets are stored only in the ignored local To
+Invest data and are preserved when current allocations are refreshed.
+
 ### Media library
 
 `web/media_library.py` keeps the watch folder (`CLOCKWORK_WATCH_DIR`) in
