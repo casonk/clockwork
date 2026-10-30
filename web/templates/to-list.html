@@ -157,6 +157,11 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button class="action-btn" type="submit" title="Update this list from current portfolio holdings">↻ Sync Holdings</button>
       </form>
+      <form class="allocation-bulk-form" id="allocation-targets-form" method="post" action="/to-invest/update-targets">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="targets_json" id="allocation-targets-json">
+        <button class="action-btn allocation-bulk-save" id="allocation-targets-save" type="submit" disabled>Save all targets</button>
+      </form>
     {% endif %}
     <a class="action-btn" href="/{{ cfg.page }}/history" title="View JSON history">📋 History</a>
     <form method="post" action="/{{ cfg.page }}/reset">
@@ -207,11 +212,6 @@
     {% else %}
       <span class="allocation-stat">Over target total <strong>{{ "%.2f"|format(-invest_summary.target_remaining) }}%</strong></span>
     {% endif %}
-    <form class="allocation-bulk-form" id="allocation-targets-form" method="post" action="/to-invest/update-targets">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input type="hidden" name="targets_json" id="allocation-targets-json">
-      <button class="action-btn allocation-bulk-save" id="allocation-targets-save" type="submit" disabled>Save all targets</button>
-    </form>
     <span class="allocation-note">Current percentages use the latest aggregate market value, including cash in the denominator. Targets are local and remain unchanged by sync.</span>
   </div>
   {% endif %}
