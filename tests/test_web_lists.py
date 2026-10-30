@@ -208,17 +208,22 @@ def test_to_invest_sync_updates_server_backed_list(client, list_files):
     assert "Targets assigned <strong>25.00%</strong>" in html
     assert "Current percentages use the latest aggregate market value" in html
     assert "30.000%" in html
-    assert 'action="/to-invest/update-target"' in html
+    assert 'action="/to-invest/update-targets"' in html
+    assert "Save all targets" in html
+    assert "allocation-target-input" in html
 
 
-def test_to_invest_target_can_be_set_validated_and_cleared(client, list_files):
+def test_to_invest_targets_are_saved_as_one_validated_batch(client, list_files):
     list_files["INVEST_LIST_FILE"].write_text(
         json.dumps(
             {
                 "categories": [
                     {
                         "name": "Stocks",
-                        "items": [{"ticker": "AMD", "holding": True, "allocation_pct": "12.5"}],
+                        "items": [
+                            {"ticker": "AMD", "holding": True, "allocation_pct": "12.5"},
+                            {"ticker": "NVDA", "holding": True, "allocation_pct": "8"},
+                        ],
                     }
                 ]
             }
@@ -227,50 +232,79 @@ def test_to_invest_target_can_be_set_validated_and_cleared(client, list_files):
     csrf = _csrf(client, "/api/invest")
 
     response = client.post(
-        "/to-invest/update-target",
+        "/to-invest/update-targets",
         data={
             "csrf_token": csrf,
-            "category": "Stocks",
-            "item": "AMD",
-            "target_pct": "15.25",
+            "targets_json": json.dumps(
+                [
+                    {"category": "Stocks", "ticker": "AMD", "target_pct": "15.25"},
+                    {"category": "Stocks", "ticker": "NVDA", "target_pct": "10"},
+                ]
+            ),
         },
         follow_redirects=True,
     )
     html = response.get_data(as_text=True)
     assert response.status_code == 200
-    assert "Set AMD target to 15.25%." in html
+    assert "Saved 2 target changes." in html
     assert "Target 15.250%" in html
     assert "2.750% under" in html
     data = client.get("/api/invest").get_json()["data"]
     assert data["categories"][0]["items"][0]["target_pct"] == "15.25"
+    assert data["categories"][0]["items"][1]["target_pct"] == "10"
 
     invalid = client.post(
-        "/to-invest/update-target",
+        "/to-invest/update-targets",
         data={
             "csrf_token": csrf,
-            "category": "Stocks",
-            "item": "AMD",
-            "target_pct": "101",
+            "targets_json": json.dumps(
+                [
+                    {"category": "Stocks", "ticker": "AMD", "target_pct": "20"},
+                    {"category": "Stocks", "ticker": "NVDA", "target_pct": "101"},
+                ]
+            ),
         },
         follow_redirects=True,
     )
     assert "Target must be a number from 0 to 100." in invalid.get_data(as_text=True)
     data = client.get("/api/invest").get_json()["data"]
     assert data["categories"][0]["items"][0]["target_pct"] == "15.25"
+    assert data["categories"][0]["items"][1]["target_pct"] == "10"
 
-    cleared = client.post(
-        "/to-invest/update-target",
+    missing = client.post(
+        "/to-invest/update-targets",
         data={
             "csrf_token": csrf,
-            "category": "Stocks",
-            "item": "AMD",
-            "target_pct": "",
+            "targets_json": json.dumps(
+                [
+                    {"category": "Stocks", "ticker": "AMD", "target_pct": "20"},
+                    {"category": "Stocks", "ticker": "MISSING", "target_pct": "5"},
+                ]
+            ),
         },
         follow_redirects=True,
     )
-    assert "Cleared AMD target." in cleared.get_data(as_text=True)
+    assert "No targets were saved." in missing.get_data(as_text=True)
+    data = client.get("/api/invest").get_json()["data"]
+    assert data["categories"][0]["items"][0]["target_pct"] == "15.25"
+
+    cleared = client.post(
+        "/to-invest/update-targets",
+        data={
+            "csrf_token": csrf,
+            "targets_json": json.dumps(
+                [
+                    {"category": "Stocks", "ticker": "AMD", "target_pct": ""},
+                    {"category": "Stocks", "ticker": "NVDA", "target_pct": "10"},
+                ]
+            ),
+        },
+        follow_redirects=True,
+    )
+    assert "Saved 1 target change." in cleared.get_data(as_text=True)
     data = client.get("/api/invest").get_json()["data"]
     assert "target_pct" not in data["categories"][0]["items"][0]
+    assert data["categories"][0]["items"][1]["target_pct"] == "10"
 
 
 def test_to_invest_sync_reports_missing_holdings_file_without_mutating_list(client, list_files):

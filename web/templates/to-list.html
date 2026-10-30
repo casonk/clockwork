@@ -56,11 +56,12 @@
     .allocation-meta.over { color:var(--yellow); }
     .allocation-meta.under { color:var(--accent); }
     .allocation-meta.on-target { color:var(--green); }
-    .allocation-target-form { display:flex; align-items:center; gap:4px; flex-shrink:0; }
-    .allocation-target-form input { width:72px; min-width:72px; padding:5px 6px; background:var(--bg); border:1px solid var(--border); border-radius:5px; color:var(--text); text-align:right; }
-    .allocation-target-form input:focus { border-color:var(--accent); outline:none; }
-    .allocation-save { width:26px; height:26px; border-radius:5px; border:1px solid var(--accent-dim); background:transparent; color:var(--accent); cursor:pointer; }
-    .allocation-save:hover { background:var(--accent-dim); }
+    .allocation-target-control { display:flex; align-items:center; flex-shrink:0; }
+    .allocation-target-control input { width:82px; min-width:82px; padding:5px 6px; background:var(--bg); border:1px solid var(--border); border-radius:5px; color:var(--text); text-align:right; }
+    .allocation-target-control input:focus { border-color:var(--accent); outline:none; }
+    .allocation-target-control input.dirty { border-color:var(--yellow); }
+    .allocation-bulk-form { margin-left:auto; }
+    .allocation-bulk-save:disabled { opacity:.45; cursor:not-allowed; }
     .allocation-summary { display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding:11px 14px; border:1px solid var(--border); border-radius:8px; background:var(--surface); margin:0 0 14px; }
     .allocation-stat { color:var(--muted); font-size:12px; }
     .allocation-stat strong { color:var(--text); font-size:14px; }
@@ -124,7 +125,8 @@
       .add-item-row, .add-category { flex-direction:column; }
       .add-btn { width:100%; }
       .item { flex-wrap:wrap; }
-      .allocation-target-form { margin-left:34px; }
+      .allocation-target-control { margin-left:34px; }
+      .allocation-bulk-form { margin-left:0; }
     }
   </style>
   <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
@@ -205,6 +207,11 @@
     {% else %}
       <span class="allocation-stat">Over target total <strong>{{ "%.2f"|format(-invest_summary.target_remaining) }}%</strong></span>
     {% endif %}
+    <form class="allocation-bulk-form" id="allocation-targets-form" method="post" action="/to-invest/update-targets">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="targets_json" id="allocation-targets-json">
+      <button class="action-btn allocation-bulk-save" id="allocation-targets-save" type="submit" disabled>Save all targets</button>
+    </form>
     <span class="allocation-note">Current percentages use the latest aggregate market value, including cash in the denominator. Targets are local and remain unchanged by sync.</span>
   </div>
   {% endif %}
@@ -261,13 +268,9 @@
               {% endif %}
             </div>
             {% if cfg.key == "invest" %}
-              <form class="allocation-target-form" method="post" action="/to-invest/update-target">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <input type="hidden" name="category" value="{{ cat.name }}">
-                <input type="hidden" name="item" value="{{ value }}">
-                <input type="number" name="target_pct" min="0" max="100" step="0.01" value="{{ item.target_pct or '' }}" placeholder="Target %" aria-label="Target percentage for {{ value }}">
-                <button class="allocation-save" type="submit" title="Save target for {{ value }}">✓</button>
-              </form>
+              <div class="allocation-target-control">
+                <input class="allocation-target-input" type="number" min="0" max="100" step="0.01" value="{{ item.target_pct or '' }}" placeholder="Target %" aria-label="Target percentage for {{ value }}" data-category="{{ cat.name }}" data-ticker="{{ value }}">
+              </div>
             {% endif %}
             {% if find_torrent %}
               <button class="find-btn" type="button" title="Find torrent"
@@ -332,6 +335,41 @@
   }
 })();
 </script>
+{% if cfg.key == "invest" %}
+<script>
+(() => {
+  const form = document.getElementById('allocation-targets-form');
+  const payload = document.getElementById('allocation-targets-json');
+  const save = document.getElementById('allocation-targets-save');
+  const inputs = [...document.querySelectorAll('.allocation-target-input')];
+  let dirty = false;
+
+  for (const input of inputs) {
+    input.addEventListener('input', () => {
+      dirty = true;
+      input.classList.add('dirty');
+      save.disabled = false;
+      save.textContent = 'Save all targets *';
+    });
+  }
+
+  form.addEventListener('submit', () => {
+    payload.value = JSON.stringify(inputs.map(input => ({
+      category: input.dataset.category,
+      ticker: input.dataset.ticker,
+      target_pct: input.value,
+    })));
+    dirty = false;
+  });
+
+  window.addEventListener('beforeunload', event => {
+    if (!dirty) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
+})();
+</script>
+{% endif %}
 {% if cfg.key == "watch" %}
 <script>
 (() => {
