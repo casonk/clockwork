@@ -106,7 +106,10 @@ each position represents.
 Each ticker accepts an optional target percentage. The page shows current versus
 target allocation, the over/under difference, category totals, and the total
 percentage still unassigned. Targets are stored only in the ignored local To
-Invest data and are preserved when current allocations are refreshed.
+Invest data and are preserved when current allocations are refreshed. Edit any
+number of target fields, then use **Save all targets**; Clockwork validates the
+complete batch before writing it, so one invalid or stale row cannot leave a
+partially saved plan.
 
 ### Media library
 
