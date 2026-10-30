@@ -19,6 +19,10 @@ should change how future sessions work in this repo.
   preserve targets; calculate percentages against the complete aggregate value
   even when cash or other positions are intentionally omitted from the visible
   ticker list, and state that denominator explicitly in the UI.
+- When a page invites editing many related values before committing them, do
+  not render each field as an independent reload-on-submit form. Provide one
+  visible batch action, validate and resolve every row before mutating any of
+  them, and warn about navigation while unsaved edits remain.
 - When a public-code privacy refactor replaces a private checkout path with a
   neutral placeholder and an environment override, migrate every ignored
   host manifest and reinstall/restart the live service in the same rollout.
