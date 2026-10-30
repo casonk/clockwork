@@ -22,7 +22,8 @@ should change how future sessions work in this repo.
 - When a page invites editing many related values before committing them, do
   not render each field as an independent reload-on-submit form. Provide one
   visible batch action, validate and resolve every row before mutating any of
-  them, and warn about navigation while unsaved edits remain.
+  them, keep that action in the sticky header when the edit surface is long,
+  and warn about navigation while unsaved edits remain.
 - When a public-code privacy refactor replaces a private checkout path with a
   neutral placeholder and an environment override, migrate every ignored
   host manifest and reinstall/restart the live service in the same rollout.
