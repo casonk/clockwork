@@ -4780,38 +4780,71 @@ def sync_invest_holdings():
     return redirect(url_for("to_invest"))
 
 
-@app.post("/to-invest/update-target")
-def update_invest_target():
-    """Set or clear one ticker's locally stored target portfolio percentage."""
+@app.post("/to-invest/update-targets")
+def update_invest_targets():
+    """Validate and save every target from the page as one transaction."""
 
     cfg = _simple_list_config("invest")
-    category = request.form.get("category", "").strip()
-    ticker = request.form.get("item", "").strip().upper()
     try:
-        target = _clean_invest_target(request.form.get("target_pct", ""))
-    except ValueError as exc:
-        flash(str(exc).capitalize() + ".", "error")
-        return redirect(url_for("to_invest") + f"#{_slug(category)}")
-
-    data = load_simple_list("invest")
-    cat = _find_simple_category(data, category)
-    item = _find_simple_item(cat, ticker, cfg) if cat else None
-    if item is None:
-        flash(f'"{ticker}" not found in {category or "that category"}.', "error")
+        payload = json.loads(request.form.get("targets_json", ""))
+    except (TypeError, json.JSONDecodeError):
+        payload = None
+    if not isinstance(payload, list) or len(payload) > 5000:
+        flash("Target batch is invalid.", "error")
         return redirect(url_for("to_invest"))
 
-    if target:
-        item["target_pct"] = target
-        detail = f"{target}%"
-        message = f"Set {ticker} target to {target}%."
+    updates: list[tuple[str, str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    try:
+        for raw in payload:
+            if not isinstance(raw, dict):
+                raise ValueError("target batch contains an invalid row")
+            category = str(raw.get("category") or "").strip()
+            ticker = str(raw.get("ticker") or "").strip().upper()
+            if not category or not ticker:
+                raise ValueError("target batch contains a row without a category or ticker")
+            key = (category.casefold(), ticker)
+            if key in seen:
+                raise ValueError(f'target batch contains duplicate ticker "{ticker}"')
+            seen.add(key)
+            updates.append((category, ticker, _clean_invest_target(raw.get("target_pct", ""))))
+    except ValueError as exc:
+        flash(str(exc).capitalize() + ".", "error")
+        return redirect(url_for("to_invest"))
+
+    data = load_simple_list("invest")
+    resolved: list[tuple[dict, str, str, str]] = []
+    for category, ticker, target in updates:
+        cat = _find_simple_category(data, category)
+        item = _find_simple_item(cat, ticker, cfg) if cat else None
+        if item is None:
+            flash(f'"{ticker}" not found in {category}. No targets were saved.', "error")
+            return redirect(url_for("to_invest"))
+        resolved.append((item, category, ticker, target))
+
+    changed = 0
+    for item, _category, _ticker, target in resolved:
+        current = str(item.get("target_pct") or "")
+        if target:
+            if current != target:
+                item["target_pct"] = target
+                changed += 1
+        elif "target_pct" in item:
+            item.pop("target_pct", None)
+            changed += 1
+
+    if changed:
+        save_simple_list("invest", data)
+    _log_event(
+        cfg["history_file"],
+        "targets",
+        detail=f"changed={changed}, submitted={len(resolved)}",
+    )
+    if changed:
+        flash(f"Saved {changed} target change{'s' if changed != 1 else ''}.", "success")
     else:
-        item.pop("target_pct", None)
-        detail = "cleared"
-        message = f"Cleared {ticker} target."
-    save_simple_list("invest", data)
-    _log_event(cfg["history_file"], "target", item=ticker, category=category, detail=detail)
-    flash(message, "success")
-    return redirect(url_for("to_invest") + f"#{_slug(category)}")
+        flash("Targets are already up to date.", "success")
+    return redirect(url_for("to_invest"))
 
 
 @app.post("/<page>/restore")
