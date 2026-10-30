@@ -6,6 +6,7 @@ import contextlib
 import datetime
 import importlib
 import json
+import math
 import os
 import platform
 import plistlib
@@ -3923,7 +3924,7 @@ SIMPLE_LIST_CONFIGS = {
         "item_placeholder": "AAPL or AAPL Apple Inc",
         "category_placeholder": "New category...",
         "name_label": "Category",
-        "extras": ["name"],
+        "extras": ["name", "allocation_pct", "target_pct"],
         "ollama": True,
         "holdings_sync": True,
     },
@@ -3988,6 +3989,27 @@ def _clean_code_flag(value) -> str:
     if isinstance(value, str):
         return "yes" if value.strip().lower() in ("1", "true", "yes", "on") else ""
     return "yes" if value else ""
+
+
+def _format_invest_percentage(value: float) -> str:
+    """Return a compact percentage string with enough precision for small positions."""
+
+    return f"{value:.4f}".rstrip("0").rstrip(".") or "0"
+
+
+def _clean_invest_target(value) -> str:
+    """Validate and normalize an optional 0-100 investment target percentage."""
+
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        number = float(text)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("target must be a number from 0 to 100") from exc
+    if not math.isfinite(number) or number < 0 or number > 100:
+        raise ValueError("target must be a number from 0 to 100")
+    return _format_invest_percentage(number)
 
 
 def _apply_code_triage(item: dict, *, priority=None, **flags) -> None:
@@ -4088,6 +4110,22 @@ def _normalize_simple_list_data(data: dict, cfg: dict) -> dict:
                     cleaned = _clean_code_priority(item.get(field))
                 elif field in CODE_FLAGS:
                     cleaned = _clean_code_flag(item.get(field))
+                elif field == "target_pct":
+                    try:
+                        cleaned = _clean_invest_target(item.get(field))
+                    except ValueError:
+                        cleaned = ""
+                elif field == "allocation_pct":
+                    try:
+                        allocation = float(item.get(field))
+                    except (TypeError, ValueError):
+                        cleaned = ""
+                    else:
+                        cleaned = (
+                            _format_invest_percentage(allocation)
+                            if math.isfinite(allocation)
+                            else ""
+                        )
                 else:
                     cleaned = str(item.get(field) or "").strip()
                 if cleaned:
@@ -4226,8 +4264,21 @@ def _load_invest_holdings_payload() -> dict:
     return payload
 
 
-def _merge_invest_holdings(data: dict, holdings: list) -> tuple[int, int, int, int]:
-    """Mark current tickers as held and add new ones without deleting watchlist items."""
+def _invest_market_value(holding: dict) -> float | None:
+    try:
+        value = float(holding.get("total_ending_value"))
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def _merge_invest_holdings(data: dict, holdings: list) -> tuple[int, int, int, int, int]:
+    """Mark current tickers held, add new ones, and refresh allocation percentages.
+
+    The denominator includes every valued aggregate position, including Core
+    Account cash that is intentionally omitted from the visible investment
+    list. This keeps each displayed percentage tied to the full portfolio.
+    """
 
     known: dict[str, dict] = {}
     for category in data["categories"]:
@@ -4235,6 +4286,39 @@ def _merge_invest_holdings(data: dict, holdings: list) -> tuple[int, int, int, i
             ticker = str(item.get("ticker") or "").upper().strip()
             if ticker and ticker not in known:
                 known[ticker] = item
+
+    portfolio_value = 0.0
+    ticker_values: dict[str, float] = {}
+    for holding in holdings:
+        if not isinstance(holding, dict):
+            continue
+        value = _invest_market_value(holding)
+        if value is None:
+            continue
+        portfolio_value += value
+        ticker = str(holding.get("ticker") or "").upper().strip()
+        if ticker:
+            ticker_values[ticker] = ticker_values.get(ticker, 0.0) + value
+    allocations = (
+        {
+            ticker: _format_invest_percentage(value / portfolio_value * 100)
+            for ticker, value in ticker_values.items()
+        }
+        if portfolio_value > 0
+        else {}
+    )
+
+    allocation_changes = 0
+    for ticker, item in known.items():
+        desired = allocations.get(ticker, "")
+        current = str(item.get("allocation_pct") or "")
+        if desired:
+            if current != desired:
+                item["allocation_pct"] = desired
+                allocation_changes += 1
+        elif "allocation_pct" in item:
+            item.pop("allocation_pct", None)
+            allocation_changes += 1
 
     marked = added = named = skipped = 0
     for holding in holdings:
@@ -4266,11 +4350,47 @@ def _merge_invest_holdings(data: dict, holdings: list) -> tuple[int, int, int, i
         item = {"ticker": ticker, "holding": True}
         if description:
             item["name"] = description
+        if ticker in allocations:
+            item["allocation_pct"] = allocations[ticker]
+            allocation_changes += 1
         category["items"].append(item)
         known[ticker] = item
         added += 1
 
-    return marked, added, named, skipped
+    return marked, added, named, skipped, allocation_changes
+
+
+def _invest_allocation_summary(data: dict) -> tuple[dict, dict[str, dict]]:
+    """Build page and category totals without persisting derived display state."""
+
+    current_total = target_total = 0.0
+    category_totals: dict[str, dict] = {}
+    has_current = False
+    for category in data["categories"]:
+        category_current = category_target = 0.0
+        for item in category["items"]:
+            if "allocation_pct" in item:
+                with contextlib.suppress(TypeError, ValueError):
+                    category_current += float(item["allocation_pct"])
+                    has_current = True
+            if "target_pct" in item:
+                with contextlib.suppress(TypeError, ValueError):
+                    category_target += float(item["target_pct"])
+        current_total += category_current
+        target_total += category_target
+        category_totals[category["name"]] = {
+            "current": category_current,
+            "target": category_target,
+        }
+    return (
+        {
+            "has_current": has_current,
+            "current": current_total,
+            "target": target_total,
+            "target_remaining": 100 - target_total,
+        },
+        category_totals,
+    )
 
 
 def load_todo() -> dict:
@@ -4357,6 +4477,9 @@ def _render_simple_list(key: str):
         1 for c in data["categories"] for item in c["items"] if item.get(cfg["status"])
     )
     backup_exists, backup_mtimes = _backup_slot_info(cfg["file"])
+    invest_summary, invest_category_totals = (
+        _invest_allocation_summary(data) if key == "invest" else ({}, {})
+    )
     return render_template(
         "to-list.html",
         cfg=cfg,
@@ -4366,6 +4489,8 @@ def _render_simple_list(key: str):
         todo_count=total - done_count,
         backup_slots_exist=backup_exists,
         backup_slots_mtime=backup_mtimes,
+        invest_summary=invest_summary,
+        invest_category_totals=invest_category_totals,
         ollama_available=_ollama_available(),
         watch_available=WATCH_DIR.exists(),
     )
@@ -4628,13 +4753,16 @@ def sync_invest_holdings():
         return redirect(url_for("to_invest"))
 
     data = load_simple_list("invest")
-    marked, added, named, skipped = _merge_invest_holdings(data, payload["holdings"])
-    if marked or added or named:
+    marked, added, named, skipped, allocations = _merge_invest_holdings(data, payload["holdings"])
+    if marked or added or named or allocations:
         save_simple_list("invest", data)
     _log_event(
         cfg["history_file"],
         "sync-holdings",
-        detail=f"marked={marked}, added={added}, named={named}, skipped={skipped}",
+        detail=(
+            f"marked={marked}, added={added}, named={named}, skipped={skipped}, "
+            f"allocations={allocations}"
+        ),
     )
 
     changes = []
@@ -4644,10 +4772,46 @@ def sync_invest_holdings():
         changes.append(f"{added} new tickers added")
     if named:
         changes.append(f"{named} names filled")
+    if allocations:
+        changes.append(f"{allocations} allocations refreshed")
     if skipped:
         changes.append(f"{skipped} cash or invalid positions skipped")
     flash(f"Synced: {', '.join(changes)}." if changes else "Holdings are already up to date.")
     return redirect(url_for("to_invest"))
+
+
+@app.post("/to-invest/update-target")
+def update_invest_target():
+    """Set or clear one ticker's locally stored target portfolio percentage."""
+
+    cfg = _simple_list_config("invest")
+    category = request.form.get("category", "").strip()
+    ticker = request.form.get("item", "").strip().upper()
+    try:
+        target = _clean_invest_target(request.form.get("target_pct", ""))
+    except ValueError as exc:
+        flash(str(exc).capitalize() + ".", "error")
+        return redirect(url_for("to_invest") + f"#{_slug(category)}")
+
+    data = load_simple_list("invest")
+    cat = _find_simple_category(data, category)
+    item = _find_simple_item(cat, ticker, cfg) if cat else None
+    if item is None:
+        flash(f'"{ticker}" not found in {category or "that category"}.', "error")
+        return redirect(url_for("to_invest"))
+
+    if target:
+        item["target_pct"] = target
+        detail = f"{target}%"
+        message = f"Set {ticker} target to {target}%."
+    else:
+        item.pop("target_pct", None)
+        detail = "cleared"
+        message = f"Cleared {ticker} target."
+    save_simple_list("invest", data)
+    _log_event(cfg["history_file"], "target", item=ticker, category=category, detail=detail)
+    flash(message, "success")
+    return redirect(url_for("to_invest") + f"#{_slug(category)}")
 
 
 @app.post("/<page>/restore")

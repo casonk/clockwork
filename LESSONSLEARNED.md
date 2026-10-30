@@ -14,6 +14,11 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
+- Keep measured portfolio allocation and user-authored allocation targets as
+  separate state. Holdings sync may refresh current percentages, but it must
+  preserve targets; calculate percentages against the complete aggregate value
+  even when cash or other positions are intentionally omitted from the visible
+  ticker list, and state that denominator explicitly in the UI.
 - When a public-code privacy refactor replaces a private checkout path with a
   neutral placeholder and an environment override, migrate every ignored
   host manifest and reinstall/restart the live service in the same rollout.
