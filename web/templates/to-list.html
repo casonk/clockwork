@@ -41,6 +41,7 @@
     .category-name { font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:.7px; color:var(--muted); flex:1; }
     .category-count { font-size:11px; padding:2px 8px; border-radius:99px; background:var(--surface); color:var(--muted); border:1px solid var(--border); white-space:nowrap; }
     .category-count .active { color:var(--accent); font-weight:700; }
+    .category-allocation { color:var(--muted); font-size:11px; white-space:nowrap; }
     .items { padding:6px 0; }
     .item { display:flex; align-items:center; gap:8px; padding:5px 14px; min-height:44px; border-bottom:1px solid rgba(46,50,80,.4); }
     .item:last-child { border-bottom:none; }
@@ -51,6 +52,19 @@
     .item-title { font-weight:600; overflow-wrap:anywhere; }
     .item-title.done { color:var(--muted); text-decoration:line-through; }
     .item-meta { color:var(--muted); font-size:11px; }
+    .allocation-meta { color:var(--muted); font-size:11px; white-space:nowrap; }
+    .allocation-meta.over { color:var(--yellow); }
+    .allocation-meta.under { color:var(--accent); }
+    .allocation-meta.on-target { color:var(--green); }
+    .allocation-target-form { display:flex; align-items:center; gap:4px; flex-shrink:0; }
+    .allocation-target-form input { width:72px; min-width:72px; padding:5px 6px; background:var(--bg); border:1px solid var(--border); border-radius:5px; color:var(--text); text-align:right; }
+    .allocation-target-form input:focus { border-color:var(--accent); outline:none; }
+    .allocation-save { width:26px; height:26px; border-radius:5px; border:1px solid var(--accent-dim); background:transparent; color:var(--accent); cursor:pointer; }
+    .allocation-save:hover { background:var(--accent-dim); }
+    .allocation-summary { display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding:11px 14px; border:1px solid var(--border); border-radius:8px; background:var(--surface); margin:0 0 14px; }
+    .allocation-stat { color:var(--muted); font-size:12px; }
+    .allocation-stat strong { color:var(--text); font-size:14px; }
+    .allocation-note { flex-basis:100%; color:var(--muted); font-size:11px; }
     .delete-btn, .cat-delete-btn { border:1px solid transparent; background:transparent; color:var(--muted); cursor:pointer; border-radius:5px; width:24px; height:24px; }
     .delete-btn:hover, .cat-delete-btn:hover { color:var(--red); border-color:var(--red-dim); background:var(--red-dim); }
     .empty-item { color:var(--muted); font-size:12px; font-style:italic; }
@@ -109,6 +123,8 @@
       .actions { justify-content:flex-start; }
       .add-item-row, .add-category { flex-direction:column; }
       .add-btn { width:100%; }
+      .item { flex-wrap:wrap; }
+      .allocation-target-form { margin-left:34px; }
     }
   </style>
   <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
@@ -176,12 +192,33 @@
     {% endfor %}
   </div>
 
+  {% if cfg.key == "invest" %}
+  <div class="allocation-summary">
+    {% if invest_summary.has_current %}
+      <span class="allocation-stat">Listed now <strong>{{ "%.2f"|format(invest_summary.current) }}%</strong></span>
+    {% else %}
+      <span class="allocation-stat"><strong>Sync holdings</strong> to calculate current allocations.</span>
+    {% endif %}
+    <span class="allocation-stat">Targets assigned <strong>{{ "%.2f"|format(invest_summary.target) }}%</strong></span>
+    {% if invest_summary.target_remaining >= 0 %}
+      <span class="allocation-stat">Unassigned <strong>{{ "%.2f"|format(invest_summary.target_remaining) }}%</strong></span>
+    {% else %}
+      <span class="allocation-stat">Over target total <strong>{{ "%.2f"|format(-invest_summary.target_remaining) }}%</strong></span>
+    {% endif %}
+    <span class="allocation-note">Current percentages use the latest aggregate market value, including cash in the denominator. Targets are local and remain unchanged by sync.</span>
+  </div>
+  {% endif %}
+
   {% for cat in data.categories %}
     {% set active = cat["items"] | rejectattr(cfg.status) | list %}
     {% set completed = cat["items"] | selectattr(cfg.status) | list %}
     <section class="category" id="{{ cat.name|lower|replace(' ', '-') }}">
       <div class="category-header">
         <span class="category-name">{{ cat.name }}</span>
+        {% if cfg.key == "invest" %}
+          {% set cat_allocation = invest_category_totals[cat.name] %}
+          <span class="category-allocation">{{ "%.2f"|format(cat_allocation.current) }}% now · {{ "%.2f"|format(cat_allocation.target) }}% target</span>
+        {% endif %}
         <span class="category-count">
           {% if active|length %}<span class="active">{{ active|length }} {{ cfg.todo_label }}</span>{% else %}all {{ cfg.done_label }}{% endif %}
         </span>
@@ -211,7 +248,27 @@
               <span class="item-title {% if item[cfg.status] %}done{% endif %}">{{ value }}</span>
               {% if item.year %}<span class="item-meta">{{ item.year }}</span>{% endif %}
               {% if item.name %}<span class="item-meta">{{ item.name }}</span>{% endif %}
+              {% if cfg.key == "invest" %}
+                {% set current_pct = item.allocation_pct|default("0")|float %}
+                {% if item.allocation_pct is defined %}<span class="allocation-meta">Now {{ "%.3f"|format(current_pct) }}%</span>{% endif %}
+                {% if item.target_pct is defined %}
+                  {% set target_pct = item.target_pct|float %}
+                  {% set delta = current_pct - target_pct %}
+                  <span class="allocation-meta {% if delta > 0.005 %}over{% elif delta < -0.005 %}under{% else %}on-target{% endif %}">
+                    Target {{ "%.3f"|format(target_pct) }}% · {% if delta > 0.005 %}+{{ "%.3f"|format(delta) }}% over{% elif delta < -0.005 %}{{ "%.3f"|format(-delta) }}% under{% else %}on target{% endif %}
+                  </span>
+                {% endif %}
+              {% endif %}
             </div>
+            {% if cfg.key == "invest" %}
+              <form class="allocation-target-form" method="post" action="/to-invest/update-target">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="category" value="{{ cat.name }}">
+                <input type="hidden" name="item" value="{{ value }}">
+                <input type="number" name="target_pct" min="0" max="100" step="0.01" value="{{ item.target_pct or '' }}" placeholder="Target %" aria-label="Target percentage for {{ value }}">
+                <button class="allocation-save" type="submit" title="Save target for {{ value }}">✓</button>
+              </form>
+            {% endif %}
             {% if find_torrent %}
               <button class="find-btn" type="button" title="Find torrent"
                       data-query="{{ value }}{% if item.year %} {{ item.year }}{% endif %}"
