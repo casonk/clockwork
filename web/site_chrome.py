@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -102,14 +103,48 @@ def _write_if_changed(path: Path, data: bytes) -> bool:
     return True
 
 
-def publish(nav: dict, directory: Path = DEFAULT_CHROME_DIR) -> bool:
-    """Write nav.json, chrome.js, theme.css and theme.js into the shared directory; False when it is absent."""
+def store_shared_dir(env: Mapping[str, str] | None = None) -> Path:
+    """``_shared`` in traction-control's portfolio site store, where every enrolled repository's
+    pages look for the navigation when no Caddy answers (traction-control docs/portfolio-sites.md).
+    """
+    env = os.environ if env is None else env
+    if env.get("PORTFOLIO_STORE"):
+        return Path(env["PORTFOLIO_STORE"]) / "_shared"
+    base = env.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "traction-control" / "sites" / "_shared"
+
+
+def chrome_dirs() -> list[Path]:
+    """Existing directories to publish into: the Caddy-served chrome directory and the store."""
+    return [d for d in (DEFAULT_CHROME_DIR, store_shared_dir()) if d.is_dir()]
+
+
+def publish(nav: dict, directory: Path = DEFAULT_CHROME_DIR, *, files: bool = True) -> bool:
+    """Write nav.json (and, with ``files``, chrome.js, theme.css and theme.js) into a directory;
+    False when it is absent. The store's theme files are traction-control's to publish."""
     if not directory.is_dir():
         return False
     changed = _write_if_changed(directory / "nav.json", (json.dumps(nav, indent=2) + "\n").encode())
-    for name, source in PUBLISHED_FILES.items():
-        changed |= _write_if_changed(directory / name, source.read_bytes())
+    if files:
+        for name, source in PUBLISHED_FILES.items():
+            changed |= _write_if_changed(directory / name, source.read_bytes())
     return changed
 
 
-__all__ = ["CHROME_SCRIPT", "DEFAULT_CHROME_DIR", "build_nav", "publish"]
+def publish_everywhere(nav: dict) -> bool:
+    """Publish to every existing target; only the Caddy directory gets the script and theme files."""
+    changed = False
+    for directory in chrome_dirs():
+        changed |= publish(nav, directory, files=directory == DEFAULT_CHROME_DIR)
+    return changed
+
+
+__all__ = [
+    "CHROME_SCRIPT",
+    "DEFAULT_CHROME_DIR",
+    "build_nav",
+    "chrome_dirs",
+    "publish",
+    "publish_everywhere",
+    "store_shared_dir",
+]
