@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Refresh the vendored top bar script: it now isolates itself from host-page CSS.
+- Refresh the vendored top bar script: it now isolates itself from host-page CSS and sits outside the page body.
 
 - Publish the top bar for other services: Clockwork writes `nav.json` (Home, Clockwork,
   Lists, Media, Services from the wiring-harness registry) and `chrome.js` into the shared
