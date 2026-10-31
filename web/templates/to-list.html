@@ -300,6 +300,7 @@
             <div class="item-body">
               <span class="item-title {% if item[cfg.status] %}done{% endif %}">{{ value }}</span>
               {% if item.year %}<span class="item-meta">{{ item.year }}</span>{% endif %}
+              {% if watch_badges and watch_badges.get(value) %}<span class="item-meta watch-badge" title="Logged by the library viewer">{{ watch_badges[value] }}</span>{% endif %}
               {% if item.name %}<span class="item-meta">{{ item.name }}</span>{% endif %}
               {% if cfg.key == "invest" %}
                 {% set current_pct = item.allocation_pct|default("0")|float %}
