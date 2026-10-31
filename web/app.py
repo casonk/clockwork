@@ -32,6 +32,7 @@ from clockwork.render import _LAUNCHD_ENV_LOADER, render_launchd_plist, resolve_
 try:
     from web import (
         book_catalog,
+        code_triage,
         media_library,
         read_sources,
         release_sources,
@@ -51,6 +52,7 @@ try:
     )
 except ModuleNotFoundError:
     import book_catalog
+    import code_triage
     import media_library
     import personal_library as personal_media
     import read_sources
@@ -4020,6 +4022,32 @@ def _extra_code_repos() -> list[str]:
     return [name for name in (part.strip() for part in raw.split(",")) if name]
 
 
+def _auto_sort_code_item(text: str, category: str, repo: str, data: dict):
+    """Fill in a blank group and/or repository with a decision model (web/code_triage.py).
+
+    Only called when one is blank. A model that is unreachable or unsure leaves ``unknown``."""
+    groups = [c["name"] for c in data["categories"] if c["name"].lower() != "archive"]
+    repos = sorted(
+        {str(i.get("repo") or "") for c in data["categories"] for i in c["items"]}
+        | set(_extra_code_repos()) - {""},
+        key=str.casefold,
+    )
+    env = os.environ
+    return code_triage.classify(
+        text,
+        group=category,
+        repo=repo,
+        groups=groups,
+        repos=code_triage.repo_catalog(BASE_DIR.parents[1], repos),
+        client=code_triage.systemone_client(
+            env.get("CLOCKWORK_TRIAGE_URL", code_triage.DEFAULT_URL)
+        ),
+        group_model=env.get("CLOCKWORK_TRIAGE_GROUP_MODEL", code_triage.GROUP_MODEL),
+        repo_model=env.get("CLOCKWORK_TRIAGE_REPO_MODEL", code_triage.REPO_MODEL),
+        threshold=float(env.get("CLOCKWORK_TRIAGE_THRESHOLD", code_triage.THRESHOLD)),
+    )
+
+
 def _clean_code_priority(value) -> str:
     """Return a canonical P1-P4 rating, or "" when unrated or unrecognised."""
     text = str(value or "").strip().upper()
@@ -4709,12 +4737,18 @@ def simple_list_add_item(page):
     if not raw:
         return redirect(url_for(_simple_list_endpoint(key)))
     data = load_simple_list(key)
+    repo = request.form.get("repo", "").strip()
+    if key == "code" and (not category or not repo) and code_triage.enabled():
+        sorted_to = _auto_sort_code_item(raw, category, repo, data)
+        category, repo = sorted_to.group, sorted_to.repo
+        flash(sorted_to.describe(), "error" if sorted_to.error else "success")
+        if _find_simple_category(data, category) is None:
+            data["categories"].append({"name": category, "items": []})
     cat = _find_simple_category(data, category)
     if cat is None:
         flash(f'{cfg["name_label"]} "{category}" not found.', "error")
         return redirect(url_for(_simple_list_endpoint(key)))
     item = _parse_simple_item(raw, cfg)
-    repo = request.form.get("repo", "").strip()
     if key == "code":
         if not repo:
             flash("Repository name cannot be empty.", "error")
@@ -5089,11 +5123,24 @@ def api_simple_add_item(list_key):
     payload, error = _todo_payload()
     if error:
         return error
-    category = str(payload.get("category") or cfg["default_category"]).strip()
+    category = str(payload.get("category") or "").strip()
     raw = str(payload.get("item") or payload.get("title") or payload.get("ticker") or "").strip()
     if not raw:
         return jsonify({"ok": False, "error": "item/title/ticker required"}), 400
     data = load_simple_list(key)
+    sorted_to = None
+    if (
+        key == "code"
+        and (not category or not str(payload.get("repo") or "").strip())
+        and code_triage.enabled()
+    ):
+        sorted_to = _auto_sort_code_item(
+            raw, category, str(payload.get("repo") or "").strip(), data
+        )
+        category, payload["repo"] = sorted_to.group, sorted_to.repo
+        if _find_simple_category(data, category) is None:
+            data["categories"].append({"name": category, "items": []})
+    category = category or cfg["default_category"]
     cat = _find_simple_category(data, category)
     if key != "code" and cat is None and bool(payload.get("create_category", True)):
         cat = {"name": category, "items": []}
@@ -5124,7 +5171,9 @@ def api_simple_add_item(list_key):
     cat["items"].append(item)
     save_simple_list(key, data)
     _log_event(cfg["history_file"], "add", item=value, category=category, detail=repo)
-    return jsonify({"ok": True, "data": data})
+    return jsonify(
+        {"ok": True, "data": data, **({"auto_sorted": sorted_to.describe()} if sorted_to else {})}
+    )
 
 
 @app.post("/api/<list_key>/toggle-item")

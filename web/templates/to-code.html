@@ -100,11 +100,11 @@
   <div class="empty" data-filter-empty hidden>No backlog items match these filters.</div>
   <form class="add-item" method="post" action="/to-code/add-item">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <select name="category" aria-label="Repo group" required>
-      <option value="" selected disabled>Choose repo group…</option>
+    <select name="category" aria-label="Repo group">
+      <option value="" selected>Group: auto</option>
       {% for cat in category_views %}<option value="{{ cat.name }}">{{ cat.name }}</option>{% endfor %}
     </select>
-    <input type="text" name="repo" list="code-repositories" placeholder="Repository (e.g. my-repo)" aria-label="Repository" required>
+    <input type="text" name="repo" list="code-repositories" placeholder="Repository (blank: auto)" aria-label="Repository">
     <input type="text" name="item" placeholder="{{ cfg.item_placeholder }}" aria-label="Backlog item" autocomplete="off" required>
     <select name="priority" aria-label="Priority">
       <option value="">Priority…</option>
