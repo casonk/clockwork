@@ -1,5 +1,8 @@
 """The viewer's watch log: what counts as watched, the log file, and the To Watch badge."""
 
+# The route tests reuse fixtures from test_library_pages as parameters.
+# ruff: noqa: F811, F401
+
 from __future__ import annotations
 
 import datetime
@@ -7,7 +10,7 @@ import json
 
 import pytest
 
-from tests.test_library_pages import _csrf, client, library, web_app  # noqa: F401
+from tests.test_library_pages import _csrf, client, library, web_app
 from web import watch_log
 
 EP = "/shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E01_1080p.mkv"
@@ -86,7 +89,7 @@ def test_stats_link_by_title_and_badge_reads_naturally(tmp_path):
 
 def test_the_viewer_reports_a_watched_episode_and_to_watch_shows_it(
     client, library, tmp_path, monkeypatch
-):  # noqa: F811
+):
     log = tmp_path / "viewing.jsonl"
     monkeypatch.setenv("CLOCKWORK_WATCH_LOG_FILE", str(log))
     watch_list = tmp_path / "to-watch.json"
@@ -116,9 +119,7 @@ def test_the_viewer_reports_a_watched_episode_and_to_watch_shows_it(
     assert "▶ 1 episode · last S01E01" in page
 
 
-def test_the_report_rejects_unknown_files_and_bad_numbers(
-    client, library, tmp_path, monkeypatch
-):  # noqa: F811
+def test_the_report_rejects_unknown_files_and_bad_numbers(client, library, tmp_path, monkeypatch):
     monkeypatch.setenv("CLOCKWORK_WATCH_LOG_FILE", str(tmp_path / "w.jsonl"))
     headers = {"X-CSRF-Token": _csrf(client)}
     assert (
@@ -131,7 +132,7 @@ def test_the_report_rejects_unknown_files_and_bad_numbers(
     assert not (tmp_path / "w.jsonl").exists()
 
 
-def test_the_play_page_wires_the_report(client, library):  # noqa: F811
+def test_the_play_page_wires_the_report(client, library):
     html = client.get("/library/play" + EP).get_data(as_text=True)
     import re
 
