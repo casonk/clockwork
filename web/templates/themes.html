@@ -47,6 +47,11 @@
     #msg { padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); }
     #msg.ok { background: var(--green-dim); color: var(--green); border-color: var(--green); }
     #msg.err { background: var(--red-dim); color: var(--red); border-color: var(--red); }
+    #labels details { margin-top: 8px; border: 1px solid var(--border); border-radius: 6px; }
+    #labels summary { padding: 6px 10px; cursor: pointer; background: var(--surface2); border-radius: 6px; }
+    .label-row { display: grid; grid-template-columns: 70px minmax(120px, 1fr) minmax(90px, auto) auto; gap: 8px; align-items: center; padding: 4px 10px; }
+    .label-row input { width: 100%; } .label-row.changed input { border-color: var(--accent); }
+    #labels-filter { width: 100%; margin-top: 6px; }
     .add-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
   </style>
 </head>
@@ -93,6 +98,14 @@
       <input id="emo-glyph" type="text" placeholder="🚀" maxlength="16" size="6" aria-label="Emoji">
       <button id="emo-add" type="button">Add emoji</button>
     </div>
+  </section>
+  <section class="panel">
+    <h2>Names and icons</h2>
+    <p class="muted">Rename or re-icon the top bar, its menus and the Home cards. Leave a field as it is to keep the default;
+      pick from your saved emoji or type your own.</p>
+    <input id="labels-filter" type="search" placeholder="Filter by name or group…" aria-label="Filter names and icons">
+    <div id="labels"></div>
+    <datalist id="emoji-list"></datalist>
   </section>
   <div class="actions">
     <button id="save" class="primary" type="button">Save</button>

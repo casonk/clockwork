@@ -15,7 +15,8 @@
     "accent-ink": "Text on accent", green: "Green", "green-dim": "Green fill", red: "Red",
     "red-dim": "Red fill", yellow: "Yellow", "yellow-dim": "Yellow fill", purple: "Purple", "purple-dim": "Purple fill"
   };
-  var S = null;          // the state being edited: themes (in menu order), palette, emoji, tokens
+  var S = null;          // the state being edited: themes (in menu order), palette, emoji, labels, tokens
+  var CATALOG = [];      // what can be renamed or re-iconed, with its defaults
   var selected = null;   // the name of the theme in the editor
   var saved = "";        // JSON of the state as last loaded or saved, to tell what changed
   var armed = null;      // the token whose colour a click on a saved colour sets
@@ -48,15 +49,17 @@
   }
 
   function snapshot() {
-    return JSON.stringify({ t: S.themes, p: S.palette, e: S.emoji });
+    return JSON.stringify({ t: S.themes, p: S.palette, e: S.emoji, l: S.labels });
   }
 
   function markDirty() {
     $("dirty").textContent = snapshot() === saved ? "" : "Unsaved changes";
   }
 
-  function load(state) {
+  function load(state, catalog) {
+    CATALOG = catalog || CATALOG;
     S = JSON.parse(JSON.stringify(state));
+    S.labels = S.labels || {};
     S.themes.forEach(function (t) { t.tokens = Object.assign({}, t.tokens); });
     if (!S.themes.some(function (t) { return t.name === selected; })) selected = S.themes.length ? S.themes[0].name : null;
     saved = snapshot();
@@ -237,8 +240,58 @@
     chips("emoji", S.emoji, function (name) { return document.createTextNode(S.emoji[name]); }, function () {});
   }
 
+  // ---- names and icons for cards, menu entries and top-bar items
+  function labelValue(item, key) {
+    var mine = S.labels[item.id] || {};
+    return key in mine ? mine[key] : (key === "name" ? item.name : item.icon);
+  }
+
+  function setLabel(item, key, value) {
+    var entry = Object.assign({}, S.labels[item.id] || {});
+    var fallback = key === "name" ? item.name : item.icon;
+    if (value === "" || value === fallback) delete entry[key]; else entry[key] = value;
+    if (Object.keys(entry).length) S.labels[item.id] = entry; else delete S.labels[item.id];
+    markDirty();
+  }
+
+  function renderLabels() {
+    var box = $("labels"), filter = ($("labels-filter").value || "").toLowerCase();
+    var openGroups = {};
+    box.querySelectorAll("details").forEach(function (d) { openGroups[d.dataset.group] = d.open; });
+    box.replaceChildren();
+    var list = $("emoji-list");
+    list.replaceChildren();
+    Object.keys(S.emoji).sort().forEach(function (name) { list.appendChild(el("option", { value: S.emoji[name], label: name })); });
+    var groups = {};
+    CATALOG.forEach(function (item) {
+      if (filter && (item.name + " " + item.group + " " + labelValue(item, "name")).toLowerCase().indexOf(filter) < 0) return;
+      (groups[item.group] = groups[item.group] || []).push(item);
+    });
+    Object.keys(groups).forEach(function (group) {
+      var details = el("details", { "data-group": group }, [el("summary", { text: group + " (" + groups[group].length + ")" })]);
+      details.open = filter ? true : !!openGroups[group];
+      groups[group].forEach(function (item) {
+        var icon = el("input", { type: "text", maxlength: "8", list: "emoji-list", "aria-label": "Icon for " + item.name, placeholder: item.icon || "–" });
+        icon.value = (S.labels[item.id] || {}).icon || "";
+        var name = el("input", { type: "text", maxlength: "32", "aria-label": "Name for " + item.name, placeholder: item.name });
+        name.value = (S.labels[item.id] || {}).name || "";
+        var row = el("div", { class: "label-row" });
+        var sync = function () { row.classList.toggle("changed", !!S.labels[item.id]); };
+        icon.addEventListener("input", function () { setLabel(item, "icon", icon.value.trim()); sync(); });
+        name.addEventListener("input", function () { setLabel(item, "name", name.value.trim()); sync(); });
+        var reset = el("button", { class: "small", type: "button", text: "Default" });
+        reset.addEventListener("click", function () { delete S.labels[item.id]; icon.value = ""; name.value = ""; sync(); markDirty(); });
+        sync();
+        row.append(icon, name, el("span", { class: "muted", text: (item.icon || "") + " " + item.name }), reset);
+        details.appendChild(row);
+      });
+      box.appendChild(details);
+    });
+    if (!Object.keys(groups).length) box.appendChild(el("p", { class: "muted", text: "Nothing matches." }));
+  }
+
   function render() {
-    renderList(); renderEditor(); renderLibraries(); markDirty();
+    renderList(); renderEditor(); renderLibraries(); renderLabels(); markDirty();
   }
 
   // ---- actions
@@ -249,7 +302,8 @@
       }),
       active: S.themes.filter(function (t) { return t.active; }).map(function (t) { return t.name; }),
       palette: S.palette,
-      emoji: S.emoji
+      emoji: S.emoji,
+      labels: S.labels
     };
   }
 
@@ -265,6 +319,7 @@
     }).catch(function () { say("Could not reach Clockwork.", "err"); });
   }
 
+  $("labels-filter").addEventListener("input", renderLabels);
   $("save").addEventListener("click", save);
   $("revert").addEventListener("click", function () { init(); say("", ""); });
   $("reset-all").addEventListener("click", function () {
@@ -300,7 +355,7 @@
   function init() {
     api("/api/themes").then(function (res) {
       if (res.data.csrf_token) CSRF = res.data.csrf_token;
-      if (res.data.ok) { load(res.data.state); say("", ""); }
+      if (res.data.ok) { load(res.data.state, res.data.catalog); say("", ""); }
       else say(res.data.error || "Could not load the themes.", "err");
     }).catch(function () { say("Could not reach Clockwork.", "err"); });
   }
