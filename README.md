@@ -415,7 +415,9 @@ which validates them and renders the merged themes once; the tracked themes are 
 repository keeps working from its vendored fallback. Clockwork's pages load the rendered themes from
 `/theme-assets/` (falling back to the vendored copies) and publishes a copy to the Caddy-served
 `/srv/portfolio-chrome`. Set `CLOCKWORK_TRACTION_CONTROL_DIR` if traction-control is not the sibling checkout.
-See traction-control `docs/system-theme.md`.
+The same page renames and re-icons the top-bar items, menu entries and Home cards ("Names and icons"); those
+overrides apply to the server-rendered bar, the Home cards and the published `nav.json`. See traction-control
+`docs/system-theme.md`.
 
 ## mTLS and Caddy
 
