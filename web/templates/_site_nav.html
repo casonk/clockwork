@@ -26,6 +26,7 @@
       <summary>🧰 <span class="cw-site-nav__desktop-label">Services</span><span class="cw-site-nav__mobile-label">Sites</span></summary>
       <div class="cw-site-nav__menu cw-site-nav__menu--services">
         <a href="/schedule" {% if request.path == '/schedule' %}aria-current="page"{% endif %}>🗓️ Schedule</a>
+        <a href="/themes" {% if request.path == '/themes' %}aria-current="page"{% endif %}>🎨 Themes</a>
         <a href="/ecu" {% if request.path == '/ecu' %}aria-current="page"{% endif %}>🖥️ Machine load</a>
         <a href="/home">All services</a>
         {% for group in site_service_groups %}
