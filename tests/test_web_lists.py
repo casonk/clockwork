@@ -48,6 +48,8 @@ def list_files(tmp_path, monkeypatch):
     }
     for attr, path in paths.items():
         monkeypatch.setattr(web_app, attr, path)
+    paths["PLACEHOLDERS_FILE"] = tmp_path / "placeholders.json"
+    monkeypatch.setattr(web_app.placeholders, "FILE", paths["PLACEHOLDERS_FILE"])
     paths["GROCERIES_FILE"].write_text(json.dumps({"categories": []}))
     paths["SHOPPING_FILE"].write_text(json.dumps({"categories": []}))
     return paths

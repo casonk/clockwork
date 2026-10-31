@@ -55,6 +55,9 @@
     .label-row { display: grid; grid-template-columns: 70px minmax(120px, 1fr) minmax(90px, auto) auto; gap: 8px; align-items: center; padding: 4px 10px; }
     .label-row input { width: 100%; } .label-row.changed input { border-color: var(--accent); }
     #labels-filter { width: 100%; margin-top: 6px; }
+    #placeholders { display: grid; gap: 4px; margin-bottom: 8px; }
+    #placeholders .label-row { grid-template-columns: auto minmax(80px, 1fr) minmax(120px, 2fr) auto; }
+    #placeholders .muted { overflow-wrap: anywhere; }
     .new-theme-form { display: grid; gap: 8px; margin-top: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface2); }
     .new-theme-form label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
     .new-theme-form[hidden] { display: none; }
@@ -79,7 +82,7 @@
 <header>
   <div>
     <h1>🎨 Themes</h1>
-    <div class="muted">Your own themes, colours, emoji, names and icons, and the shared font and size. Saved owner-only; the tracked themes are never edited.</div>
+    <div class="muted">Your own themes, colours, emoji, names and icons, placeholder cards, and the shared font and size. Saved owner-only; the tracked themes are never edited.</div>
   </div>
   <div class="actions"><a href="/home" title="Home">🏠 Home</a></div>
 </header>
@@ -126,6 +129,25 @@
       <input id="emo-glyph" type="text" placeholder="🚀" maxlength="16" size="6" aria-label="Emoji">
       <button id="emo-add" type="button">Add emoji</button>
     </div>
+  </section>
+  <section class="panel" id="placeholders-panel">
+    <h2>Placeholder cards</h2>
+    <p class="muted">A Home card for a page that still has to be built. Home shows it as planned, and Clockwork adds a To Code item in the repository you name. Removing the card leaves that backlog item. Renaming it later is a name override, saved with the themes.</p>
+    <div id="placeholders"></div>
+    <form id="placeholder-form" class="fields">
+      <label>Name<input id="ph-name" type="text" maxlength="32" required placeholder="e.g. Pantry plan" autocomplete="off"></label>
+      <label>Icon<input id="ph-icon" type="text" maxlength="8" placeholder="🧩" aria-label="Icon" autocomplete="off"></label>
+      <label>Home group<input id="ph-group" type="text" maxlength="32" value="Clockwork" list="ph-groups" required autocomplete="off"></label>
+      <label>Path<input id="ph-path" type="text" maxlength="64" placeholder="blank: made from the name" spellcheck="false" autocomplete="off"></label>
+      <label>Repo group
+        <select id="ph-repo-group" aria-label="Repo group">
+          <option value="util" selected>util</option>
+        </select>
+      </label>
+      <label>Repository<input id="ph-repo" type="text" maxlength="64" required placeholder="clockwork" spellcheck="false" autocomplete="off"></label>
+      <div class="add-row"><button id="ph-add" class="primary" type="submit">Register placeholder</button></div>
+    </form>
+    <datalist id="ph-groups"></datalist>
   </section>
   <section class="panel">
     <h2>Names and icons</h2>
