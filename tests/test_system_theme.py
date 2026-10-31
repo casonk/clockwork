@@ -1,12 +1,16 @@
 """Clockwork pages follow the portfolio system theme and offer a rotator in the top bar."""
 
+import os
 import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / "web" / "templates"
 STATIC = ROOT / "web" / "static"
-SOURCE = ROOT.parent / "traction-control" / "themes"
+SOURCE = (
+    Path(os.environ.get("CLOCKWORK_TRACTION_CONTROL_DIR", ROOT.parent / "traction-control"))
+    / "themes"
+)
 
 # Colours that do not belong to a theme: shadows and scrims are black in every theme, and
 # a video stage is black by design.
@@ -54,6 +58,27 @@ def test_top_bar_has_a_theme_rotator():
     assert ".cw-site-nav__theme" in css
 
 
+def test_top_bar_has_a_font_and_size_switcher():
+    nav = (TEMPLATES / "_site_nav.html").read_text()
+    assert "data-type-menu" in nav
+    assert 'aria-label="Font and size"' in nav
+    # A text-only summary stays out of the services-menu parser, which requires a span.
+    assert '<summary aria-label="Font and size" title="Font and size">Aa</summary>' in nav
+    css = (STATIC / "site-nav.css").read_text()
+    assert ".cw-site-nav__group--type" in css
+    assert "var(--font)" in css and "var(--font-size)" in css
+    theme = (STATIC / "portfolio-theme.css").read_text()
+    assert "--font-size: 14px" in theme and 'html[data-font="serif"]' in theme
+    assert "data-type-menu" in (STATIC / "portfolio-theme.js").read_text()
+
+
+def test_pages_use_the_shared_font_instead_of_a_private_stack():
+    for path in TEMPLATES.glob("*.html"):
+        css = css_and_script(path.read_text())
+        assert "apple-system" not in css and "Iowan Old Style" not in css, path.name
+    assert "apple-system" not in (STATIC / "site-nav.css").read_text()
+
+
 def test_top_bar_offers_a_theme_menu_beside_the_rotator():
     nav = (TEMPLATES / "_site_nav.html").read_text()
     assert "data-theme-menu" in nav
@@ -76,6 +101,7 @@ def test_rendered_page_includes_theme_assets_and_rotator():
     assert "/theme-assets/theme.css" in body
     assert "/theme-assets/theme.js" in body
     assert "data-theme-cycle" in body
+    assert "data-type-menu" in body
     assert client.get("/theme-assets/theme.js").status_code == 200
     assert client.get("/theme-assets/theme.css").status_code == 200
     assert client.get("/static/portfolio-theme.js").status_code == 200  # the vendored fallback
