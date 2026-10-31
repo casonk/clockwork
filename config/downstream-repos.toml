@@ -22,6 +22,7 @@ paths = [
   "./util-repos/shock-relay",      # shared Gmail notification digest sender
   "./util-repos/snowbridge",       # installed system service + interval timer
   "./util-repos/tachometer",       # weekly portfolio-wide performance snapshot
+  "./util-repos/tradility",        # weekday post-market technical-analysis refresh
   "./util-repos/traction-control", # daily governance audit + daily bug sweep + every-other-day template consolidation and CI repair
   "./util-repos/terminility",      # daily tmux session alias rebuild
   "./research-repos/zillow-public-data",  # weekly data report pull and analysis

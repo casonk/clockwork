@@ -34,6 +34,7 @@
     .back-link:hover { opacity: 1; }
     .header-title { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; flex: 1; }
     .header-meta { font-size: 11px; color: var(--muted-fg); white-space: nowrap; }
+    .header-meta.stale { color: var(--red); font-weight: 700; }
 
     /* ── Controls ── */
     .controls {
@@ -89,6 +90,7 @@
       font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s;
     }
     .refresh-btn:hover { color: var(--text); border-color: var(--muted-fg); }
+    .refresh-btn + .refresh-btn { margin-left: 0; }
     .refresh-btn.spinning .refresh-icon { animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .refresh-icon { display: inline-block; }
@@ -229,6 +231,7 @@
   <div class="indicator-group">
     <button class="ind-btn active" data-ind="rsi"  onclick="setIndicator('rsi')">RSI 14</button>
     <button class="ind-btn"        data-ind="vwap" onclick="setIndicator('vwap')">VWAP 20</button>
+    <button class="ind-btn"        data-ind="trend" onclick="setIndicator('trend')">Trend 50/200</button>
   </div>
 
   <span class="controls-label" style="margin-left:6px">Class</span>
@@ -244,8 +247,11 @@
     <option value="price-desc">Sort: price ↓</option>
   </select>
 
-  <button class="refresh-btn" id="refresh-btn" onclick="loadData()">
-    <span class="refresh-icon">↻</span> Refresh
+  <button class="refresh-btn" id="reload-btn" onclick="loadData()">
+    <span class="refresh-icon">↻</span> Reload
+  </button>
+  <button class="refresh-btn" id="refresh-btn" onclick="runRefresh()">
+    <span class="refresh-icon">▶</span> Run refresh
   </button>
 </div>
 
@@ -307,11 +313,16 @@
     if (activeIndicator === 'rsi') {
       if (ticker.rsi_14 == null) return null;
       return 1 - ticker.rsi_14 / 100;          // RSI 0→t=1 (green), RSI 100→t=0 (red)
-    } else {
+    } else if (activeIndicator === 'vwap') {
       const p = ticker.last_price, v = ticker.vwap_20;
       if (p == null || v == null || v === 0) return null;
       const d = (p - v) / v;                   // % above/below VWAP
       return Math.max(0, Math.min(1, 0.5 - d / 0.6));  // ±30% mapped to [0,1]
+    } else {
+      if (ticker.long_term_trend === 'bullish') return 0.85;
+      if (ticker.long_term_trend === 'bearish') return 0.15;
+      if (ticker.long_term_trend === 'mixed') return 0.5;
+      return null;
     }
   }
 
@@ -355,12 +366,18 @@
       document.getElementById('legend-lbl-buy').textContent  = 'Oversold (buy)';
       document.getElementById('legend-lbl-mid').textContent  = 'Neutral';
       document.getElementById('legend-lbl-sell').textContent = 'Overbought (sell)';
-    } else {
+    } else if (activeIndicator === 'vwap') {
       document.getElementById('legend-ticks').innerHTML =
         '<span>−30%</span><span>−15%</span><span>0%</span><span>+15%</span><span>+30%</span>';
       document.getElementById('legend-lbl-buy').textContent  = 'Below VWAP (buy)';
       document.getElementById('legend-lbl-mid').textContent  = 'At VWAP';
       document.getElementById('legend-lbl-sell').textContent = 'Above VWAP (sell)';
+    } else {
+      document.getElementById('legend-ticks').innerHTML =
+        '<span>Bullish</span><span></span><span>Mixed</span><span></span><span>Bearish</span>';
+      document.getElementById('legend-lbl-buy').textContent  = '50-day above 200-day';
+      document.getElementById('legend-lbl-mid').textContent  = 'Mixed';
+      document.getElementById('legend-lbl-sell').textContent = '50-day below 200-day';
     }
   }
 
@@ -369,21 +386,25 @@
   let activeIndicator = 'rsi';
   let activeClasses   = new Set(['all']);
   let allClasses      = [];
+  let csrfToken       = '';
 
   // ── Data load ────────────────────────────────────────────────────────────────
   async function loadData() {
-    const btn = document.getElementById('refresh-btn');
+    const btn = document.getElementById('reload-btn');
     btn.classList.add('spinning');
     try {
       const res  = await fetch('/api/tradility-analysis');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || 'Unknown error');
+      csrfToken = data.csrf_token || '';
       allTickers = data.tickers || [];
       if (data.generated_at) {
         const d = new Date(data.generated_at);
-        document.getElementById('meta-generated').textContent =
-          `Updated ${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
+        const meta = document.getElementById('meta-generated');
+        const stale = Boolean(data.freshness && data.freshness.stale);
+        meta.textContent = `${stale ? '⚠ Stale — ' : ''}Updated ${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
+        meta.classList.toggle('stale', stale);
       }
       const classSet = new Set();
       for (const t of allTickers) if (t.asset_class) classSet.add(t.asset_class);
@@ -395,6 +416,31 @@
         `<div class="error-card">⚠ Could not load analysis: ${err.message}</div>`;
     } finally {
       btn.classList.remove('spinning');
+    }
+  }
+
+  async function runRefresh() {
+    const btn = document.getElementById('refresh-btn');
+    btn.classList.add('spinning');
+    btn.disabled = true;
+    try {
+      if (!csrfToken) await loadData();
+      const res = await fetch('/api/tradility-refresh', {
+        method: 'POST',
+        headers: {'X-CSRF-Token': csrfToken},
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      const meta = document.getElementById('meta-generated');
+      meta.textContent = 'Refresh started… reload in a few minutes';
+      meta.classList.remove('stale');
+    } catch (err) {
+      const meta = document.getElementById('meta-generated');
+      meta.textContent = `Refresh failed: ${err.message}`;
+      meta.classList.add('stale');
+    } finally {
+      btn.classList.remove('spinning');
+      btn.disabled = false;
     }
   }
 
@@ -478,10 +524,12 @@
     const [buyR, buyG, buyB]    = rdylgn(0.85);
     const [sellR, sellG, sellB] = rdylgn(0.10);
     const [midR, midG, midB]    = rdylgn(0.50);
+    const positiveLabel = activeIndicator === 'trend' ? 'bullish' : 'buy';
+    const negativeLabel = activeIndicator === 'trend' ? 'bearish' : 'sell';
     document.getElementById('stats-bar').innerHTML = `
       <div class="stat"><strong>${tickers.length}</strong> shown</div>
-      <div class="stat"><strong style="color:rgb(${buyR},${buyG},${buyB})">${buyN}</strong> buy</div>
-      <div class="stat"><strong style="color:rgb(${sellR},${sellG},${sellB})">${sellN}</strong> sell</div>
+      <div class="stat"><strong style="color:rgb(${buyR},${buyG},${buyB})">${buyN}</strong> ${positiveLabel}</div>
+      <div class="stat"><strong style="color:rgb(${sellR},${sellG},${sellB})">${sellN}</strong> ${negativeLabel}</div>
       <div class="stat"><strong style="color:rgb(${midR},${midG},${midB})">${neutralN}</strong> neutral</div>
       ${noDataN ? `<div class="stat"><strong style="color:var(--muted-fg)">${noDataN}</strong> no data</div>` : ''}
     `;
@@ -518,7 +566,7 @@
             <div class="rsi-bar-fill" style="width:${pct}%;${fill}"></div>
           </div>`;
         }
-      } else {
+      } else if (activeIndicator === 'vwap') {
         indLabel = 'VWAP 20';
         indValue = t.vwap_20 != null ? fmtPrice(t.vwap_20) : '—';
         if (t.last_price != null && t.vwap_20 != null && t.vwap_20 !== 0) {
@@ -527,6 +575,16 @@
           const col   = pal ? `color:${pal.fg}` : '';
           extraHtml = `<div class="vwap-delta" style="${col}">${sign}${delta.toFixed(2)}% vs VWAP</div>`;
         }
+      } else {
+        indLabel = 'SMA 50 / 200';
+        indValue = t.sma_50 != null && t.sma_200 != null
+          ? `${fmtPrice(t.sma_50)} / ${fmtPrice(t.sma_200)}` : '—';
+        if (t.sma_50 != null && t.sma_200 != null && t.sma_200 !== 0) {
+          const spread = (t.sma_50 - t.sma_200) / t.sma_200 * 100;
+          const sign = spread >= 0 ? '+' : '';
+          const col = pal ? `color:${pal.fg}` : '';
+          extraHtml = `<div class="vwap-delta" style="${col}">${sign}${spread.toFixed(2)}% 50/200 spread</div>`;
+        }
       }
 
       // Badge label
@@ -534,8 +592,11 @@
       if (t._t !== null) {
         if (activeIndicator === 'rsi') {
           badge = t._t > 0.7 ? 'Oversold' : t._t < 0.3 ? 'Overbought' : 'Neutral';
-        } else {
+        } else if (activeIndicator === 'vwap') {
           badge = t._t > 0.55 ? 'Below' : t._t < 0.45 ? 'Above' : 'At VWAP';
+        } else {
+          badge = t.long_term_trend === 'bullish' ? 'Bullish'
+            : t.long_term_trend === 'bearish' ? 'Bearish' : 'Mixed';
         }
       } else {
         badge = t.fetch_status === 'error' ? 'No data' : '—';

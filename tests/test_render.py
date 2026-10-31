@@ -128,6 +128,22 @@ def test_render_example_scheduler_intraday_systemd_and_cron_examples():
     assert "scheduled_intraday_snapshot.sh market-close" in cron_output
 
 
+def test_render_tradility_weekday_refresh_timer():
+    manifest = load_manifest(
+        Path(__file__).resolve().parent.parent / "examples" / "tradility" / "daily-analysis.toml"
+    )
+
+    rendered = render_target(manifest, "systemd-user")
+
+    service = rendered["tradility-refresh.service"]
+    timer = rendered["tradility-refresh.timer"]
+    assert "scripts/run_scheduled_analysis.sh" in service
+    assert "EnvironmentFile=-%h/.config/tradility/scheduled.env" in service
+    assert 'Environment="TRADILITY_HISTORY_PERIOD=5y"' in service
+    assert "OnCalendar=Mon..Fri *-*-* 16:30:00" in timer
+    assert "Persistent=true" in timer
+
+
 def test_render_traction_control_template_consolidation_interval_example():
     manifest = load_manifest(
         Path(__file__).resolve().parent.parent

@@ -421,6 +421,7 @@ clockwork render --manifest examples/fedora-debugg/crash-snapshot.toml --target 
 clockwork render --manifest examples/example-scheduler/intraday-snapshots.toml --target systemd-user
 clockwork render --manifest examples/example-scheduler/monthly-controller.toml --target cron
 clockwork render --manifest examples/shock-relay/gmail-digest.toml --target systemd-user
+clockwork render --manifest examples/tradility/daily-analysis.toml --target systemd-user
 clockwork render --manifest examples/traction-control/bug-sweep-agentic.toml --target systemd-user
 clockwork render --manifest examples/traction-control/template-consolidation-agentic.toml --target systemd-user
 clockwork render --manifest examples/traction-control/ci-repair-agentic.toml --target systemd-user
@@ -434,6 +435,7 @@ clockwork install --manifest examples/archility/archility-weekly.toml --target s
 clockwork install --manifest examples/fedora-debugg/crash-snapshot.toml --target systemd-user
 clockwork install --manifest examples/snowbridge/wireguard-endpoint-monitor.toml --target systemd-system
 clockwork install --manifest examples/shock-relay/gmail-digest.toml --target systemd-user
+clockwork install --manifest examples/tradility/daily-analysis.toml --target systemd-user
 clockwork install --manifest examples/example-scheduler/monthly-controller.toml --target cron --output /tmp/example-scheduler.crontab
 clockwork install --manifest examples/traction-control/bug-sweep-agentic.toml --target systemd-user
 clockwork install --manifest examples/traction-control/template-consolidation-agentic.toml --target systemd-user
@@ -442,6 +444,13 @@ clockwork install --manifest examples/clockwork/clockwork-web.local.toml --targe
 # Select one exact job when a manifest contains multiple jobs.
 clockwork install --manifest examples/intake/report-and-daemon.toml --target systemd-user --job intake-daemon
 ```
+
+The Tradility manifest runs at 16:30 local time Monday through Friday and
+loads owner-only machine paths and token-helper configuration from
+`~/.config/tradility/scheduled.env`. At minimum, set
+`TRADILITY_HOLDINGS_FILE`; scheduled Schwab use can additionally set
+`TRADILITY_SCHWAB_TOKEN_COMMAND`. The tracked manifest contains neither
+credentials nor private checkout paths.
 
 ### macOS Clockwork web LaunchAgent
 
