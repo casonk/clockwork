@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Treat systemd's `activating` state as an in-progress Tradility refresh even
+  though `systemctl is-active` exits nonzero for a running oneshot service.
+
 - To Code: the group and the repository are now optional. A blank one is filled in by a System One decision
   model (`web/code_triage.py`, `POST /to-code/add-item` and `POST /api/code/add-item`): `clef-flash` picks the
   repository (about 190 ms) and `clef` the group, each from a list of the allowed values with a description

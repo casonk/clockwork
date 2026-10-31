@@ -5316,7 +5316,7 @@ def api_tradility_analysis():
             )
         except ValueError:
             pass
-    active_rc, active_output = _systemctl("is-active", TRADILITY_REFRESH_UNIT, scope="user")
+    _active_rc, active_output = _systemctl("is-active", TRADILITY_REFRESH_UNIT, scope="user")
     data["freshness"] = {
         "age_seconds": age_seconds,
         "stale": age_seconds is None or age_seconds > TRADILITY_STALE_HOURS * 3600,
@@ -5324,7 +5324,9 @@ def api_tradility_analysis():
     }
     data["refresh"] = {
         "unit": TRADILITY_REFRESH_UNIT,
-        "active": active_rc == 0 and active_output.strip() in {"active", "activating"},
+        # A running Type=oneshot unit is "activating", for which systemctl
+        # intentionally exits 3 even though the workload is still in progress.
+        "active": active_output.strip() in {"active", "activating"},
     }
     data["csrf_token"] = _csrf_token()
     data["ok"] = True
