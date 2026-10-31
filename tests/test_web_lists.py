@@ -37,6 +37,7 @@ def list_files(tmp_path, monkeypatch):
         "HOLDINGS_AGGREGATE_FILE": tmp_path / "holdings-aggregate.json",
         "CODE_LIST_FILE": tmp_path / "to-code.json",
         "CODE_LIST_HISTORY_FILE": tmp_path / "to-code-history.jsonl",
+        "TRADILITY_ANALYSIS_FILE": tmp_path / "tradility-analysis.json",
         "GROCERIES_FILE": tmp_path / "groceries.json",
         "GROCERIES_HISTORY_FILE": tmp_path / "groceries-history.jsonl",
         "SHOPPING_FILE": tmp_path / "shopping.json",
@@ -63,6 +64,57 @@ def _csrf(client, path: str) -> str:
     resp = client.get(path)
     assert resp.status_code == 200
     return resp.get_json()["csrf_token"]
+
+
+def test_tradility_api_reports_stale_data_and_refreshes_via_systemd(
+    client, list_files, monkeypatch
+):
+    list_files["TRADILITY_ANALYSIS_FILE"].write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-01-01T00:00:00Z",
+                "history_period": "5y",
+                "tickers": [],
+            }
+        )
+    )
+    calls = []
+
+    def fake_systemctl(*args, scope="user"):
+        calls.append((args, scope))
+        if args[0] == "is-active":
+            return 3, "inactive"
+        return 0, ""
+
+    monkeypatch.setattr(web_app, "_systemctl", fake_systemctl)
+    monkeypatch.setattr(web_app, "_scheduler_backend", lambda: "systemd")
+
+    analysis = client.get("/api/tradility-analysis")
+
+    assert analysis.status_code == 200
+    payload = analysis.get_json()
+    assert payload["freshness"]["stale"] is True
+    assert payload["freshness"]["age_seconds"] > 0
+    assert payload["refresh"]["active"] is False
+    assert payload["csrf_token"]
+
+    started = client.post(
+        "/api/tradility-refresh",
+        headers={"X-CSRF-Token": payload["csrf_token"]},
+    )
+
+    assert started.status_code == 202
+    assert started.get_json()["ok"] is True
+    assert (("start", "--no-block", "tradility-refresh.service"), "user") in calls
+
+
+def test_tradility_page_distinguishes_reload_from_refresh(client):
+    html = client.get("/to-tradility").get_data(as_text=True)
+
+    assert "> Reload" in html
+    assert "> Run refresh" in html
+    assert "Trend 50/200" in html
+    assert "async function runRefresh()" in html
 
 
 @pytest.mark.parametrize(

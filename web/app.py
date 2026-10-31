@@ -111,6 +111,10 @@ TRADILITY_ANALYSIS_FILE = Path(
         BASE_DIR.parent / "tradility" / "exports" / "tradility-analysis.json",
     )
 )
+TRADILITY_REFRESH_UNIT = os.environ.get(
+    "CLOCKWORK_TRADILITY_REFRESH_UNIT", "tradility-refresh.service"
+).strip()
+TRADILITY_STALE_HOURS = max(1, int(os.environ.get("CLOCKWORK_TRADILITY_STALE_HOURS", "72")))
 _OLLAMA_BASE = os.environ.get("CREW_CHIEF_URL", "http://localhost:11434")
 _OLLAMA_MODEL = os.environ.get("CLOCKWORK_GROCERY_MODEL", "qwen2.5-coder:7b")
 _SUGGEST_MODEL = os.environ.get("CLOCKWORK_SUGGEST_MODEL", _OLLAMA_MODEL)
@@ -5299,8 +5303,45 @@ def api_tradility_analysis():
         data = json.loads(TRADILITY_ANALYSIS_FILE.read_text(encoding="utf-8"))
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
+    generated_at = str(data.get("generated_at", "")).strip()
+    age_seconds = None
+    if generated_at:
+        try:
+            generated = datetime.datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+            if generated.tzinfo is None:
+                generated = generated.replace(tzinfo=datetime.timezone.utc)
+            age_seconds = max(
+                0,
+                int((datetime.datetime.now(datetime.timezone.utc) - generated).total_seconds()),
+            )
+        except ValueError:
+            pass
+    active_rc, active_output = _systemctl("is-active", TRADILITY_REFRESH_UNIT, scope="user")
+    data["freshness"] = {
+        "age_seconds": age_seconds,
+        "stale": age_seconds is None or age_seconds > TRADILITY_STALE_HOURS * 3600,
+        "stale_after_hours": TRADILITY_STALE_HOURS,
+    }
+    data["refresh"] = {
+        "unit": TRADILITY_REFRESH_UNIT,
+        "active": active_rc == 0 and active_output.strip() in {"active", "activating"},
+    }
+    data["csrf_token"] = _csrf_token()
     data["ok"] = True
     return jsonify(data)
+
+
+@app.post("/api/tradility-refresh")
+def api_tradility_refresh():
+    """Start the installed user-level Tradility refresh without blocking."""
+    if not TRADILITY_REFRESH_UNIT:
+        return jsonify({"ok": False, "error": "Tradility refresh unit is not configured"}), 503
+    if _scheduler_backend() != "systemd":
+        return jsonify({"ok": False, "error": "Tradility refresh requires systemd"}), 503
+    rc, _output = _systemctl("start", "--no-block", TRADILITY_REFRESH_UNIT, scope="user")
+    if rc != 0:
+        return jsonify({"ok": False, "error": "Could not start Tradility refresh"}), 503
+    return jsonify({"ok": True, "unit": TRADILITY_REFRESH_UNIT}), 202
 
 
 def _watch_scan_dirs() -> list[Path]:

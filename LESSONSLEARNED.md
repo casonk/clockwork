@@ -14,6 +14,11 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
+- A dashboard reload is not a data refresh. For generated market-data
+  artifacts, expose the generation age and a stale threshold, label rereading
+  separately from regeneration, and route manual regeneration through the same
+  reviewed systemd workload that owns automatic refreshes.
+
 - **Keep the navigation menus in one place when a second consumer appears.** The top bar for
   other services is built from `web/site_chrome.py`, which mirrors `_site_nav.html`;
   `tests/test_site_chrome.py` compares the two so adding a page to one without the other fails.

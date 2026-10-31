@@ -1,0 +1,24 @@
+[[jobs]]
+name = "tradility-refresh"
+description = "Refresh multi-year portfolio technical analysis after the trading day"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h/git/util-repos/tradility"
+exec_start = "/usr/bin/env bash %h/git/util-repos/tradility/scripts/run_scheduled_analysis.sh"
+environment_files = ["-%h/.config/tradility/scheduled.env"]
+after = ["network-online.target"]
+wants = ["network-online.target"]
+standard_output = "journal"
+standard_error = "journal"
+timer_description = "Refresh Tradility after each weekday trading session"
+
+[jobs.environment]
+TRADILITY_HISTORY_PERIOD = "5y"
+TRADILITY_MARKET_SOURCE = "auto"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "Mon..Fri *-*-* 16:30:00"
+persistent = true
+accuracy_sec = "1m"
+randomized_delay_sec = "300"
