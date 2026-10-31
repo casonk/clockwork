@@ -60,12 +60,13 @@ def test_top_bar_has_a_theme_rotator():
 
 def test_top_bar_has_a_font_and_size_switcher():
     nav = (TEMPLATES / "_site_nav.html").read_text()
-    assert "data-type-menu" in nav
-    assert 'aria-label="Font and size"' in nav
-    # A text-only summary stays out of the services-menu parser, which requires a span.
-    assert '<summary aria-label="Font and size" title="Font and size">Aa</summary>' in nav
+    assert 'data-type-cycle="font"' in nav and 'data-type-cycle="size"' in nav
+    assert 'data-type-menu="font"' in nav and 'data-type-menu="size"' in nav
+    # Text-only summaries stay out of the services-menu parser, which requires a span.
+    assert '<summary aria-label="Choose a font" title="Choose a font"></summary>' in nav
+    assert '<summary aria-label="Choose a size" title="Choose a size"></summary>' in nav
     css = (STATIC / "site-nav.css").read_text()
-    assert ".cw-site-nav__group--type" in css
+    assert ".cw-site-nav__rotator" in css
     assert "var(--font)" in css and "var(--font-size)" in css
     theme = (STATIC / "portfolio-theme.css").read_text()
     assert "--font-size: 14px" in theme and 'html[data-font="serif"]' in theme
@@ -104,7 +105,7 @@ def test_rendered_page_includes_theme_assets_and_rotator():
     assert "/theme-assets/theme.css" in body
     assert "/theme-assets/theme.js" in body
     assert "data-theme-cycle" in body
-    assert "data-type-menu" in body
+    assert 'data-type-cycle="font"' in body and 'data-type-cycle="size"' in body
     assert client.get("/theme-assets/theme.js").status_code == 200
     assert client.get("/theme-assets/theme.css").status_code == 200
     assert client.get("/static/portfolio-theme.js").status_code == 200  # the vendored fallback
