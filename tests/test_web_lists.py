@@ -780,7 +780,7 @@ def test_to_watch_renders_torrent_and_library_controls(client, list_files):
     assert 'id="lib-check-btn"' in html
     assert 'href="/api/watch-check"' not in html
     assert 'data-query="Napoleon Dynamite 2004"' in html
-    assert 'data-query="Brazil' not in html
+    assert 'data-query="Brazil 1985"' in html  # watched items can still be searched
     assert html.count('class="search-panel"') == 1
     assert "/api/torrent-add" in html
     assert "/api/series-build" in html
@@ -917,6 +917,28 @@ def test_other_lists_do_not_render_torrent_controls(client):
 
     assert "find-btn" not in html.split("</style>")[1]
     assert "lib-check-btn" not in html.split("</style>")[1]
+
+
+def test_a_watched_item_keeps_its_torrent_search(client, list_files):
+    list_files["WATCH_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {
+                        "name": "Films",
+                        "items": [
+                            {"title": "Seen Film", "watched": True},
+                            {"title": "Unseen Film", "watched": False},
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+    html = client.get("/to-watch").get_data(as_text=True)
+
+    assert html.count('title="Find torrent"') == 2
+    assert html.count('class="search-panel"') == 2
 
 
 @pytest.mark.parametrize("page", ["to-read", "to-listen"])

@@ -288,7 +288,7 @@
           {% if loop.first or loop.previtem[cfg.status] != item[cfg.status] %}
           <button class="group-toggle" type="button" data-group-toggle="{{ grp }}" aria-expanded="true">{{ "Completed" if grp == "done" else "Open" }} ({{ (completed if grp == "done" else active)|length }})</button>
           {% endif %}
-          {% set find_torrent = cfg.key == "watch" and not item[cfg.status] %}
+          {% set find_torrent = cfg.key == "watch" %}
           {% set find_media = cfg.key in ("read", "listen") and not item[cfg.status] %}
           <div class="item" data-group="{{ grp }}"{% if cfg.key in ("watch", "read", "listen") %} data-title="{{ value }}" data-year="{{ item.year or '' }}" data-category="{{ cat.name }}"{% elif cfg.key == "invest" %} data-invest-anchor="item:{{ cat.name }}:{{ value }}"{% endif %}>
             <form method="post" action="/{{ cfg.page }}/toggle-item">
