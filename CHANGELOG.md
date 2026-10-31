@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- To Code auto-sorting now classifies only the repository and takes the group from it. Checked on the real
+  backlog (27 repositories, leave-one-out), no repository spans two groups, and asking a model for the group
+  was right about 46% of the time against 73% for always answering the commonest group. It also uses one
+  model for the one question (two different models made Ollama reload each on every add, 30 seconds),
+  merges repository names that differ only in case before asking, offers only the given group's repositories
+  when a group is given, and waits up to 60 seconds for a model that has to load. Settings:
+  `CLOCKWORK_TRIAGE_MODEL` (default `clef`) replaces the two per-question models; the threshold stays 0.6.
+
 - Treat systemd's `activating` state as an in-progress Tradility refresh even
   though `systemctl is-active` exits nonzero for a running oneshot service.
 
