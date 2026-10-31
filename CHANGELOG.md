@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Log what is watched in the library viewer and show it on To Watch. The player reports a video once 90%
+  of it has played (`POST /library/play/<path>/watched`, CSRF-protected); Clockwork appends it to
+  `config/watch-log.jsonl` (gitignored personal data; `CLOCKWORK_WATCH_LOG_FILE` moves it) with the title,
+  season and episode, ignoring clips and repeats within three hours. The To Watch page links the log to
+  list items by title and shows a badge such as `▶ 3 episodes · last S01E03 · 2 days ago`.
+
 - Add the missing **Tradility** card to the Home page, and a test that every page in the top bar's Lists and Media menus has a Home card.
 
 - Also publish the navigation into traction-control's portfolio site store (`~/.config/traction-control/sites/_shared`,
