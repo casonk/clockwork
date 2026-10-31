@@ -79,11 +79,12 @@ def test_tradility_api_reports_stale_data_and_refreshes_via_systemd(
         )
     )
     calls = []
+    service_state = ["inactive"]
 
     def fake_systemctl(*args, scope="user"):
         calls.append((args, scope))
         if args[0] == "is-active":
-            return 3, "inactive"
+            return 3, service_state[0]
         return 0, ""
 
     monkeypatch.setattr(web_app, "_systemctl", fake_systemctl)
@@ -106,6 +107,10 @@ def test_tradility_api_reports_stale_data_and_refreshes_via_systemd(
     assert started.status_code == 202
     assert started.get_json()["ok"] is True
     assert (("start", "--no-block", "tradility-refresh.service"), "user") in calls
+
+    service_state[0] = "activating"
+    running = client.get("/api/tradility-analysis").get_json()
+    assert running["refresh"]["active"] is True
 
 
 def test_tradility_page_distinguishes_reload_from_refresh(client):

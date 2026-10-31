@@ -186,6 +186,13 @@ should change how future sessions work in this repo.
 - `systemctl` read-only queries (`is-active`, `is-enabled`, `show`) work for
   system-scope units without elevation — regular users can query system units.
   Only write operations (`enable`, `disable`, `daemon-reload`, etc.) need sudo.
+- Do not infer workload inactivity from the exit status of `systemctl
+  is-active` alone. A running `Type=oneshot` service reports `activating` while
+  its command executes but `systemctl` exits 3; interpret the textual state.
+- A portable example manifest may use the portfolio's conventional `%h/git`
+  checkout, but deployment must verify `WorkingDirectory` on the actual host.
+  Keep a divergent host path in an owner-local systemd drop-in so reinstalling
+  the tracked unit does not erase it or publish private topology.
 - Editable pip installs (`pip install -e .`) place the package in the invoking
   user's site-packages. When the same command is run via `sudo`, root's Python
   environment does not include the user's site-packages. Use a wrapper script
