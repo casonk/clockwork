@@ -71,7 +71,11 @@ def test_rendered_page_includes_theme_assets_and_rotator():
     response = client.get("/home")
     body = response.get_data(as_text=True)
     assert response.status_code == 200
-    assert "/static/portfolio-theme.css" in body
-    assert "/static/portfolio-theme.js" in body
+    # Pages load the theme through /theme-assets/, which serves the rendered themes when you have
+    # your own and the vendored copies (web/static/portfolio-theme.*) otherwise.
+    assert "/theme-assets/theme.css" in body
+    assert "/theme-assets/theme.js" in body
     assert "data-theme-cycle" in body
-    assert client.get("/static/portfolio-theme.js").status_code == 200
+    assert client.get("/theme-assets/theme.js").status_code == 200
+    assert client.get("/theme-assets/theme.css").status_code == 200
+    assert client.get("/static/portfolio-theme.js").status_code == 200  # the vendored fallback
