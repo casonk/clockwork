@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Also publish the navigation into traction-control's portfolio site store (`~/.config/traction-control/sites/_shared`,
+  `PORTFOLIO_STORE` to move it) when it exists, so pages served without a Caddy in front still get the top bar's menus.
+
 - Refresh the vendored portfolio theme: adds the Hulk (purple and green) and Neon themes.
 
 - Add the High contrast white and Liberty themes, rename High contrast to High contrast dark, and

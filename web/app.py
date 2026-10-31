@@ -1811,7 +1811,7 @@ def _publish_site_chrome() -> bool:
     """Write the shared top bar's files for services outside Clockwork (when the
     directory the shared Caddy serves exists)."""
     with app.test_request_context("/", base_url="https://clockwork.invalid/"):
-        return site_chrome.publish(_site_nav_document("https://clockwork.invalid/"))
+        return site_chrome.publish_everywhere(_site_nav_document("https://clockwork.invalid/"))
 
 
 def _publish_site_chrome_forever(interval: float = 300.0) -> None:
@@ -6635,7 +6635,7 @@ if __name__ == "__main__":
     scheme = "https" if ssl_context else "http"
     debug = os.environ.get("CLOCKWORK_WEB_DEBUG", "").lower() in {"1", "true", "yes", "on"}
     print(f"clockwork-web  {scheme}://{host}:{port}")
-    if site_chrome.DEFAULT_CHROME_DIR.is_dir():
+    if site_chrome.chrome_dirs():
         import threading
 
         threading.Thread(
