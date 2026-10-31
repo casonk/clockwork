@@ -452,6 +452,12 @@ loads owner-only machine paths and token-helper configuration from
 `TRADILITY_SCHWAB_TOKEN_COMMAND`. The tracked manifest contains neither
 credentials nor private checkout paths.
 
+The example service assumes the public checkout convention
+`%h/git/util-repos/tradility`. On a host that materializes the portfolio at a
+different path, keep that path in an owner-local systemd service drop-in that
+overrides `WorkingDirectory` and resets `ExecStart`; do not add the host path
+to the tracked manifest.
+
 ### macOS Clockwork web LaunchAgent
 
 The tracked macOS manifest is deliberately a non-installable template: it has
