@@ -458,6 +458,14 @@ different path, keep that path in an owner-local systemd service drop-in that
 overrides `WorkingDirectory` and resets `ExecStart`; do not add the host path
 to the tracked manifest.
 
+The Tradility page serves compact ticker cards from
+`GET /api/tradility-analysis`. Selecting a card loads its chart-ready history
+from `GET /api/tradility-analysis/<ticker>` and opens a responsive detail view
+with selectable performance ranges, period returns, 52-week range, transparent
+technical-rating components, indicator context, and source provenance. The
+technical label is explicitly not analyst consensus or investment advice.
+Details can be deep-linked with `/to-tradility?ticker=AAPL`.
+
 ### macOS Clockwork web LaunchAgent
 
 The tracked macOS manifest is deliberately a non-installable template: it has

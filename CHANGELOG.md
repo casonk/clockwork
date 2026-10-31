@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Tradility stock cards now open a responsive historical-performance dialog
+  with range-selectable price charts, period returns, 52-week range, technical
+  rating components, indicators, and data-source provenance. The list API omits
+  heavy chart history and a ticker-detail endpoint serves it on demand.
 - To Watch keeps the torrent search button on items already marked watched, so a title can be found and downloaded after watching it elsewhere.
 - To Code items now carry an entry date and a staleness rank. New items are stamped with `added`; older ones are dated at render time from the history log's `add` event or a `[manual:YYYY-MM-DD]` title prefix, without rewriting the backlog. Each item shows its age (stale after 30 days), the filter bar counts stale open items, and a Sort control orders each repository by priority (default), newest first or oldest first, with undated items last.
 - To Code auto-sorting now classifies only the repository and takes the group from it. Checked on the real
