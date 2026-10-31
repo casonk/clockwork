@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Also publish `theme.css` and `theme.js` into the shared directory, so services can use the
+  shared colour tokens and apply the saved theme before first paint.
 - Refresh the vendored top bar script: it now isolates itself from host-page CSS and sits outside the page body.
 
 - Publish the top bar for other services: Clockwork writes `nav.json` (Home, Clockwork,

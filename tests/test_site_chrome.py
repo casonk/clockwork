@@ -72,6 +72,8 @@ def test_publish_writes_both_files_once_and_skips_a_missing_directory(tmp_path):
     assert site_chrome.publish(nav, tmp_path) is True
     assert json.loads((tmp_path / "nav.json").read_text())["home"]["label"] == "Home"
     assert (tmp_path / "chrome.js").read_text() == site_chrome.CHROME_SCRIPT.read_text()
+    for name in ("theme.css", "theme.js"):
+        assert (tmp_path / name).read_text() == site_chrome.PUBLISHED_FILES[name].read_text()
     assert site_chrome.publish(nav, tmp_path) is False  # unchanged
 
 
