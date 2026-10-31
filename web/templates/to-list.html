@@ -53,9 +53,22 @@
     .item-title.done { color:var(--muted); text-decoration:line-through; }
     .item-meta { color:var(--muted); font-size:11px; }
     .allocation-meta { color:var(--muted); font-size:11px; white-space:nowrap; }
-    .allocation-meta.over { color:var(--yellow); }
-    .allocation-meta.under { color:var(--accent); }
-    .allocation-meta.on-target { color:var(--green); }
+    .allocation-delta { padding:1px 5px; border:1px solid var(--border); border-radius:4px; }
+    .allocation-delta.over { color:var(--red); background:var(--red-dim); border-color:var(--red); }
+    .allocation-delta.under { color:var(--green); background:var(--green-dim); border-color:var(--green); }
+    .allocation-delta.on-target { color:var(--text); background:var(--surface2); }
+    @supports (color: color-mix(in srgb, red, blue)) {
+      .allocation-delta.over {
+        color:color-mix(in srgb, var(--muted), var(--red) var(--delta-tone));
+        background:color-mix(in srgb, var(--surface), var(--red) var(--delta-wash));
+        border-color:color-mix(in srgb, var(--border), var(--red) var(--delta-border));
+      }
+      .allocation-delta.under {
+        color:color-mix(in srgb, var(--muted), var(--green) var(--delta-tone));
+        background:color-mix(in srgb, var(--surface), var(--green) var(--delta-wash));
+        border-color:color-mix(in srgb, var(--border), var(--green) var(--delta-border));
+      }
+    }
     .allocation-target-control { display:flex; align-items:center; flex-shrink:0; }
     .allocation-target-control input { width:82px; min-width:82px; padding:5px 6px; background:var(--bg); border:1px solid var(--border); border-radius:5px; color:var(--text); text-align:right; }
     .allocation-target-control input:focus { border-color:var(--accent); outline:none; }
@@ -212,7 +225,7 @@
     {% else %}
       <span class="allocation-stat">Over target total <strong>{{ "%.2f"|format(-invest_summary.target_remaining) }}%</strong></span>
     {% endif %}
-    <span class="allocation-note">Current percentages use the latest aggregate market value, including cash in the denominator. Targets are local and remain unchanged by sync.</span>
+    <span class="allocation-note">Current percentages use the latest aggregate market value, including cash in the denominator. Delta colors fade from green when underweight through neutral at target to red when overweight. Targets are local and remain unchanged by sync.</span>
   </div>
   {% endif %}
 
@@ -261,8 +274,13 @@
                 {% if item.target_pct is defined %}
                   {% set target_pct = item.target_pct|float %}
                   {% set delta = current_pct - target_pct %}
-                  <span class="allocation-meta {% if delta > 0.005 %}over{% elif delta < -0.005 %}under{% else %}on-target{% endif %}">
-                    Target {{ "%.3f"|format(target_pct) }}% · {% if delta > 0.005 %}+{{ "%.3f"|format(delta) }}% over{% elif delta < -0.005 %}{{ "%.3f"|format(-delta) }}% under{% else %}on target{% endif %}
+                  {% set delta_abs = delta|abs %}
+                  {% set delta_strength = delta_abs / 5 if delta_abs < 5 else 1 %}
+                  <span class="allocation-meta">Target {{ "%.3f"|format(target_pct) }}%</span>
+                  <span class="allocation-meta allocation-delta {% if delta > 0.005 %}over{% elif delta < -0.005 %}under{% else %}on-target{% endif %}"
+                        data-delta="{{ "%.4f"|format(delta) }}"
+                        style="--delta-tone:{{ "%.1f"|format(35 + delta_strength * 65) }}%; --delta-wash:{{ "%.1f"|format(5 + delta_strength * 13) }}%; --delta-border:{{ "%.1f"|format(15 + delta_strength * 30) }}%">
+                    {% if delta > 0.005 %}Δ +{{ "%.3f"|format(delta) }}% overweight{% elif delta < -0.005 %}Δ {{ "%.3f"|format(delta) }}% underweight{% else %}Δ on target{% endif %}
                   </span>
                 {% endif %}
               {% endif %}
@@ -350,6 +368,11 @@
       input.classList.add('dirty');
       save.disabled = false;
       save.textContent = 'Save all targets *';
+    });
+    input.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' || event.isComposing) return;
+      event.preventDefault();
+      if (!save.disabled) form.requestSubmit(save);
     });
   }
 
