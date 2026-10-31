@@ -411,6 +411,130 @@ def test_the_page_has_the_names_and_icons_section(client):
     assert 'id="labels"' in html and 'id="labels-filter"' in html
 
 
+def _register(client, **fields):
+    token = _csrf(client, "/api/placeholders")
+    body = {"repo_group": "util", "repo": "clockwork", **fields}
+    return client.post("/api/placeholders", json=body, headers={"X-CSRF-Token": token})
+
+
+def test_the_page_offers_placeholder_cards(client):
+    html = client.get("/themes").get_data(as_text=True)
+    assert 'id="placeholder-form"' in html
+    assert 'id="ph-name"' in html and 'id="ph-repo"' in html
+    assert "To Code item" in html and "Register placeholder" in html
+    assert 'api("/api/placeholders"' in EDITOR_JS
+
+
+def test_registering_a_placeholder_shows_it_on_home_and_adds_a_to_code_item(client, list_files):
+    assert client.post("/api/placeholders", json={"name": "Signal plan"}).status_code == 403
+    response = _register(client, name="Signal plan", icon="📡", group="Pit Box")
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] and body["code"] == "added"
+    assert body["card"] == {
+        "id": "/signal-plan",
+        "name": "Signal plan",
+        "icon": "📡",
+        "group": "Pit Box",
+        "repo_group": "util",
+        "repo": "clockwork",
+    }
+    stored = list_files["PLACEHOLDERS_FILE"]
+    assert stat.S_IMODE(stored.stat().st_mode) == 0o600
+    assert json.loads(stored.read_text(encoding="utf-8"))["cards"] == [body["card"]]
+    html = client.get("/home").get_data(as_text=True)
+    assert 'class="card card-placeholder"' in html
+    assert "Signal plan" in html and "badge-placeholder" in html
+    assert 'href="/signal-plan"' not in html
+    nav = json.dumps(client.get("/api/site-nav").get_json())
+    assert "/signal-plan" not in nav
+    saved = json.loads(list_files["CODE_LIST_FILE"].read_text(encoding="utf-8"))
+    items = [
+        item
+        for category in saved["categories"]
+        if category["name"] == "util"
+        for item in category["items"]
+    ]
+    assert items[0]["title"] == "Implement the Signal plan placeholder card at /signal-plan"
+    assert items[0]["repo"] == "clockwork" and items[0]["added"]
+    with web_app.app.test_request_context("/themes"):
+        catalog = web_app._label_catalog()
+    matches = [item for item in catalog if item["id"] == "/signal-plan"]
+    assert len(matches) == 1 and matches[0]["placeholder"] is True
+    assert client.get("/api/placeholders").get_json()["cards"] == [body["card"]]
+
+
+def test_registering_again_keeps_the_existing_to_code_item(client, list_files):
+    assert _register(client, name="Signal plan").status_code == 200
+    token = _csrf(client, "/api/placeholders")
+    removed = client.post(
+        "/api/placeholders/remove",
+        json={"id": "/signal-plan"},
+        headers={"X-CSRF-Token": token},
+    )
+    assert removed.status_code == 200 and removed.get_json()["cards"] == []
+    assert "Signal plan" not in client.get("/home").get_data(as_text=True)
+    again = _register(client, name="Signal plan")
+    assert again.status_code == 200 and again.get_json()["code"] == "already listed"
+    saved = json.loads(list_files["CODE_LIST_FILE"].read_text(encoding="utf-8"))
+    titles = [
+        item["title"]
+        for category in saved["categories"]
+        if category["name"] == "util"
+        for item in category["items"]
+    ]
+    assert titles.count("Implement the Signal plan placeholder card at /signal-plan") == 1
+
+
+def test_a_placeholder_refuses_a_card_that_already_exists_or_a_bad_field(client, list_files):
+    assert _register(client, name="Signal plan", path="/groceries").status_code == 400
+    assert _register(client, name="Signal plan", path="/Not A Path").status_code == 400
+    assert _register(client, name="Signal plan", icon="ab").status_code == 400
+    assert _register(client, name="Signal plan", repo_group="no-such-family").status_code == 400
+    assert _register(client, name="Signal plan", repo="../clockwork").status_code == 400
+    assert _register(client, name="").status_code == 400
+    assert not list_files["PLACEHOLDERS_FILE"].exists()
+    assert not list_files["CODE_LIST_FILE"].exists()
+
+
+def test_a_broken_placeholders_file_is_left_alone(client, list_files):
+    token = _csrf(client, "/api/placeholders")
+    path = list_files["PLACEHOLDERS_FILE"]
+    path.write_text("{", encoding="utf-8")
+    response = client.post(
+        "/api/placeholders",
+        json={"name": "Signal plan", "repo_group": "util", "repo": "clockwork"},
+        headers={"X-CSRF-Token": token},
+    )
+    assert response.status_code == 400
+    assert "unreadable" in response.get_json()["error"]
+    assert path.read_text(encoding="utf-8") == "{"
+    assert client.get("/home").status_code == 200
+    assert client.get("/api/placeholders").status_code == 400
+
+
+def test_a_label_override_renames_a_placeholder_on_home(client, list_files, tmp_path, monkeypatch):
+    assert _register(client, name="Signal plan", icon="📡").status_code == 200
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    write_labels(tmp_path / "cfg", {"/signal-plan": {"name": "Bay plan", "icon": "🛟"}})
+    html = client.get("/home").get_data(as_text=True)
+    assert "Bay plan" in html and "🛟" in html
+    stored = json.loads(list_files["PLACEHOLDERS_FILE"].read_text(encoding="utf-8"))
+    assert stored["cards"][0]["name"] == "Signal plan"
+    with web_app.app.test_request_context("/themes"):
+        catalog = web_app._label_catalog()
+    match = next(item for item in catalog if item["id"] == "/signal-plan")
+    assert match["name"] == "Signal plan" and match["icon"] == "📡"
+
+
+def test_the_placeholder_list_has_a_cap(client, monkeypatch):
+    monkeypatch.setattr(web_app.placeholders, "MAX_CARDS", 1)
+    assert _register(client, name="Signal plan").status_code == 200
+    refused = _register(client, name="Second plan")
+    assert refused.status_code == 400
+    assert "at most 1" in refused.get_json()["error"]
+
+
 # -- the colour rows are named by what they are for ----------------------------
 
 EDITOR_JS = (Path(__file__).resolve().parents[1] / "web" / "static" / "themes-editor.js").read_text(

@@ -23,6 +23,9 @@ job.
 - `web/app.py`: Flask web UI for browsing, enabling, and disabling jobs
 - `web/code_triage.py`: auto-sorts a To Code item with a blank group or repo: classifies the repository with a System One decision model and takes the group from it (stdlib client, thresholded, `unknown` when unsure)
 - `web/watch_log.py`: the library viewer's watch log (`config/watch-log.jsonl`, gitignored) and the To Watch badges built from it
+- `web/placeholders.py`: placeholder Home cards (`config/placeholders.json`, gitignored). The Themes
+  page registers one and adds a To Code item. They are portal content, not theme-layer labels, and
+  they stay out of the published services menu until the page exists.
 - `web/site_chrome.py`: builds and publishes `nav.json` and `chrome.js` for the shared top
   bar other services load from `/_portfolio/` (menus mirror `_site_nav.html`; a test checks
   the two agree)

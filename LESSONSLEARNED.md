@@ -19,6 +19,12 @@ should change how future sessions work in this repo.
   separately from regeneration, and route manual regeneration through the same
   reviewed systemd workload that owns automatic refreshes.
 
+- A placeholder Home card is portal content, not a theme. Store it in the gitignored
+  `config/placeholders.json` (`CLOCKWORK_PLACEHOLDERS_FILE`) and register it from the Themes page,
+  which also adds a To Code item with an explicit repository group and repository. Keep it out of
+  the published services menu: `_site_service_groups` skips cards marked `placeholder`, because the
+  path is not a page yet. A later rename goes through `[labels]`, the same as any other card.
+
 - **Keep the navigation menus in one place when a second consumer appears.** The top bar for
   other services is built from `web/site_chrome.py`, which mirrors `_site_nav.html`;
   `tests/test_site_chrome.py` compares the two so adding a page to one without the other fails.

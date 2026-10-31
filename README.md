@@ -420,6 +420,11 @@ The same page renames and re-icons the top-bar items, menu entries and Home card
 overrides apply to the server-rendered bar, the Home cards and the published `nav.json`. See traction-control
 `docs/system-theme.md`.
 
+The same page also registers placeholder cards: a Home card for a page that is not built yet. They are stored
+in the gitignored `config/placeholders.json` (`CLOCKWORK_PLACEHOLDERS_FILE`), shown on Home as planned, and
+kept out of the services menu. Registering one adds a To Code item for the repository group and repository
+you name. Removing the card leaves that backlog item.
+
 ## mTLS and Caddy
 
 mTLS provisioning, Caddyfile generation, and DNS setup live in the
