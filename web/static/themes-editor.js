@@ -1,4 +1,4 @@
-/* The themes page: edit your portfolio themes, colours, emoji, and the shared font and size.
+/* The themes page: edit your portfolio themes, colours, emoji, and the shared font and page scale.
  *
  * Everything shown comes from a file you can edit, so the DOM is built with textContent and
  * properties, never innerHTML. The server (traction-control's portfolio_themes.py) validates the
@@ -61,11 +61,15 @@
     S = JSON.parse(JSON.stringify(state));
     S.labels = S.labels || {};
     S.themes.forEach(function (t) { t.tokens = Object.assign({}, t.tokens); });
-    S.type = S.type || { font: "system", size: 14 };
+    S.type = S.type || { font: "system", size: "medium" };
+    if (typeof S.type.size === "number") S.type.size = "medium";
     S.fonts = S.fonts && S.fonts.length ? S.fonts : [
       { name: "system", label: "System" }, { name: "serif", label: "Serif" }, { name: "mono", label: "Mono" }
     ];
-    S.sizes = S.sizes && S.sizes.length ? S.sizes : [14, 16, 18, 20];
+    S.sizes = S.sizes && S.sizes.length ? S.sizes : [
+      { name: "tiny", label: "Tiny" }, { name: "small", label: "Small" },
+      { name: "medium", label: "Medium" }, { name: "large", label: "Large" }
+    ];
     if (!S.themes.some(function (t) { return t.name === selected; })) selected = S.themes.length ? S.themes[0].name : null;
     saved = snapshot();
     render();
@@ -261,9 +265,11 @@
     fillSelect(font, S.fonts.map(function (face) {
       return { value: face.name, label: face.label };
     }), S.type.font, function (value) { S.type.font = value; });
-    fillSelect(size, S.sizes.map(function (n) {
-      return { value: String(n), label: n + " px" };
-    }), String(S.type.size), function (value) { S.type.size = parseInt(value, 10); });
+    fillSelect(size, S.sizes.map(function (item) {
+      return item && typeof item === "object"
+        ? { value: item.name, label: item.label }
+        : { value: String(item), label: String(item) };
+    }), S.type.size, function (value) { S.type.size = value; });
   }
 
   // ---- names and icons for cards, menu entries and top-bar items
@@ -330,7 +336,7 @@
       palette: S.palette,
       emoji: S.emoji,
       labels: S.labels,
-      type: { font: S.type.font, size: Number(S.type.size) }
+      type: { font: S.type.font, size: S.type.size }
     };
   }
 
@@ -350,7 +356,7 @@
   $("save").addEventListener("click", save);
   $("revert").addEventListener("click", function () { init(); say("", ""); });
   $("reset-all").addEventListener("click", function () {
-    if (!confirm("Drop all of your themes, colours, emoji, names and icons, and the shared font and size, and go back to the tracked themes?")) return;
+    if (!confirm("Drop all of your themes, colours, emoji, names and icons, and the shared font and page scale, and go back to the tracked themes?")) return;
     api("/api/themes/reset", {}).then(function (res) {
       if (res.data.ok) { say("Reset. Reloading…", "ok"); setTimeout(function () { location.reload(); }, 600); }
       else say(res.data.error || "Could not reset.", "err");
