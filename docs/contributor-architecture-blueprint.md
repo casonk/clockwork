@@ -76,6 +76,7 @@ workload logic.
 - `examples/intake/report-and-daemon.toml`
 - `examples/snowbridge/wireguard-endpoint-monitor.toml`
 - `examples/example-scheduler/monthly-controller.toml`
+- `examples/tradility/daily-analysis.toml`
 
 ## Validation
 

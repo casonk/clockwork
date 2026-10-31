@@ -18,6 +18,11 @@
   season and episode, ignoring clips and repeats within three hours. The To Watch page links the log to
   list items by title and shows a badge such as `▶ 3 episodes · last S01E03 · 2 days ago`.
 
+- Add a weekday post-market user-systemd manifest for Tradility, report
+  analysis age/staleness through its API and page, and make dashboard refresh
+  start the non-blocking analysis service instead of merely rereading stale
+  JSON. A separate Reload control remains available.
+
 - Add the missing **Tradility** card to the Home page, and a test that every page in the top bar's Lists and Media menus has a Home card.
 
 - Also publish the navigation into traction-control's portfolio site store (`~/.config/traction-control/sites/_shared`,
