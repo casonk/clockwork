@@ -30,7 +30,7 @@ from clockwork.manifest import load_manifest
 from clockwork.render import _LAUNCHD_ENV_LOADER, render_launchd_plist, resolve_launchd_label
 
 try:
-    from web import book_catalog, media_library, read_sources, release_sources
+    from web import book_catalog, media_library, read_sources, release_sources, site_chrome
     from web import personal_library as personal_media
     from web.library_pages import library_pages
     from web.personal_library import personal_library
@@ -48,6 +48,7 @@ except ModuleNotFoundError:
     import personal_library as personal_media
     import read_sources
     import release_sources
+    import site_chrome
     from library_pages import library_pages
     from personal_library import personal_library
     from security import same_origin_host, validate_remote_bind
@@ -1790,6 +1791,41 @@ def _schedule() -> list[dict]:
     now = time.time()
     rows = _timer_rows("user", now) + _timer_rows("system", now)
     return sorted(rows, key=lambda r: (r["next_epoch"] is None, r["next_epoch"] or 0, r["timer"]))
+
+
+def _clockwork_origin(default: str) -> str:
+    """Clockwork's own origin from the registry, so links from other sites are absolute."""
+    for _, cards in _load_portal_groups():
+        for card in cards:
+            if card.get("name") == "clockwork-web" and str(card.get("url", "")).startswith("http"):
+                return str(card["url"])
+    return default
+
+
+def _site_nav_document(default_origin: str) -> dict:
+    groups = _site_service_groups(_load_portal_groups())
+    return site_chrome.build_nav(_clockwork_origin(default_origin), groups)
+
+
+def _publish_site_chrome() -> bool:
+    """Write the shared top bar's files for services outside Clockwork (when the
+    directory the shared Caddy serves exists)."""
+    with app.test_request_context("/", base_url="https://clockwork.invalid/"):
+        return site_chrome.publish(_site_nav_document("https://clockwork.invalid/"))
+
+
+def _publish_site_chrome_forever(interval: float = 300.0) -> None:
+    while True:
+        try:
+            _publish_site_chrome()
+        except Exception as exc:  # keep the loop alive; the next pass retries
+            print(f"clockwork-web  could not publish the site top bar: {exc}", file=sys.stderr)
+        time.sleep(interval)
+
+
+@app.get("/api/site-nav")
+def api_site_nav():
+    return jsonify(_site_nav_document(request.host_url))
 
 
 @app.get("/api/schedule")
@@ -6599,6 +6635,12 @@ if __name__ == "__main__":
     scheme = "https" if ssl_context else "http"
     debug = os.environ.get("CLOCKWORK_WEB_DEBUG", "").lower() in {"1", "true", "yes", "on"}
     print(f"clockwork-web  {scheme}://{host}:{port}")
+    if site_chrome.DEFAULT_CHROME_DIR.is_dir():
+        import threading
+
+        threading.Thread(
+            target=_publish_site_chrome_forever, daemon=True, name="site-chrome"
+        ).start()
     if ssl_context:
         print("mTLS: clients must present a certificate signed by the configured CA.")
     app.run(

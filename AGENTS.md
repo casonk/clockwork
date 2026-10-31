@@ -21,6 +21,9 @@ job.
 - `src/clockwork/render.py`: cron, `systemd`, and launchd rendering helpers
 - `src/clockwork/cli.py`: CLI entry point for render/install flows
 - `web/app.py`: Flask web UI for browsing, enabling, and disabling jobs
+- `web/site_chrome.py`: builds and publishes `nav.json` and `chrome.js` for the shared top
+  bar other services load from `/_portfolio/` (menus mirror `_site_nav.html`; a test checks
+  the two agree)
 - `web/templates/`: Jinja2 templates for the web UI. Pages include `_theme_head.html` and
   style only with the system theme tokens (`var(--surface)`, never a literal colour);
   `web/static/portfolio-theme.{css,js}` are vendored from traction-control
