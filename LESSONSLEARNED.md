@@ -22,6 +22,8 @@ should change how future sessions work in this repo.
 - **Keep the navigation menus in one place when a second consumer appears.** The top bar for
   other services is built from `web/site_chrome.py`, which mirrors `_site_nav.html`;
   `tests/test_site_chrome.py` compares the two so adding a page to one without the other fails.
+  A Home card in the Clockwork group does not show up in that menu: `_site_service_groups` skips
+  the Clockwork group. A Clockwork page needs its own `SERVICES_MENU` entry and the matching link.
 
 - **Style pages with the system theme tokens; pass category hues through `--hue`.** A literal
   colour ignores the theme rotator and goes unreadable in the light theme. For data that needs

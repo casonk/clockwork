@@ -47,6 +47,7 @@ MEDIA_MENU = (
 )
 SERVICES_MENU = (
     ("Schedule", "🗓️", "/schedule"),
+    ("Themes", "🎨", "/themes"),
     ("Machine load", "🖥️", "/ecu"),
     ("All services", "", "/home"),
 )
