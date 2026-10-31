@@ -13,7 +13,9 @@ def template_links() -> dict[str, list[str]]:
     """The paths in each menu of web/templates/_site_nav.html, by group."""
     html = (ROOT / "web" / "templates" / "_site_nav.html").read_text()
     out = {}
-    for label, body in re.findall(r"<summary>[^<]*<span[^>]*>([^<]*)</span>.*?</summary>(.*?)</details>", html, re.S):
+    for label, body in re.findall(
+        r"<summary>[^<]*<span[^>]*>([^<]*)</span>.*?</summary>(.*?)</details>", html, re.S
+    ):
         out[label] = re.findall(r'<a href="(/[^"]*)"', body)
     return out
 
@@ -28,13 +30,31 @@ def test_menus_match_the_server_rendered_navigation():
 
 def test_build_nav_makes_absolute_links_and_flags_services():
     groups = [
-        {"label": "Pinned", "services": [{"name": "career", "display": "Career", "icon": "💼", "url": "https://career.example/"}]},
-        {"label": "Clockwork", "services": [{"name": "x", "display": "Local", "icon": "", "url": "/local"}]},
+        {
+            "label": "Pinned",
+            "services": [
+                {
+                    "name": "career",
+                    "display": "Career",
+                    "icon": "💼",
+                    "url": "https://career.example/",
+                }
+            ],
+        },
+        {
+            "label": "Clockwork",
+            "services": [{"name": "x", "display": "Local", "icon": "", "url": "/local"}],
+        },
     ]
     nav = site_chrome.build_nav("https://clock.example", groups)
 
     assert nav["home"]["url"] == "https://clock.example/home"
-    assert nav["items"][0] == {"label": "Clockwork", "mobile": "Jobs", "icon": "⏰", "url": "https://clock.example/"}
+    assert nav["items"][0] == {
+        "label": "Clockwork",
+        "mobile": "Jobs",
+        "icon": "⏰",
+        "url": "https://clock.example/",
+    }
     lists = next(i for i in nav["items"] if i["label"] == "Lists")
     assert lists["menu"][0]["url"] == "https://clock.example/groceries"
     menu = next(i for i in nav["items"] if i["label"] == "Services")["menu"]
