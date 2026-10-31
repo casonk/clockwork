@@ -52,15 +52,11 @@ def test_build_nav_makes_absolute_links_and_flags_services():
     nav = site_chrome.build_nav("https://clock.example", groups)
 
     assert nav["home"]["url"] == "https://clock.example/home"
-    assert nav["items"][0] == {
-        "label": "Clockwork",
-        "mobile": "Jobs",
-        "icon": "⏰",
-        "url": "https://clock.example/",
-    }
+    assert [i["label"] for i in nav["items"]] == ["Lists", "Media", "Services"]
     lists = next(i for i in nav["items"] if i["label"] == "Lists")
     assert lists["menu"][0]["url"] == "https://clock.example/groceries"
     menu = next(i for i in nav["items"] if i["label"] == "Services")["menu"]
+    assert menu[0] == {"label": "Clockwork", "icon": "⏰", "url": "https://clock.example/"}
     assert {"section": "Pinned"} in menu
     sample = next(e for e in menu if e.get("label") == "Sample App")
     assert sample["service"] is True and sample["url"] == "https://sample.example/"
@@ -88,7 +84,7 @@ def test_api_site_nav_serves_the_document():
 
     assert response.status_code == 200
     assert body["home"]["url"].endswith("/home")
-    assert [i["label"] for i in body["items"]] == ["Clockwork", "Lists", "Media", "Services"]
+    assert [i["label"] for i in body["items"]] == ["Lists", "Media", "Services"]
 
 
 def test_vendored_chrome_script_matches_traction_control():

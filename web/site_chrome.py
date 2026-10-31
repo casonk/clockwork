@@ -46,6 +46,7 @@ MEDIA_MENU = (
     ("To Listen", "🎧", "/to-listen"),
 )
 SERVICES_MENU = (
+    ("Clockwork", "⏰", "/"),
     ("Schedule", "🗓️", "/schedule"),
     ("Themes", "🎨", "/themes"),
     ("Machine load", "🖥️", "/ecu"),
@@ -58,7 +59,6 @@ PREFIX_PAGES = frozenset({"/groceries", "/shopping", "/library"})
 # The fixed top-bar items: id -> (label, icon). Their ids are what a label overrides.
 FIXED_ITEMS = {
     "nav:home": ("Home", "🏠"),
-    "nav:clockwork": ("Clockwork", "⏰"),
     "nav:lists": ("Lists", "✅"),
     "nav:media": ("Media", "🎬"),
     "nav:services": ("Services", "🧰"),
@@ -99,7 +99,6 @@ def site_menus(labels: dict[str, dict[str, str]] | None = None) -> dict[str, dic
 
     return {
         "home": fixed("nav:home"),
-        "clockwork": {**fixed("nav:clockwork"), "mobile": "Jobs"},
         "lists": {**fixed("nav:lists"), "entries": entries_for(LISTS_MENU, labels)},
         "media": {**fixed("nav:media"), "entries": entries_for(MEDIA_MENU, labels)},
         "services": {
@@ -145,7 +144,6 @@ def build_nav(
         "version": 1,
         "home": {**menus["home"], "url": own("/home")},
         "items": [
-            {**menus["clockwork"], "url": own("/")},
             {
                 "label": menus["lists"]["label"],
                 "icon": menus["lists"]["icon"],
