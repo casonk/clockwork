@@ -41,7 +41,11 @@
     .category-name { font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:.7px; color:var(--muted); flex:1; }
     .category-count { font-size:11px; padding:2px 8px; border-radius:99px; background:var(--surface); color:var(--muted); border:1px solid var(--border); white-space:nowrap; }
     .category-count .active { color:var(--accent); font-weight:700; }
-    .category-allocation { color:var(--muted); font-size:11px; white-space:nowrap; }
+    .invest-category-header { flex-wrap:wrap; }
+    .category-allocation { order:4; flex-basis:100%; display:flex; align-items:center; gap:14px; flex-wrap:wrap; padding-top:8px; border-top:1px solid var(--border); color:var(--muted); font-size:11px; }
+    .category-allocation-stat { white-space:nowrap; }
+    .category-allocation-stat strong { color:var(--text); font-size:12px; }
+    .category-allocation .allocation-delta { font-size:10px; }
     .items { padding:6px 0; }
     .item { display:flex; align-items:center; gap:8px; padding:5px 14px; min-height:44px; border-bottom:1px solid rgba(46,50,80,.4); }
     .item:last-child { border-bottom:none; }
@@ -233,11 +237,22 @@
     {% set active = cat["items"] | rejectattr(cfg.status) | list %}
     {% set completed = cat["items"] | selectattr(cfg.status) | list %}
     <section class="category" id="{{ cat.name|lower|replace(' ', '-') }}">
-      <div class="category-header">
+      <div class="category-header{% if cfg.key == "invest" %} invest-category-header{% endif %}">
         <span class="category-name">{{ cat.name }}</span>
         {% if cfg.key == "invest" %}
           {% set cat_allocation = invest_category_totals[cat.name] %}
-          <span class="category-allocation">{{ "%.2f"|format(cat_allocation.current) }}% now · {{ "%.2f"|format(cat_allocation.target) }}% target</span>
+          {% set cat_delta = cat_allocation.current - cat_allocation.target %}
+          {% set cat_delta_abs = cat_delta|abs %}
+          {% set cat_delta_strength = cat_delta_abs / 5 if cat_delta_abs < 5 else 1 %}
+          <span class="category-allocation" aria-label="{{ cat.name }} allocation summary">
+            <span class="category-allocation-stat">Now <strong>{{ "%.2f"|format(cat_allocation.current) }}%</strong></span>
+            <span class="category-allocation-stat">Target <strong>{{ "%.2f"|format(cat_allocation.target) }}%</strong></span>
+            <span class="allocation-delta {% if cat_delta > 0.005 %}over{% elif cat_delta < -0.005 %}under{% else %}on-target{% endif %}"
+                  data-delta-scope="category" data-delta="{{ "%.4f"|format(cat_delta) }}"
+                  style="--delta-tone:{{ "%.1f"|format(35 + cat_delta_strength * 65) }}%; --delta-wash:{{ "%.1f"|format(5 + cat_delta_strength * 13) }}%; --delta-border:{{ "%.1f"|format(15 + cat_delta_strength * 30) }}%">
+              {% if cat_delta > 0.005 %}Δ +{{ "%.2f"|format(cat_delta) }}% overweight{% elif cat_delta < -0.005 %}Δ {{ "%.2f"|format(cat_delta) }}% underweight{% else %}Δ on target{% endif %}
+            </span>
+          </span>
         {% endif %}
         <span class="category-count">
           {% if active|length %}<span class="active">{{ active|length }} {{ cfg.todo_label }}</span>{% else %}all {{ cfg.done_label }}{% endif %}
