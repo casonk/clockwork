@@ -32,6 +32,7 @@ from clockwork.render import _LAUNCHD_ENV_LOADER, render_launchd_plist, resolve_
 try:
     from web import (
         book_catalog,
+        code_age,
         code_triage,
         media_library,
         read_sources,
@@ -52,6 +53,7 @@ try:
     )
 except ModuleNotFoundError:
     import book_catalog
+    import code_age
     import code_triage
     import media_library
     import personal_library as personal_media
@@ -4002,7 +4004,7 @@ SIMPLE_LIST_CONFIGS = {
         "item_placeholder": "Add backlog item...",
         "category_placeholder": "New repo group...",
         "name_label": "Repo group",
-        "extras": ["repo", "priority", *CODE_FLAGS],
+        "extras": ["repo", "priority", "added", *CODE_FLAGS],
     },
 }
 
@@ -4184,6 +4186,9 @@ def _normalize_simple_list_data(data: dict, cfg: dict) -> dict:
                     cleaned = _clean_code_priority(item.get(field))
                 elif field in CODE_FLAGS:
                     cleaned = _clean_code_flag(item.get(field))
+                elif field == "added":
+                    day = code_age.parse_day(item.get(field))
+                    cleaned = day.isoformat() if day else ""
                 elif field == "target_pct":
                     try:
                         cleaned = _clean_invest_target(item.get(field))
@@ -4524,22 +4529,26 @@ def _render_simple_list(key: str):
     if key == "code":
         category_views = []
         visible_repos = set()
+        sort = request.args.get("sort", "")
+        sort = sort if sort in code_age.SORTS else "priority"
+        today = datetime.date.today()
+        history = code_age.history_dates(_read_history(cfg["history_file"]))
         for category in data["categories"]:
             by_repo = {}
             for item in category["items"]:
+                added = code_age.added_date(item, category["name"], history)
+                item["added_on"] = added.isoformat() if added else ""
+                item["age_days"] = code_age.age_days(added, today)
+                item["age_label"] = code_age.label(item["age_days"])
+                item["stale"] = code_age.is_stale(item["age_days"]) and not item.get(cfg["status"])
                 repo = str(item.get("repo") or "Unassigned")
                 group = by_repo.setdefault(repo.casefold(), {"name": repo, "items": []})
                 group["items"].append(item)
                 visible_repos.add(repo)
             groups = sorted(by_repo.values(), key=lambda group: group["name"].casefold())
             for group in groups:
-                # Stable sort: open items first, then P1..P4, unrated last.
-                group["items"].sort(
-                    key=lambda item: (
-                        bool(item.get(cfg["status"])),
-                        item.get("priority") or "P9",
-                    )
-                )
+                # Stable sort: open items first, then P1..P4 (unrated last), or by age.
+                group["items"].sort(key=lambda item: code_age.sort_key(sort, item))
                 group["remaining"] = sum(not item.get(cfg["status"]) for item in group["items"])
             category_views.append({**category, "groups": groups})
         total = sum(len(c["items"]) for c in data["categories"])
@@ -4552,6 +4561,16 @@ def _render_simple_list(key: str):
             cfg=cfg,
             data=data,
             category_views=category_views,
+            sort=sort,
+            sorts=code_age.SORTS,
+            stale_days=code_age.STALE_DAYS,
+            stale_count=sum(
+                1
+                for view in category_views
+                for group in view["groups"]
+                for item in group["items"]
+                if item["stale"]
+            ),
             visible_repos=sorted(visible_repos, key=str.casefold),
             known_repos=_extra_code_repos(),
             priorities=CODE_PRIORITIES,
@@ -4756,6 +4775,7 @@ def simple_list_add_item(page):
             flash("Repository name cannot be empty.", "error")
             return redirect(url_for(_simple_list_endpoint(key)) + f"#{_slug(category)}")
         item["repo"] = repo
+        item["added"] = datetime.date.today().isoformat()
         _apply_code_triage(
             item,
             priority=request.form.get("priority", ""),
@@ -5156,6 +5176,7 @@ def api_simple_add_item(list_key):
         if not repo:
             return jsonify({"ok": False, "error": "repo required"}), 400
         item["repo"] = repo
+        item["added"] = datetime.date.today().isoformat()
         _apply_code_triage(
             item, priority=payload.get("priority"), **{f: payload.get(f) for f in CODE_FLAGS}
         )
