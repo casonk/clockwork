@@ -408,4 +408,95 @@ def test_a_bad_label_is_refused_and_nothing_is_saved(client, themes_env, labels)
 
 def test_the_page_has_the_names_and_icons_section(client):
     html = client.get("/themes").get_data(as_text=True)
-    assert 'id="labels"' in html and 'id="labels-filter"' in html and 'id="emoji-list"' in html
+    assert 'id="labels"' in html and 'id="labels-filter"' in html
+
+
+# -- the colour rows are named by what they are for ----------------------------
+
+EDITOR_JS = (Path(__file__).resolve().parents[1] / "web" / "static" / "themes-editor.js").read_text(
+    encoding="utf-8"
+)
+
+
+def css_tokens() -> list[str]:
+    """The colour tokens every theme defines (from the vendored theme), minus the stripe."""
+    css = (
+        Path(__file__).resolve().parents[1] / "web" / "static" / "portfolio-theme.css"
+    ).read_text()
+    block = css.split("}", 1)[0]
+    return [
+        t
+        for t in dict.fromkeys(__import__("re").findall(r"--([a-z0-9-]+):", block))
+        if t != "stripe"
+    ]
+
+
+def token_rows() -> list[tuple[str, str, str]]:
+    """The (token, name, note) rows of the editor's TOKEN_GROUPS block."""
+    import re
+
+    block = EDITOR_JS.split("var TOKEN_GROUPS", 1)[1].split("var TOKEN_LABELS", 1)[0]
+    return re.findall(r'\["([a-z0-9-]+)", "([^"]+)", "([^"]*)"\]', block)
+
+
+def test_every_theme_token_has_a_purpose_name_and_a_group_in_the_editor():
+    listed = token_rows()
+    keys = [k for k, _, _ in listed]
+    assert sorted(keys) == sorted(css_tokens()), "the editor and the theme disagree on the tokens"
+    assert len(keys) == len(set(keys))
+    for key, label, hint in listed:
+        assert label and hint, f"{key} needs a name and a note on where it is used"
+
+
+def test_colours_are_named_by_purpose_not_only_by_hue():
+    import re
+
+    labels = {
+        k: label
+        for k, label, _ in re.findall(r'\["([a-z0-9-]+)", "([^"]+)", "([^"]*)"\]', EDITOR_JS)
+    }
+    for bare in (
+        "Green",
+        "Red",
+        "Yellow",
+        "Purple",
+        "Green fill",
+        "Red fill",
+        "Yellow fill",
+        "Purple fill",
+    ):
+        assert bare not in labels.values(), f"{bare!r} says the hue, not the purpose"
+    assert labels["green"].startswith("Success") and labels["red"].startswith("Error")
+    assert labels["yellow"].startswith("Warning") and labels["purple"].startswith("Highlight")
+    for hue in (
+        "green",
+        "red",
+        "yellow",
+        "purple",
+    ):  # each status colour is paired with its background
+        assert "background" in labels[f"{hue}-dim"].lower()
+    for chip in ('"Success"', '"Error"', '"Warning"', '"Highlight"'):
+        assert chip in EDITOR_JS  # and so are the preview chips
+
+
+def test_the_colour_rows_are_grouped_with_a_heading_each():
+    for title in ("Page and panels", "Text", "Accent (the main colour)", "Status colours"):
+        assert title in EDITOR_JS
+
+
+def test_every_icon_and_colour_has_a_library_picker_and_new_themes_use_a_form():
+    for name in (
+        "openPicker",
+        "closePicker",
+        "iconField",
+        "browse(",
+        "newThemeForm",
+        "titleProblem",
+    ):
+        assert name in EDITOR_JS, name
+    assert "prompt(" not in EDITOR_JS
+    html = (Path(__file__).resolve().parents[1] / "web" / "templates" / "themes.html").read_text(
+        encoding="utf-8"
+    )
+    assert 'id="new-theme-form"' in html
+    assert "emoji-list" not in html
