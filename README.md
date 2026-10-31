@@ -105,6 +105,12 @@ each position represents.
 
 Each ticker accepts an optional target percentage. The page shows current versus
 target allocation, category totals, and the total percentage still unassigned.
+Every category can use **Global %** inputs, where ticker targets are percentages
+of the full portfolio, or **Basket %** inputs. Basket mode adds a category total
+target expressed as a global portfolio percentage; each ticker's global target
+is derived as `basket total × ticker basket percentage ÷ 100`. Existing
+categories default to Global mode, so changing modes is explicit and does not
+reinterpret previously saved targets until the new mode is saved.
 The signed delta uses a diverging intensity spectrum: underweight positions are
 green, on-target positions are neutral, and overweight positions are red. Each
 category header rolls up its current allocation, summed target, and signed
@@ -113,9 +119,9 @@ a separate category budget.
 Targets are stored only in the ignored local To Invest data and are preserved
 when current allocations are refreshed. Edit any number of target fields, then
 use **Save all targets** in the sticky page header or press **Enter** in a target
-field; both submit the same complete batch. Clockwork validates that batch
-before writing it, so one invalid or stale row cannot leave a partially saved
-plan.
+or basket-total field; both submit category modes, basket totals, and ticker
+targets as the same complete batch. Clockwork validates that batch before
+writing it, so one invalid or stale row cannot leave a partially saved plan.
 
 ### Media library
 
