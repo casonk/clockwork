@@ -45,7 +45,13 @@ def test_a_bad_stamp_is_treated_as_missing():
 
 
 def test_labels_and_staleness():
-    assert [code_age.label(n) for n in (None, 0, 5, 14, 90)] == ["undated", "today", "5d", "2w", "3mo"]
+    assert [code_age.label(n) for n in (None, 0, 5, 14, 90)] == [
+        "undated",
+        "today",
+        "5d",
+        "2w",
+        "3mo",
+    ]
     assert code_age.is_stale(30) and not code_age.is_stale(29) and not code_age.is_stale(None)
 
 
@@ -81,7 +87,12 @@ def test_new_items_are_stamped_through_the_form_and_the_api(client, list_files):
     )
     client.post(
         "/to-code/add-item",
-        data={"csrf_token": token, "category": "util", "repo": "clockwork", "item": "From the form"},
+        data={
+            "csrf_token": token,
+            "category": "util",
+            "repo": "clockwork",
+            "item": "From the form",
+        },
     )
     stored = json.loads(list_files["CODE_LIST_FILE"].read_text())["categories"][0]["items"]
     assert [i["added"] for i in stored] == [dt.date.today().isoformat()] * 2
@@ -92,8 +103,18 @@ def test_the_page_shows_ages_and_sorts_by_them(client, list_files):
     _seed(
         list_files,
         [
-            {"title": "Older item", "done": False, "repo": "r", "added": str(today - dt.timedelta(40))},
-            {"title": "Newer item", "done": False, "repo": "r", "added": str(today - dt.timedelta(2))},
+            {
+                "title": "Older item",
+                "done": False,
+                "repo": "r",
+                "added": str(today - dt.timedelta(40)),
+            },
+            {
+                "title": "Newer item",
+                "done": False,
+                "repo": "r",
+                "added": str(today - dt.timedelta(2)),
+            },
             {"title": "Undated item", "done": False, "repo": "r"},
         ],
     )
