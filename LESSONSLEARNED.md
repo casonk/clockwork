@@ -260,6 +260,9 @@ should change how future sessions work in this repo.
   producer artifact, strip them from card/list responses, and expose an exact
   item-detail endpoint so the browser pays the history cost only after a user
   opens that item.
+- Treat ISO date-only market values as calendar labels, not local instants.
+  Format them in UTC in browser charts; otherwise negative-offset time zones
+  display the prior trading date.
 
 ### 2026-10-18 — Wikidata lookups for media titles
 
