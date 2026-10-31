@@ -32,6 +32,11 @@ def themes_env(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
     monkeypatch.setenv(themes_admin.ENV, str(SIBLING))
     monkeypatch.delenv("PORTFOLIO_THEMES_LOCAL", raising=False)
+    # Saving publishes a copy into the Caddy chrome directory. Keep that copy in the test
+    # directory; the real /srv/portfolio-chrome is what the live sites read.
+    chrome = tmp_path / "portfolio-chrome"
+    chrome.mkdir()
+    monkeypatch.setattr(site_chrome, "DEFAULT_CHROME_DIR", chrome)
     return config / "traction-control"
 
 
@@ -204,3 +209,11 @@ def test_asset_falls_back_to_the_vendored_copy_and_knows_only_three_names(monkey
 
 def test_the_home_page_has_a_themes_card(client):
     assert b'href="/themes"' in client.get("/home").data
+
+
+def test_the_services_menu_links_the_themes_page(client):
+    items = client.get("/api/site-nav").get_json()["items"]
+    menu = next(i for i in items if i["label"] == "Services")["menu"]
+    entry = next(e for e in menu if e.get("label") == "Themes")
+    assert entry["icon"] == "🎨" and entry["url"].endswith("/themes")
+    assert 'href="/themes"' in client.get("/themes").get_data(as_text=True)
