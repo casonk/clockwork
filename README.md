@@ -410,7 +410,7 @@ as JSON. `examples/clockwork/media-library.toml` runs `sync` every 30 minutes.
 `/themes` (the Services menu, and the Themes card on Home) edits your own portfolio themes: rename and recolour any theme with a live
 preview, create themes of your own from a tracked one, choose which are offered and in what order, keep named
 colour and emoji libraries to pick from, and set the shared font and page scale (tiny, small, medium, or large).
-The Aa control beside the theme rotator scales the whole page for this browser only. The changes live in an owner-only file,
+The font rotator and the size rotator beside the theme rotator change this browser only. Each steps through its own list. The changes live in an owner-only file,
 `~/.config/traction-control/themes.local.toml`, written by traction-control's `scripts/portfolio_themes.py`,
 which validates them and renders the merged themes once; the tracked themes are never edited, and every other
 repository keeps working from its vendored fallback. Clockwork's pages load the rendered themes from

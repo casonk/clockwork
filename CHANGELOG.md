@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The top bar has a font rotator and a size rotator, each like the theme rotator: the button steps to the next choice, and the menu beside it lists that choice only.
 - The shared size is a page scale: tiny, small, medium, or large (80%, 90%, 100%, 125%). It zooms the whole page, so text that sets its own pixel size scales with the headings. Medium is the current page. The Aa control and the Themes page use these names.
 - Pages follow the shared font and base size (`var(--font)`, `var(--font-size)`, `var(--mono)`). The top bar's Aa control changes the font and size for this browser only. The Themes page edits the shared default (system, serif or mono, and 14, 16, 18 or 20).
 - The Themes page also renames and re-icons things: a "Names and icons" section lists the top-bar items, the Lists, Media and Services menu entries and every Home card (including registry services) with their defaults, filterable, with a Default button per row and your saved emoji as suggestions. Overrides are stored in the same owner-only layer (traction-control `[labels]`, rendered to `labels.json`) and applied to the server-rendered top bar, the Home cards, the Services menu and the published `nav.json`, so other services' top bars follow. A page is identified by its path and a registry service by its name. The top-bar menus now come from one source: the template loops over `site_chrome.site_menus()` instead of repeating the entries by hand (the rendered bar is unchanged without overrides).
