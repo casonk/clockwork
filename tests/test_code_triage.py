@@ -1,5 +1,8 @@
 """Auto-sorting a To Code item: the classifier, and the form and API that use it."""
 
+# The route tests reuse the list fixtures from test_web_lists as parameters.
+# ruff: noqa: F811
+
 from __future__ import annotations
 
 import json
@@ -54,14 +57,8 @@ def test_fills_both_blank_fields_and_uses_a_model_per_question():
     assert (result.group_confidence, result.repo_confidence) == (0.8, 0.85)
     group_call, repo_call = model.calls
     assert group_call[0] == code_triage.GROUP_MODEL and repo_call[0] == code_triage.REPO_MODEL
-    assert (
-        "archive" not in group_call[2] or True
-    )  # callers pass groups without archive; see the route test
-    assert group_call[2] == sorted([*GROUPS, "unknown"]) and repo_call[2] == [
-        "media-library",
-        "scheduler-service",
-        "unknown",
-    ]
+    assert group_call[2] == sorted([*GROUPS, "unknown"])
+    assert repo_call[2] == ["media-library", "scheduler-service", "unknown"]
     assert result.describe() == "auto-sorted to util (80%) / scheduler-service (85%)"
 
 
@@ -146,9 +143,7 @@ def _saved(list_files):
     return json.loads(list_files["CODE_LIST_FILE"].read_text())["categories"]
 
 
-def test_the_form_sorts_an_item_with_no_group_or_repo(
-    client, list_files, fake, monkeypatch
-):  # noqa: F811
+def test_the_form_sorts_an_item_with_no_group_or_repo(client, list_files, fake, monkeypatch):
     monkeypatch.setenv("CLOCKWORK_CODE_EXTRA_REPOS", "scheduler-service")
     response = client.post(
         "/to-code/add-item",
@@ -170,9 +165,7 @@ def test_the_form_sorts_an_item_with_no_group_or_repo(
     assert "archive" not in fake.calls[0][2]  # finished groups are never offered
 
 
-def test_an_unsure_form_item_lands_in_unknown_and_is_still_saved(
-    client, list_files, monkeypatch
-):  # noqa: F811
+def test_an_unsure_form_item_lands_in_unknown_and_is_still_saved(client, list_files, monkeypatch):
     unsure = FakeModel(
         group={"util": 0.3, "doc": 0.3, "sec": 0.3, "unknown": 0.1}, repo={"a": 0.3, "unknown": 0.7}
     )
@@ -192,9 +185,7 @@ def test_an_unsure_form_item_lands_in_unknown_and_is_still_saved(
     assert unknown["items"] == [{"title": "Think about stuff", "done": False, "repo": "unknown"}]
 
 
-def test_the_api_reports_how_an_item_was_sorted(
-    client, list_files, fake, monkeypatch
-):  # noqa: F811
+def test_the_api_reports_how_an_item_was_sorted(client, list_files, fake, monkeypatch):
     monkeypatch.setenv("CLOCKWORK_CODE_EXTRA_REPOS", "scheduler-service")
     response = client.post(
         "/api/code/add-item",
@@ -208,7 +199,7 @@ def test_the_api_reports_how_an_item_was_sorted(
     assert util["items"][-1]["repo"] == "scheduler-service"
 
 
-def test_a_given_group_and_repo_skip_the_model(client, list_files, fake):  # noqa: F811
+def test_a_given_group_and_repo_skip_the_model(client, list_files, fake):
     response = client.post(
         "/api/code/add-item",
         json={"category": "doc", "repo": "clockwork", "item": "Write it down"},
@@ -218,9 +209,7 @@ def test_a_given_group_and_repo_skip_the_model(client, list_files, fake):  # noq
     assert fake.calls == []
 
 
-def test_with_auto_sorting_off_a_missing_repo_is_still_refused(
-    client, list_files, monkeypatch
-):  # noqa: F811
+def test_with_auto_sorting_off_a_missing_repo_is_still_refused(client, list_files, monkeypatch):
     monkeypatch.setattr(web_app.code_triage, "enabled", lambda env=None: False)
     response = client.post(
         "/api/code/add-item",
