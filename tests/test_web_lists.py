@@ -250,7 +250,7 @@ def test_to_invest_targets_are_saved_as_one_validated_batch(client, list_files):
     html = response.get_data(as_text=True)
     assert response.status_code == 200
     assert "Saved 2 target changes." in html
-    assert "Target 15.250%" in html
+    assert "Global target 15.250%" in html
     assert "Δ -2.750% underweight" in html
     data = client.get("/api/invest").get_json()["data"]
     assert data["categories"][0]["items"][0]["target_pct"] == "15.25"
@@ -364,9 +364,97 @@ def test_to_invest_renders_delta_spectrum_and_enter_batch_submit(client, list_fi
     assert "form.requestSubmit(save)" in html
     assert 'aria-label="Stocks allocation summary"' in html
     assert "Now <strong>21.50%</strong>" in html
-    assert "Target <strong>20.00%</strong>" in html
+    assert "Global target <strong>20.00%</strong>" in html
     assert 'data-delta-scope="category" data-delta="1.5040"' in html
     assert "Δ +1.50% overweight" in html
+
+
+def test_to_invest_basket_targets_compute_global_targets_transactionally(client, list_files):
+    list_files["INVEST_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {
+                        "name": "Stocks",
+                        "items": [
+                            {
+                                "ticker": "AMD",
+                                "holding": True,
+                                "allocation_pct": "12",
+                                "target_pct": "60",
+                            },
+                            {
+                                "ticker": "NVDA",
+                                "holding": True,
+                                "allocation_pct": "8",
+                                "target_pct": "40",
+                            },
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+    csrf = _csrf(client, "/api/invest")
+    payload = {
+        "categories": [
+            {
+                "category": "Stocks",
+                "target_mode": "basket",
+                "basket_target_pct": "25",
+            }
+        ],
+        "items": [
+            {"category": "Stocks", "ticker": "AMD", "target_pct": "60"},
+            {"category": "Stocks", "ticker": "NVDA", "target_pct": "40"},
+        ],
+    }
+
+    response = client.post(
+        "/to-invest/update-targets",
+        data={"csrf_token": csrf, "targets_json": json.dumps(payload)},
+        follow_redirects=True,
+    )
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Saved 2 target changes." in html
+    assert "Targets assigned <strong>25.00%</strong>" in html
+    assert "Global target <strong>25.00%</strong>" in html
+    assert "Basket assigned <strong>100.00%</strong>" in html
+    assert "Basket 60.000% → Global 15.000%" in html
+    assert "Basket 40.000% → Global 10.000%" in html
+    assert 'aria-label="Basket percentage for AMD"' in html
+    assert 'aria-label="Basket total target for Stocks"' in html
+
+    data = client.get("/api/invest").get_json()["data"]
+    category = data["categories"][0]
+    assert category["target_mode"] == "basket"
+    assert category["basket_target_pct"] == "25"
+    assert [item["target_pct"] for item in category["items"]] == ["60", "40"]
+
+    invalid_payload = {
+        "categories": [
+            {
+                "category": "Stocks",
+                "target_mode": "basket",
+                "basket_target_pct": "",
+            }
+        ],
+        "items": [
+            {"category": "Stocks", "ticker": "AMD", "target_pct": "70"},
+            {"category": "Stocks", "ticker": "NVDA", "target_pct": "30"},
+        ],
+    }
+    invalid = client.post(
+        "/to-invest/update-targets",
+        data={"csrf_token": csrf, "targets_json": json.dumps(invalid_payload)},
+        follow_redirects=True,
+    )
+    assert "Basket target for &#34;Stocks&#34; is required." in invalid.get_data(as_text=True)
+    unchanged = client.get("/api/invest").get_json()["data"]["categories"][0]
+    assert unchanged["basket_target_pct"] == "25"
+    assert [item["target_pct"] for item in unchanged["items"]] == ["60", "40"]
 
 
 def test_to_invest_sync_reports_missing_holdings_file_without_mutating_list(client, list_files):

@@ -19,7 +19,10 @@ should change how future sessions work in this repo.
   preserve targets; calculate percentages against the complete aggregate value
   even when cash or other positions are intentionally omitted from the visible
   ticker list, state that denominator explicitly in the UI, and surface the
-  same current/target/delta rollup at both portfolio and category levels.
+  same current/target/delta rollup at both portfolio and category levels. When
+  supporting basket-relative targets, keep the category's global basket budget
+  explicit and derive each global ticker target from that budget rather than
+  persisting a second, drift-prone copy.
 - When a page invites editing many related values before committing them, do
   not render each field as an independent reload-on-submit form. Provide one
   visible batch action, validate and resolve every row before mutating any of
