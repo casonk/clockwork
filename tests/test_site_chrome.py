@@ -34,10 +34,10 @@ def test_build_nav_makes_absolute_links_and_flags_services():
             "label": "Pinned",
             "services": [
                 {
-                    "name": "career",
-                    "display": "Career",
+                    "name": "sample",
+                    "display": "Sample App",
                     "icon": "💼",
-                    "url": "https://career.example/",
+                    "url": "https://sample.example/",
                 }
             ],
         },
@@ -59,8 +59,8 @@ def test_build_nav_makes_absolute_links_and_flags_services():
     assert lists["menu"][0]["url"] == "https://clock.example/groceries"
     menu = next(i for i in nav["items"] if i["label"] == "Services")["menu"]
     assert {"section": "Pinned"} in menu
-    career = next(e for e in menu if e.get("label") == "Career")
-    assert career["service"] is True and career["url"] == "https://career.example/"
+    sample = next(e for e in menu if e.get("label") == "Sample App")
+    assert sample["service"] is True and sample["url"] == "https://sample.example/"
     local = next(e for e in menu if e.get("label") == "Local")
     assert local["url"] == "https://clock.example/local"
 
