@@ -362,6 +362,11 @@ def test_to_invest_renders_delta_spectrum_and_enter_batch_submit(client, list_fi
     assert "Δ on target" in html
     assert "event.key !== 'Enter'" in html
     assert "form.requestSubmit(save)" in html
+    assert 'aria-label="Stocks allocation summary"' in html
+    assert "Now <strong>21.50%</strong>" in html
+    assert "Target <strong>20.00%</strong>" in html
+    assert 'data-delta-scope="category" data-delta="1.5040"' in html
+    assert "Δ +1.50% overweight" in html
 
 
 def test_to_invest_sync_reports_missing_holdings_file_without_mutating_list(client, list_files):
