@@ -407,7 +407,7 @@ as JSON. `examples/clockwork/media-library.toml` runs `sync` every 30 minutes.
 
 ### Themes
 
-`/themes` (the Themes card on Home) edits your own portfolio themes: rename and recolour any theme with a live
+`/themes` (the Services menu, and the Themes card on Home) edits your own portfolio themes: rename and recolour any theme with a live
 preview, create themes of your own from a tracked one, choose which are offered and in what order, and keep named
 colour and emoji libraries to pick from. The changes live in an owner-only file,
 `~/.config/traction-control/themes.local.toml`, written by traction-control's `scripts/portfolio_themes.py`,
