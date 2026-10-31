@@ -23,6 +23,10 @@ Mark items `[x]` when complete and move them to Done.
 
 ## Done
 
+- [x] [manual:2026-10-31] **Add Tradility stock performance details** — make
+  cards open on-demand multi-year charts, period returns, 52-week range,
+  transparent technical ratings, indicators, and source/freshness context.
+
 - [x] [manual:2026-10-26] **Add the To Code portfolio backlog list** — group
   items by repository family and repository, require explicit family selection,
   and link the local list from Home and the Lists menu.
