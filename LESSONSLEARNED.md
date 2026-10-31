@@ -23,7 +23,8 @@ should change how future sessions work in this repo.
   not render each field as an independent reload-on-submit form. Provide one
   visible batch action, validate and resolve every row before mutating any of
   them, keep that action in the sticky header when the edit surface is long,
-  and warn about navigation while unsaved edits remain.
+  route Enter from any field through that same batch form, and warn about
+  navigation while unsaved edits remain.
 - When a public-code privacy refactor replaces a private checkout path with a
   neutral placeholder and an environment override, migrate every ignored
   host manifest and reinstall/restart the live service in the same rollout.
