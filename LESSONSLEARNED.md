@@ -14,6 +14,12 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
+- **Style pages with the system theme tokens; pass category hues through `--hue`.** A literal
+  colour ignores the theme rotator and goes unreadable in the light theme. For data that needs
+  its own hue (grocery type badges, heat maps), set `--hue` and mix it with tokens
+  (`color-mix(in srgb, var(--hue) 20%, var(--surface))` for the fill, `... 55%, var(--text)` for
+  the text) so it adapts to every theme. `tests/test_system_theme.py` rejects other literals.
+
 - Keep measured portfolio allocation and user-authored allocation targets as
   separate state. Holdings sync may refresh current percentages, but it must
   preserve targets; calculate percentages against the complete aggregate value

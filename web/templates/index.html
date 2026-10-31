@@ -7,26 +7,7 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    :root {
-      --bg:        #0f1117;
-      --surface:   #1a1d27;
-      --surface2:  #22263a;
-      --surface3:  #191c2a;
-      --border:    #2e3250;
-      --accent:    #5b7fff;
-      --accent-dim:#2d3f8a;
-      --green:     #3ecf6e;
-      --green-dim: #1a4d30;
-      --red:       #e05252;
-      --red-dim:   #4d1a1a;
-      --yellow:    #e0b832;
-      --yellow-dim:#4d3d0a;
-      --purple:    #a06fff;
-      --purple-dim:#3a1f70;
-      --text:      #e2e4f0;
-      --muted:     #8890b0;
-      --mono:      "JetBrains Mono", "Fira Code", ui-monospace, monospace;
-    }
+    :root { --surface3: color-mix(in srgb, var(--bg) 50%, var(--surface)); --mono:      "JetBrains Mono", "Fira Code", ui-monospace, monospace; }
 
     body {
       background: var(--bg);
@@ -240,7 +221,7 @@
       letter-spacing: 0.5px; padding: 2px 7px; border-radius: 4px;
     }
     .scope-badge.user   { background: var(--accent-dim); color: var(--accent); }
-    .scope-badge.system { background: #3a2a0a; color: #e0a832; }
+    .scope-badge.system { background: var(--yellow-dim); color: var(--yellow); }
 
     /* ── System status dot ── */
     .sys-status {
@@ -366,7 +347,7 @@
     .form-actions { display: flex; gap: 8px; margin-top: 20px; justify-content: flex-end; }
     .btn-primary {
       padding: 8px 20px; border-radius: 7px; border: none;
-      background: var(--accent); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+      background: var(--accent); color: var(--accent-ink); font-size: 13px; font-weight: 600; cursor: pointer;
     }
     .btn-primary:hover { filter: brightness(1.15); }
     .btn-secondary {
@@ -408,6 +389,7 @@
       .drill-grid { grid-template-columns: 1fr; gap: 6px; }
     }
   </style>
+  {% include "_theme_head.html" %}
   <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
 </head>
 <body>

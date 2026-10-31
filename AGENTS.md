@@ -21,7 +21,12 @@ job.
 - `src/clockwork/render.py`: cron, `systemd`, and launchd rendering helpers
 - `src/clockwork/cli.py`: CLI entry point for render/install flows
 - `web/app.py`: Flask web UI for browsing, enabling, and disabling jobs
-- `web/templates/`: Jinja2 templates for the web UI
+- `web/templates/`: Jinja2 templates for the web UI. Pages include `_theme_head.html` and
+  style only with the system theme tokens (`var(--surface)`, never a literal colour);
+  `web/static/portfolio-theme.{css,js}` are vendored from traction-control
+  (`themes/`, `docs/system-theme.md`) and refreshed with its
+  `scripts/render_portfolio_theme.py --install web/static`. The top bar's rotator is
+  `data-theme-cycle` in `_site_nav.html`.
 - `examples/`: portable manifest templates using `%h/git/...` for systemd unit fields
   and `$HOME/git/...` for cron commands. `%h` is the systemd home-directory specifier
   and works natively in `WorkingDirectory`, `ExecStart`, and `Environment=` directives.

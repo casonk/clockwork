@@ -7,24 +7,7 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    :root {
-      --bg:        #0f1117;
-      --surface:   #1a1d27;
-      --surface2:  #22263a;
-      --surface3:  #191c2a;
-      --border:    #2e3250;
-      --accent:    #5b7fff;
-      --accent-dim:#2d3f8a;
-      --green:     #3ecf6e;
-      --green-dim: #1a4d30;
-      --red:       #e05252;
-      --red-dim:   #4d1a1a;
-      --yellow:    #e0b832;
-      --yellow-dim:#4d3d0a;
-      --text:      #e2e4f0;
-      --muted:     #8890b0;
-      --mono:      "JetBrains Mono", "Fira Code", ui-monospace, monospace;
-    }
+    :root { --surface3: color-mix(in srgb, var(--bg) 50%, var(--surface)); --mono:      "JetBrains Mono", "Fira Code", ui-monospace, monospace; }
 
     body {
       background: var(--bg);
@@ -178,7 +161,7 @@
       min-height: 44px;
     }
     .item:not(:last-child) {
-      border-bottom: 1px solid rgba(46,50,80,0.4);
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
     }
 
     /* Toggle checkbox — submitted as a form button */
@@ -384,24 +367,24 @@
       text-transform: uppercase; padding: 1px 6px; border-radius: 4px;
       flex-shrink: 0; white-space: nowrap;
     }
-    .type-Tops        { background:#1a2a4d; color:#5b9eff; }
-    .type-Bottoms     { background:#1a0a3d; color:#a07bff; }
-    .type-Outerwear   { background:#0d2d4d; color:#4a9eff; }
-    .type-Footwear    { background:#2d1a10; color:#d4845a; }
-    .type-Accessories { background:#3d2a00; color:#f39c12; }
-    .type-Underwear   { background:#2d0a4d; color:#b07bff; }
-    .type-Bedding     { background:#1a4d30; color:#3ecf6e; }
-    .type-Bath        { background:#0a3330; color:#1abc9c; }
-    .type-Cleaning    { background:#1a1a4d; color:#7b6ff0; }
-    .type-Lighting    { background:#4d3d0a; color:#e0b832; }
-    .type-Storage     { background:#1e2030; color:#8890b0; }
-    .type-Furniture   { background:#3d1a10; color:#c0714a; }
-    .type-Fitness     { background:#1a4d1a; color:#3ecf3e; }
-    .type-Camping     { background:#2d3d10; color:#a0c040; }
-    .type-Sports      { background:#4d1a1a; color:#e05252; }
-    .type-Electronics { background:#0a2a3d; color:#5bc0de; }
+    .type-Tops        { background:var(--accent-dim); color:var(--accent); }
+    .type-Bottoms     { background:var(--purple-dim); color:var(--purple); }
+    .type-Outerwear   { --hue:#4a9eff; background: color-mix(in srgb, var(--hue) 20%, var(--surface)); color: color-mix(in srgb, var(--hue) 55%, var(--text)); }
+    .type-Footwear    { --hue:#d4845a; background: color-mix(in srgb, var(--hue) 20%, var(--surface)); color: color-mix(in srgb, var(--hue) 55%, var(--text)); }
+    .type-Accessories { --hue:#f39c12; background: color-mix(in srgb, var(--hue) 20%, var(--surface)); color: color-mix(in srgb, var(--hue) 55%, var(--text)); }
+    .type-Underwear   { background:var(--purple-dim); color:var(--purple); }
+    .type-Bedding     { background:var(--green-dim); color:var(--green); }
+    .type-Bath        { --hue:#1abc9c; background: color-mix(in srgb, var(--hue) 20%, var(--surface)); color: color-mix(in srgb, var(--hue) 55%, var(--text)); }
+    .type-Cleaning    { --hue:#7b6ff0; background: color-mix(in srgb, var(--hue) 20%, var(--surface)); color: color-mix(in srgb, var(--hue) 55%, var(--text)); }
+    .type-Lighting    { background:var(--yellow-dim); color:var(--yellow); }
+    .type-Storage     { background:var(--surface3); color:var(--muted); }
+    .type-Furniture   { --hue:#c0714a; background: color-mix(in srgb, var(--hue) 20%, var(--surface)); color: color-mix(in srgb, var(--hue) 55%, var(--text)); }
+    .type-Fitness     { --hue:#3ecf3e; background: color-mix(in srgb, var(--hue) 20%, var(--surface)); color: color-mix(in srgb, var(--hue) 55%, var(--text)); }
+    .type-Camping     { --hue:#a0c040; background: color-mix(in srgb, var(--hue) 20%, var(--surface)); color: color-mix(in srgb, var(--hue) 55%, var(--text)); }
+    .type-Sports      { background:var(--red-dim); color:var(--red); }
+    .type-Electronics { --hue:#5bc0de; background: color-mix(in srgb, var(--hue) 20%, var(--surface)); color: color-mix(in srgb, var(--hue) 55%, var(--text)); }
     /* fallback for any AI-invented type */
-    [class^="type-"] { background:#1e2030; color:#8890b0; }
+    [class^="type-"] { background:var(--surface3); color:var(--muted); }
 
     /* ── Rules indicator ── */
     .rules-chip {
@@ -427,6 +410,7 @@
       .item { min-height: 48px; }
     }
   </style>
+  {% include "_theme_head.html" %}
   <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
 </head>
 <body>
@@ -482,7 +466,7 @@
     </form>
     <div style="position:relative" id="backup-wrap">
       <button class="sync-btn" onclick="toggleBackupMenu(event)" type="button" title="Restore from backup">↩ Restore</button>
-      <div id="backup-menu" style="display:none;position:absolute;right:0;top:calc(100% + 6px);background:#22263a;border:1px solid #2e3250;border-radius:8px;padding:6px;min-width:220px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);">
+      <div id="backup-menu" style="display:none;position:absolute;right:0;top:calc(100% + 6px);background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px;min-width:220px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);">
         {% for slot, label in [('hot','Hot'),('cold','Cold'),('archive','Archive')] %}
         {% set exists = backup_slots_exist[loop.index0] %}
         {% set mtime = backup_slots_mtime[loop.index0] %}
@@ -491,11 +475,11 @@
           <input type="hidden" name="slot" value="{{ slot }}">
           <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-radius:5px;gap:10px;">
             <div>
-              <div style="font-size:12px;font-weight:600;color:#e2e4f0">{{ label }}</div>
-              <div style="font-size:10px;color:#8890b0;margin-top:1px">{{ mtime if exists else 'no backup' }}</div>
+              <div style="font-size:12px;font-weight:600;color:var(--text)">{{ label }}</div>
+              <div style="font-size:10px;color:var(--muted);margin-top:1px">{{ mtime if exists else 'no backup' }}</div>
             </div>
             <button type="submit" {% if not exists %}disabled{% endif %}
-                    style="padding:3px 8px;border-radius:4px;border:1px solid #2e3250;background:transparent;color:#8890b0;font-size:11px;font-weight:600;cursor:{% if exists %}pointer{% else %}not-allowed{% endif %};opacity:{% if exists %}1{% else %}0.3{% endif %}">Restore</button>
+                    style="padding:3px 8px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:11px;font-weight:600;cursor:{% if exists %}pointer{% else %}not-allowed{% endif %};opacity:{% if exists %}1{% else %}0.3{% endif %}">Restore</button>
           </div>
         </form>
         {% endfor %}
