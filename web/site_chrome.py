@@ -53,17 +53,80 @@ SERVICES_MENU = (
 )
 
 
-def build_nav(base_url: str, service_groups: list[dict]) -> dict:
+# Pages whose sub-pages also count as "here" in the top bar (/library/play/...).
+PREFIX_PAGES = frozenset({"/groceries", "/shopping", "/library"})
+# The fixed top-bar items: id -> (label, icon). Their ids are what a label overrides.
+FIXED_ITEMS = {
+    "nav:home": ("Home", "🏠"),
+    "nav:clockwork": ("Clockwork", "⏰"),
+    "nav:lists": ("Lists", "✅"),
+    "nav:media": ("Media", "🎬"),
+    "nav:services": ("Services", "🧰"),
+}
+
+
+def labelled(
+    ident: str, label: str, icon: str, labels: dict[str, dict[str, str]] | None
+) -> tuple[str, str]:
+    """*label* and *icon* with your override for *ident*, if you set one."""
+    mine = (labels or {}).get(ident, {})
+    return mine.get("name", label), mine.get("icon", icon)
+
+
+def entries_for(rows, labels: dict[str, dict[str, str]] | None = None) -> list[dict]:
+    """Menu rows as dicts with your names and icons applied; a page's id is its path."""
+    out = []
+    for label, icon, path in rows:
+        name, glyph = labelled(path, label, icon, labels)
+        out.append(
+            {
+                "path": path,
+                "label": name,
+                "icon": glyph,
+                "prefix": path in PREFIX_PAGES,
+                "mark": path != "/home",  # "All services" is a pointer, never "the current page"
+            }
+        )
+    return out
+
+
+def site_menus(labels: dict[str, dict[str, str]] | None = None) -> dict[str, dict]:
+    """What the server-rendered top bar shows, with your names and icons applied."""
+
+    def fixed(key: str) -> dict:
+        label, icon = labelled(key, *FIXED_ITEMS[key], labels)
+        return {"label": label, "icon": icon}
+
+    return {
+        "home": fixed("nav:home"),
+        "clockwork": {**fixed("nav:clockwork"), "mobile": "Jobs"},
+        "lists": {**fixed("nav:lists"), "entries": entries_for(LISTS_MENU, labels)},
+        "media": {**fixed("nav:media"), "entries": entries_for(MEDIA_MENU, labels)},
+        "services": {
+            **fixed("nav:services"),
+            "mobile": "Sites",
+            "entries": entries_for(SERVICES_MENU, labels),
+        },
+    }
+
+
+def build_nav(
+    base_url: str, service_groups: list[dict], labels: dict[str, dict[str, str]] | None = None
+) -> dict:
     """The navigation document; ``base_url`` is Clockwork's own origin."""
     base = base_url.rstrip("/") + "/"
+    menus = site_menus(labels)
 
     def own(path: str) -> str:
         return urljoin(base, path.lstrip("/"))
 
-    def entries(rows) -> list[dict]:
-        return [{"label": label, "icon": icon, "url": own(path)} for label, icon, path in rows]
+    def entries(key: str) -> list[dict]:
+        return [
+            {"label": e["label"], "icon": e["icon"], "url": own(e["path"])}
+            for e in menus[key]["entries"]
+        ]
 
-    services: list[dict] = entries(SERVICES_MENU)
+    services: list[dict] = entries("services")
     for group in service_groups:
         services.append({"section": group["label"]})
         for svc in group["services"]:
@@ -80,15 +143,23 @@ def build_nav(base_url: str, service_groups: list[dict]) -> dict:
             )
     return {
         "version": 1,
-        "home": {"label": "Home", "icon": "🏠", "url": own("/home")},
+        "home": {**menus["home"], "url": own("/home")},
         "items": [
-            {"label": "Clockwork", "mobile": "Jobs", "icon": "⏰", "url": own("/")},
-            {"label": "Lists", "icon": "✅", "menu": entries(LISTS_MENU)},
-            {"label": "Media", "icon": "🎬", "menu": entries(MEDIA_MENU)},
+            {**menus["clockwork"], "url": own("/")},
             {
-                "label": "Services",
+                "label": menus["lists"]["label"],
+                "icon": menus["lists"]["icon"],
+                "menu": entries("lists"),
+            },
+            {
+                "label": menus["media"]["label"],
+                "icon": menus["media"]["icon"],
+                "menu": entries("media"),
+            },
+            {
+                "label": menus["services"]["label"],
                 "mobile": "Sites",
-                "icon": "🧰",
+                "icon": menus["services"]["icon"],
                 "align": "right",
                 "menu": services,
             },
