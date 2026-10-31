@@ -14,6 +14,11 @@ from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import urljoin
 
+try:
+    from web import themes_admin
+except ModuleNotFoundError:
+    import themes_admin
+
 STATIC = Path(__file__).resolve().parent / "static"
 CHROME_SCRIPT = STATIC / "portfolio-chrome.js"
 # Published name -> vendored source. theme.css and theme.js give a page the shared colour
@@ -127,7 +132,11 @@ def publish(nav: dict, directory: Path = DEFAULT_CHROME_DIR, *, files: bool = Tr
     changed = _write_if_changed(directory / "nav.json", (json.dumps(nav, indent=2) + "\n").encode())
     if files:
         for name, source in PUBLISHED_FILES.items():
-            changed |= _write_if_changed(directory / name, source.read_bytes())
+            # Your rendered themes when there are any, else the vendored copy. This directory is
+            # served by Caddy, which cannot follow a link into an owner-only home, so it is a copy.
+            changed |= _write_if_changed(
+                directory / name, (themes_admin.asset(name) or source).read_bytes()
+            )
     return changed
 
 

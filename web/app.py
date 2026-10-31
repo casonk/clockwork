@@ -24,7 +24,18 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import tomlkit
-from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import (
+    Flask,
+    abort,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    session,
+    url_for,
+)
 
 from clockwork.manifest import load_manifest
 from clockwork.render import _LAUNCHD_ENV_LOADER, render_launchd_plist, resolve_launchd_label
@@ -38,6 +49,7 @@ try:
         read_sources,
         release_sources,
         site_chrome,
+        themes_admin,
         watch_log,
     )
     from web import personal_library as personal_media
@@ -60,6 +72,7 @@ except ModuleNotFoundError:
     import read_sources
     import release_sources
     import site_chrome
+    import themes_admin
     import watch_log
     from library_pages import library_pages
     from personal_library import personal_library
@@ -4711,6 +4724,54 @@ def to_tradility():
     return render_template("to-tradility.html")
 
 
+@app.get("/theme-assets/<name>")
+def theme_asset(name):
+    """theme.css, theme.js or chrome.js: your rendered themes when there are any, else the vendored copy."""
+    path = themes_admin.asset(name)
+    if path is None:
+        abort(404)
+    response = send_file(path, mimetype=themes_admin.CONTENT_TYPES[name].split(";")[0])
+    response.headers["Cache-Control"] = "no-cache"  # a saved theme shows on the next load
+    return response
+
+
+@app.get("/themes")
+def themes_page():
+    return render_template("themes.html", tool_found=themes_admin.tool() is not None)
+
+
+@app.get("/api/themes")
+def api_themes():
+    try:
+        return jsonify({"ok": True, "state": themes_admin.state(), "csrf_token": _csrf_token()})
+    except themes_admin.ThemesError as exc:
+        return jsonify({"ok": False, "error": str(exc), "csrf_token": _csrf_token()}), 503
+
+
+def _themes_change(action):
+    if not _has_valid_csrf_token():
+        return jsonify({"ok": False, "error": "invalid csrf token"}), 403
+    try:
+        state = action()
+    except themes_admin.ThemesError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    _publish_site_chrome()  # the Caddy copy follows the render
+    return jsonify({"ok": True, "state": state, "csrf_token": _csrf_token()})
+
+
+@app.post("/api/themes/apply")
+def api_themes_apply():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"ok": False, "error": "send the themes as a JSON object"}), 400
+    return _themes_change(lambda: themes_admin.apply(payload))
+
+
+@app.post("/api/themes/reset")
+def api_themes_reset():
+    return _themes_change(themes_admin.reset)
+
+
 @app.get("/api/<list_key>")
 def api_simple_list(list_key):
     key = list_key[3:] if list_key.startswith("to-") else list_key
@@ -6695,6 +6756,16 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
             "hostname": "",
             "access_mode": "shared-mtls",
             "icon": "📊",
+        }
+    )
+    groups["Clockwork"].append(
+        {
+            "name": "clockwork-themes",
+            "display": "Themes",
+            "url": "/themes",
+            "hostname": "",
+            "access_mode": "shared-mtls",
+            "icon": "🎨",
         }
     )
 
