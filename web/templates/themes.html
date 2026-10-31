@@ -31,8 +31,11 @@
     .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-bottom: 12px; }
     .fields label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
     .fields input, .fields select { width: 100%; }
-    .tokens { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; margin-bottom: 12px; }
-    .token { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center; }
+    .tokens { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 6px 14px; margin-bottom: 10px; }
+    .token-group { margin: 14px 0 6px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--border); padding-bottom: 3px; }
+    .token-name { display: grid; line-height: 1.25; min-width: 0; }
+    .token-name small { font-size: 11px; }
+    .token { display: grid; grid-template-columns: 1fr auto auto auto; gap: 6px; align-items: center; }
     .token input[type=color] { width: 38px; height: 30px; padding: 0; }
     .token input[type=text] { width: 86px; font-family: var(--mono); }
     .chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -44,7 +47,7 @@
     .preview .acc { display: inline-block; background: var(--accent); color: var(--accent-ink); padding: 3px 10px; border-radius: 6px; font-weight: 600; }
     .preview .st { display: inline-block; padding: 1px 8px; border-radius: 8px; margin-right: 6px; font-size: 12px; }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    #msg { padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); }
+    #msg { position: sticky; top: 8px; z-index: 6; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); }
     #msg.ok { background: var(--green-dim); color: var(--green); border-color: var(--green); }
     #msg.err { background: var(--red-dim); color: var(--red); border-color: var(--red); }
     #labels details { margin-top: 8px; border: 1px solid var(--border); border-radius: 6px; }
@@ -52,6 +55,22 @@
     .label-row { display: grid; grid-template-columns: 70px minmax(120px, 1fr) minmax(90px, auto) auto; gap: 8px; align-items: center; padding: 4px 10px; }
     .label-row input { width: 100%; } .label-row.changed input { border-color: var(--accent); }
     #labels-filter { width: 100%; margin-top: 6px; }
+    .new-theme-form { display: grid; gap: 8px; margin-top: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface2); }
+    .new-theme-form label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+    .new-theme-form[hidden] { display: none; }
+    .picker { position: absolute; z-index: 50; width: 340px; max-width: calc(100vw - 16px); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.35); display: grid; grid-template-rows: auto minmax(0, 320px) auto; }
+    .picker > input[type=search] { margin: 8px; }
+    .picker-body { overflow: auto; padding: 0 8px 4px; }
+    .picker-body h4, .library-browse h4 { margin: 8px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+    .picker-foot { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 8px; border-top: 1px solid var(--border); }
+    .picker-foot input[type=text] { flex: 1; min-width: 90px; }
+    .picker-foot input[type=color] { width: 34px; height: 30px; padding: 0; }
+    .pick-grid { display: flex; flex-wrap: wrap; gap: 4px; }
+    .pick-cell { width: 34px; height: 34px; padding: 0; font-size: 20px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+    .picker-btn { display: inline-flex; align-items: center; gap: 6px; min-width: 56px; justify-content: space-between; }
+    .picker-btn .caret { color: var(--muted); font-size: 11px; }
+    .library-browse { margin-top: 8px; border: 1px solid var(--border); border-radius: 6px; padding: 4px 10px 8px; }
+    .library-browse summary { cursor: pointer; padding: 4px 0; }
     .add-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
   </style>
 </head>
@@ -84,6 +103,7 @@
       <p class="muted">Tick the ones to offer; the order here is the menu order.</p>
       <ul id="theme-list"></ul>
       <div class="add-row"><button id="new-theme" type="button">＋ New theme</button></div>
+      <div id="new-theme-form" class="new-theme-form" hidden></div>
     </aside>
     <section class="panel" id="editor"><p class="muted">Pick a theme to edit it.</p></section>
   </div>
@@ -113,7 +133,6 @@
       pick from your saved emoji or type your own.</p>
     <input id="labels-filter" type="search" placeholder="Filter by name or group…" aria-label="Filter names and icons">
     <div id="labels"></div>
-    <datalist id="emoji-list"></datalist>
   </section>
   <div class="actions">
     <button id="save" class="primary" type="button">Save</button>
