@@ -106,7 +106,10 @@ each position represents.
 Each ticker accepts an optional target percentage. The page shows current versus
 target allocation, category totals, and the total percentage still unassigned.
 The signed delta uses a diverging intensity spectrum: underweight positions are
-green, on-target positions are neutral, and overweight positions are red.
+green, on-target positions are neutral, and overweight positions are red. Each
+category header rolls up its current allocation, summed target, and signed
+delta using the same spectrum, so group-level drift is visible without adding
+a separate category budget.
 Targets are stored only in the ignored local To Invest data and are preserved
 when current allocations are refreshed. Edit any number of target fields, then
 use **Save all targets** in the sticky page header or press **Enter** in a target
