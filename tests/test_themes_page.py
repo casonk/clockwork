@@ -239,3 +239,170 @@ def test_the_services_menu_links_the_themes_page(client):
     entry = next(e for e in menu if e.get("label") == "Themes")
     assert entry["icon"] == "🎨" and entry["url"].endswith("/themes")
     assert 'href="/themes"' in client.get("/themes").get_data(as_text=True)
+
+
+# -- names and icons for cards, menu entries and top-bar items -----------------
+
+
+def write_labels(config: Path, labels: dict) -> None:
+    rendered = config / "traction-control" / "themes" / "rendered"
+    rendered.mkdir(parents=True, exist_ok=True)
+    (rendered / "labels.json").write_text(json.dumps(labels), encoding="utf-8")
+
+
+def test_labels_are_read_from_the_rendered_file_and_cached_by_its_time(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert themes_admin.labels() == {}  # no file
+    write_labels(tmp_path, {"/groceries": {"name": "Pantry", "icon": "🥫"}, "bad": "x"})
+    assert themes_admin.labels() == {"/groceries": {"name": "Pantry", "icon": "🥫"}}
+    path = tmp_path / "traction-control" / "themes" / "rendered" / "labels.json"
+    path.write_text("{ not json")
+    assert themes_admin.labels() == {}  # unreadable means no overrides, never an error page
+
+
+def test_menus_and_the_published_nav_apply_your_names_and_icons(client):
+    labels = {
+        "nav:lists": {"name": "Boards", "icon": "📋"},
+        "/groceries": {"name": "Pantry", "icon": "🥫"},
+        "/home": {"name": "Everything"},
+    }
+    menus = site_chrome.site_menus(labels)
+    assert (menus["lists"]["label"], menus["lists"]["icon"]) == ("Boards", "📋")
+    first = menus["lists"]["entries"][0]
+    assert (first["path"], first["label"], first["icon"]) == ("/groceries", "Pantry", "🥫")
+    assert menus["media"]["label"] == "Media"  # untouched
+    nav = site_chrome.build_nav("https://c.example/", [], labels)
+    lists = next(i for i in nav["items"] if i["label"] == "Boards")
+    assert lists["menu"][0] == {
+        "label": "Pantry",
+        "icon": "🥫",
+        "url": "https://c.example/groceries",
+    }
+    services = next(i for i in nav["items"] if i.get("align") == "right")["menu"]
+    assert any(e["label"] == "Everything" for e in services)
+    assert site_chrome.build_nav("https://c.example/", []) == site_chrome.build_nav(
+        "https://c.example/", [], {}
+    )
+
+
+def test_prefix_pages_and_all_services_are_flagged_for_the_template():
+    entries = {
+        e["path"]: e
+        for m in ("lists", "media", "services")
+        for e in site_chrome.site_menus()[m]["entries"]
+    }
+    assert entries["/library"]["prefix"] and entries["/groceries"]["prefix"]
+    assert not entries["/to-do"]["prefix"]
+    assert entries["/home"]["mark"] is False and entries["/to-do"]["mark"] is True
+
+
+def test_the_server_rendered_top_bar_and_home_cards_show_your_labels(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    before = client.get("/home").get_data(as_text=True)
+    assert "Groceries" in before
+    write_labels(
+        tmp_path,
+        {
+            "/groceries": {"name": "Pantry", "icon": "🥫"},
+            "nav:media": {"name": "Watch"},
+            "nav:home": {"icon": "🏡"},
+        },
+    )
+    html = client.get("/home").get_data(as_text=True)
+    assert "🥫 Pantry" in html  # the menu entry and the Home card share the path's label
+    assert "<span>Watch</span>" in html
+    assert "🏡" in html
+    assert ">Groceries<" not in html.split("<main")[0]  # the top bar no longer says Groceries
+
+
+def test_a_registry_service_is_renamed_by_its_name(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    registry = tmp_path / "wh"
+    registry.mkdir()
+    (registry / "services.toml").write_text(
+        '[[services]]\nname = "demo-svc"\ndescription = "Demo service"\nhostname = "demo.internal"\n'
+        'owner_repo = "clockwork"\naccess_mode = "shared-mtls"\nport = 9\n'
+    )
+    monkeypatch.setattr(web_app, "WIRING_HARNESS_DIR", registry)
+    with web_app.app.test_request_context("/home"):
+        cards = {c["name"]: c for _, cs in web_app._load_portal_groups() for c in cs}
+    assert cards["demo-svc"]["display"] == "Demo service"
+    write_labels(tmp_path / "cfg", {"demo-svc": {"name": "Renamed", "icon": "🧪"}})
+    with web_app.app.test_request_context("/home"):
+        cards = {c["name"]: c for _, cs in web_app._load_portal_groups() for c in cs}
+        defaults = {
+            c["name"]: c for _, cs in web_app._load_portal_groups(apply_labels=False) for c in cs
+        }
+    assert (cards["demo-svc"]["display"], cards["demo-svc"]["icon"]) == ("Renamed", "🧪")
+    assert defaults["demo-svc"]["display"] == "Demo service"
+
+
+def test_the_catalog_lists_every_renameable_thing_once_with_its_defaults(client):
+    with web_app.app.test_request_context("/themes"):
+        catalog = web_app._label_catalog()
+    ids = [item["id"] for item in catalog]
+    assert len(ids) == len(set(ids))
+    assert {
+        "nav:home",
+        "nav:lists",
+        "/groceries",
+        "/to-code",
+        "/schedule",
+        "/themes",
+        "/home",
+    } <= set(ids)
+    top = next(i for i in catalog if i["id"] == "nav:lists")
+    assert (top["name"], top["icon"], top["group"]) == ("Lists", "✅", "Top bar")
+
+
+@needs_tool
+def test_saving_labels_goes_through_the_tool_and_shows_up_in_pages_and_the_published_nav(
+    client, themes_env
+):
+    data = client.get("/api/themes").get_json()
+    assert any(i["id"] == "/groceries" for i in data["catalog"])
+    desired = unchanged(data["state"])
+    desired["labels"] = {
+        "/groceries": {"name": "Pantry", "icon": "🥫"},
+        "nav:lists": {"name": "Boards"},
+    }
+    response = apply(client, desired)
+    assert (
+        response.status_code == 200 and response.get_json()["state"]["labels"] == desired["labels"]
+    )
+    assert (
+        stat.S_IMODE((themes_env / "themes" / "rendered" / "labels.json").stat().st_mode) == 0o600
+    )
+    html = client.get("/home").get_data(as_text=True)
+    assert "🥫 Pantry" in html and "<span>Boards</span>" in html
+    nav = client.get("/api/site-nav").get_json()
+    assert any(item["label"] == "Boards" for item in nav["items"])
+    token = _csrf(client, "/api/themes")
+    assert (
+        client.post("/api/themes/reset", json={}, headers={"X-CSRF-Token": token}).status_code
+        == 200
+    )
+    assert "🥫 Pantry" not in client.get("/home").get_data(as_text=True)
+
+
+@needs_tool
+@pytest.mark.parametrize(
+    "labels",
+    [
+        {"/a": {"name": "<b>x</b>"}},
+        {"/a": {"icon": "ab"}},
+        {"Bad Id": {"name": "x"}},
+        {"/a": {"name": "x", "url": "//evil"}},
+    ],
+)
+def test_a_bad_label_is_refused_and_nothing_is_saved(client, themes_env, labels):
+    desired = unchanged(editor_state(client))
+    desired["labels"] = labels
+    response = apply(client, desired)
+    assert response.status_code == 400 and response.get_json()["error"]
+    assert not (themes_env / "themes.local.toml").exists()
+
+
+def test_the_page_has_the_names_and_icons_section(client):
+    html = client.get("/themes").get_data(as_text=True)
+    assert 'id="labels"' in html and 'id="labels-filter"' in html and 'id="emoji-list"' in html
