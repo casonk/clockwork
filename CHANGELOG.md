@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- To Code: the group and the repository are now optional. A blank one is filled in by a System One decision
+  model (`web/code_triage.py`, `POST /to-code/add-item` and `POST /api/code/add-item`): `clef-flash` picks the
+  repository (about 190 ms) and `clef` the group, each from a list of the allowed values with a description
+  (repository descriptions come from each checkout's `.github/repository.toml`) plus `unknown`. Anything the
+  model is unsure about (confidence under 0.6, `CLOCKWORK_TRIAGE_THRESHOLD`) or cannot be asked is filed as
+  `unknown`, in an `unknown` group and repository, never guessed. A group or repo you give is never changed. The
+  API reports the outcome as `auto_sorted`. Turn it off with `CLOCKWORK_TRIAGE=0`; the endpoint and models are
+  `CLOCKWORK_TRIAGE_URL`, `CLOCKWORK_TRIAGE_GROUP_MODEL` and `CLOCKWORK_TRIAGE_REPO_MODEL`. The defaults come from
+  crew-chief's synthetic `backlog-triage` benchmark; the group is the hard part (see its results).
+
 - Log what is watched in the library viewer and show it on To Watch. The player reports a video once 90%
   of it has played (`POST /library/play/<path>/watched`, CSRF-protected); Clockwork appends it to
   `config/watch-log.jsonl` (gitignored personal data; `CLOCKWORK_WATCH_LOG_FILE` moves it) with the title,
