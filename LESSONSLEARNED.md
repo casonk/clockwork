@@ -18,7 +18,8 @@ should change how future sessions work in this repo.
   separate state. Holdings sync may refresh current percentages, but it must
   preserve targets; calculate percentages against the complete aggregate value
   even when cash or other positions are intentionally omitted from the visible
-  ticker list, and state that denominator explicitly in the UI.
+  ticker list, state that denominator explicitly in the UI, and surface the
+  same current/target/delta rollup at both portfolio and category levels.
 - When a page invites editing many related values before committing them, do
   not render each field as an independent reload-on-submit form. Provide one
   visible batch action, validate and resolve every row before mutating any of
