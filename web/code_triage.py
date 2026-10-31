@@ -1,15 +1,18 @@
-"""Sort a new To Code item into a group and a repository with a System One decision model.
+"""Sort a new To Code item into a repository (and so a group) with a System One decision model.
 
-The To Code form used to require both. Now either can be left blank: ``classify`` asks Ollama's
-``/v1/systemone`` endpoint a ``choice`` question for each missing field, lists the allowed values
-(with a description each) and an ``unknown`` option, and answers ``unknown`` whenever the model
-picks it or is not confident enough. Nothing is guessed: an unsure item lands in the ``unknown``
-group or repository, where a person or a stronger model can sort it later.
+The To Code form used to require both a group and a repository. Now either can be left blank. In
+this backlog a group is a family of repositories (every repository's items sit in one group), so the
+group follows from the repository and only the repository is classified: ``classify`` asks Ollama's
+``/v1/systemone`` endpoint one ``choice`` question over the known repositories (each with a
+description) plus ``unknown``. When the group is given, only that group's repositories are offered.
+The answer is ``unknown`` whenever the model picks it or is not confident enough, and then the group
+is ``unknown`` too unless one was given. Nothing is guessed: an unsure item lands in the ``unknown``
+group and repository, where a person or a stronger model can sort it later.
 
-The defaults come from crew-chief's ``benchmarks/decisions/backlog-triage.json`` (synthetic
-entries, held out): the repository is answered well by ``clef-flash`` in about 190 ms (82% right
-overall; at confidence 0.6 it answers 74% of items and is wrong on 8%), the group is much harder
-and only ``clef`` (about 0.9 s) is useful (at 0.6 it answers 59% and is wrong on 8%). Stdlib only.
+Measured on the real backlog (leave-one-out, 30 repositories): about 41% of items get a repository
+and 72% of those are right at confidence 0.6; the rest are ``unknown``. Asking for the group as its
+own question was tried and dropped: it was right less often (about 46%) than always answering the
+most common group (73%). Stdlib only.
 """
 
 from __future__ import annotations
@@ -26,19 +29,10 @@ import tomllib
 
 UNKNOWN = "unknown"
 DEFAULT_URL = "http://localhost:11434/v1/systemone"
-REPO_MODEL = "clef-flash"
-GROUP_MODEL = "clef"
+MODEL = "clef"
 THRESHOLD = 0.6
-TIMEOUT_SECONDS = 20
-# What each standard group means; a group not listed here is described by its name.
-GROUP_DESCRIPTIONS = {
-    "util": "Improvements, bugs and features in the tools and services that run the portfolio",
-    "doc": "Documentation, diagrams, write-ups and records",
-    "sec": "Security: credentials, access, exposure and hardening",
-    "research": "Investigation or evaluation before anything is built",
-    "health": "Machine, drive or service health, monitoring and maintenance",
-}
-UNKNOWN_GROUP = "Does not clearly belong to any listed group"
+# A model that is not resident loads first: 10 to 20 seconds on this machine.
+TIMEOUT_SECONDS = 60
 UNKNOWN_REPO = "Does not clearly belong to any listed repository"
 
 Client = Callable[[str, str, dict], dict]
@@ -48,18 +42,14 @@ Client = Callable[[str, str, dict], dict]
 class Triage:
     group: str
     repo: str
-    group_confidence: float | None = None
     repo_confidence: float | None = None
     error: str = ""
 
     def describe(self) -> str:
         if self.error:
             return f"auto-sort unavailable ({self.error}); filed as {self.group} / {self.repo}"
-
-        def part(value: str, confidence: float | None) -> str:
-            return value if confidence is None else f"{value} ({confidence:.0%})"
-
-        return f"auto-sorted to {part(self.group, self.group_confidence)} / {part(self.repo, self.repo_confidence)}"
+        confidence = "" if self.repo_confidence is None else f" ({self.repo_confidence:.0%})"
+        return f"auto-sorted to {self.group} / {self.repo}{confidence}"
 
 
 def enabled(env: Mapping[str, str] | None = None) -> bool:
@@ -110,6 +100,33 @@ def systemone_client(url: str = DEFAULT_URL, timeout: int = TIMEOUT_SECONDS) -> 
     return call
 
 
+def canonical_repos(names: list[str]) -> dict[str, str]:
+    """Case-folded name -> its most common spelling, so ``Clockwork`` and ``clockwork`` are one repository."""
+    spellings: dict[str, dict[str, int]] = {}
+    for name in names:
+        if name.strip():
+            counts = spellings.setdefault(name.casefold(), {})
+            counts[name] = counts.get(name, 0) + 1
+    return {
+        key: max(counts, key=lambda n: (counts[n], n.islower(), n))
+        for key, counts in spellings.items()
+    }
+
+
+def groups_by_repo(data: dict) -> dict[str, str]:
+    """Case-folded repository -> the group most of its items sit in (finished work is not counted)."""
+    tally: dict[str, dict[str, int]] = {}
+    for category in data["categories"]:
+        if category["name"].lower() == "archive":
+            continue
+        for item in category["items"]:
+            repo = str(item.get("repo") or "").casefold()
+            if repo:
+                counts = tally.setdefault(repo, {})
+                counts[category["name"]] = counts.get(category["name"], 0) + 1
+    return {repo: max(counts, key=counts.get) for repo, counts in tally.items()}
+
+
 def _ask(client: Client, model: str, text: str, instructions: str, criteria: dict[str, str]):
     """(choice, confidence) for one choice question, or raise ValueError on a malformed answer."""
     body = client(
@@ -123,53 +140,42 @@ def _ask(client: Client, model: str, text: str, instructions: str, criteria: dic
     return choice, probabilities[choice]
 
 
-def _decide(client, model, text, instructions, criteria, threshold) -> tuple[str, float]:
-    choice, confidence = _ask(client, model, text, instructions, criteria)
-    if choice == UNKNOWN or choice not in criteria or confidence < threshold:
-        return UNKNOWN, confidence
-    return choice, confidence
-
-
 def classify(
     text: str,
     *,
     group: str = "",
     repo: str = "",
-    groups: list[str],
+    group_of_repo: Mapping[str, str],
     repos: Mapping[str, str],
     client: Client,
-    group_model: str = GROUP_MODEL,
-    repo_model: str = REPO_MODEL,
+    model: str = MODEL,
     threshold: float = THRESHOLD,
 ) -> Triage:
-    """Fill in whichever of ``group`` and ``repo`` is blank; a given value is never changed."""
-    group_confidence = repo_confidence = None
+    """Fill in whichever of ``group`` and ``repo`` is blank; a given value is never changed.
+
+    ``group_of_repo`` maps a case-folded repository to its group, ``repos`` maps each candidate
+    repository to a description. With a group given, only that group's repositories are offered."""
+    confidence = None
     error = ""
-    try:
-        if not group and groups:
-            criteria = {g: GROUP_DESCRIPTIONS.get(g, g) for g in groups if g != UNKNOWN}
-            criteria[UNKNOWN] = UNKNOWN_GROUP
-            group, group_confidence = _decide(
-                client,
-                group_model,
-                text,
-                "Which backlog group does this entry belong to? Answer unknown if it does not clearly fit.",
-                criteria,
-                threshold,
-            )
-        if not repo and repos:
-            criteria = {
-                **{name: desc for name, desc in repos.items() if name != UNKNOWN},
-                UNKNOWN: UNKNOWN_REPO,
-            }
-            repo, repo_confidence = _decide(
-                client,
-                repo_model,
-                text,
-                "Which repository is this entry about? Answer unknown if it does not clearly belong to one.",
-                criteria,
-                threshold,
-            )
-    except (OSError, ValueError, urllib.error.URLError, json.JSONDecodeError) as exc:
-        error = str(exc)[:80] or exc.__class__.__name__
-    return Triage(group or UNKNOWN, repo or UNKNOWN, group_confidence, repo_confidence, error)
+    if not repo:
+        candidates = {
+            name: desc
+            for name, desc in repos.items()
+            if name != UNKNOWN and (not group or group_of_repo.get(name.casefold()) == group)
+        }
+        if candidates:
+            try:
+                choice, confidence = _ask(
+                    client,
+                    model,
+                    text,
+                    "Which repository is this entry about? Answer unknown if it does not clearly belong to one.",
+                    {**candidates, UNKNOWN: UNKNOWN_REPO},
+                )
+                repo = choice if choice in candidates and confidence >= threshold else UNKNOWN
+            except (OSError, ValueError, urllib.error.URLError, json.JSONDecodeError) as exc:
+                error = str(exc)[:80] or exc.__class__.__name__
+    repo = repo or UNKNOWN
+    if not group:
+        group = group_of_repo.get(repo.casefold(), UNKNOWN)
+    return Triage(group, repo, confidence, error)
