@@ -34,10 +34,10 @@ def test_build_nav_makes_absolute_links_and_flags_services():
             "label": "Pinned",
             "services": [
                 {
-                    "name": "career",
-                    "display": "Career",
+                    "name": "sample",
+                    "display": "Sample App",
                     "icon": "💼",
-                    "url": "https://career.example/",
+                    "url": "https://sample.example/",
                 }
             ],
         },
@@ -59,8 +59,8 @@ def test_build_nav_makes_absolute_links_and_flags_services():
     assert lists["menu"][0]["url"] == "https://clock.example/groceries"
     menu = next(i for i in nav["items"] if i["label"] == "Services")["menu"]
     assert {"section": "Pinned"} in menu
-    career = next(e for e in menu if e.get("label") == "Career")
-    assert career["service"] is True and career["url"] == "https://career.example/"
+    sample = next(e for e in menu if e.get("label") == "Sample App")
+    assert sample["service"] is True and sample["url"] == "https://sample.example/"
     local = next(e for e in menu if e.get("label") == "Local")
     assert local["url"] == "https://clock.example/local"
 
@@ -92,3 +92,28 @@ def test_vendored_chrome_script_matches_traction_control():
     source = ROOT.parent / "traction-control" / "themes" / "portfolio-chrome.js"
     if source.is_file():
         assert site_chrome.CHROME_SCRIPT.read_text() == source.read_text()
+
+
+def test_publish_everywhere_writes_the_nav_to_the_store_and_the_files_only_to_the_caddy_dir(
+    tmp_path, monkeypatch
+):
+    caddy = tmp_path / "caddy"
+    caddy.mkdir()
+    store = tmp_path / "store"
+    (store / "_shared").mkdir(parents=True)
+    monkeypatch.setattr(site_chrome, "DEFAULT_CHROME_DIR", caddy)
+    monkeypatch.setenv("PORTFOLIO_STORE", str(store))
+    nav = site_chrome.build_nav("https://clock.example", [])
+
+    assert site_chrome.publish_everywhere(nav) is True
+    assert (caddy / "chrome.js").is_file() and (caddy / "nav.json").is_file()
+    assert (store / "_shared" / "nav.json").is_file()
+    assert not (store / "_shared" / "chrome.js").exists()  # traction-control publishes those
+    assert site_chrome.publish_everywhere(nav) is False
+
+
+def test_publish_everywhere_does_nothing_when_no_target_exists(tmp_path, monkeypatch):
+    monkeypatch.setattr(site_chrome, "DEFAULT_CHROME_DIR", tmp_path / "absent")
+    monkeypatch.setenv("PORTFOLIO_STORE", str(tmp_path / "no-store"))
+    assert site_chrome.chrome_dirs() == []
+    assert site_chrome.publish_everywhere(site_chrome.build_nav("https://c.example", [])) is False
