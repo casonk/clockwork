@@ -1,4 +1,4 @@
-/* The themes page: edit your portfolio themes, colours and emoji.
+/* The themes page: edit your portfolio themes, colours, emoji, and the shared font and size.
  *
  * Everything shown comes from a file you can edit, so the DOM is built with textContent and
  * properties, never innerHTML. The server (traction-control's portfolio_themes.py) validates the
@@ -15,7 +15,7 @@
     "accent-ink": "Text on accent", green: "Green", "green-dim": "Green fill", red: "Red",
     "red-dim": "Red fill", yellow: "Yellow", "yellow-dim": "Yellow fill", purple: "Purple", "purple-dim": "Purple fill"
   };
-  var S = null;          // the state being edited: themes (in menu order), palette, emoji, tokens
+  var S = null;          // the state being edited: themes (in menu order), palette, emoji, type, tokens
   var selected = null;   // the name of the theme in the editor
   var saved = "";        // JSON of the state as last loaded or saved, to tell what changed
   var armed = null;      // the token whose colour a click on a saved colour sets
@@ -48,7 +48,7 @@
   }
 
   function snapshot() {
-    return JSON.stringify({ t: S.themes, p: S.palette, e: S.emoji });
+    return JSON.stringify({ t: S.themes, p: S.palette, e: S.emoji, y: S.type });
   }
 
   function markDirty() {
@@ -58,6 +58,11 @@
   function load(state) {
     S = JSON.parse(JSON.stringify(state));
     S.themes.forEach(function (t) { t.tokens = Object.assign({}, t.tokens); });
+    S.type = S.type || { font: "system", size: 14 };
+    S.fonts = S.fonts && S.fonts.length ? S.fonts : [
+      { name: "system", label: "System" }, { name: "serif", label: "Serif" }, { name: "mono", label: "Mono" }
+    ];
+    S.sizes = S.sizes && S.sizes.length ? S.sizes : [14, 16, 18, 20];
     if (!S.themes.some(function (t) { return t.name === selected; })) selected = S.themes.length ? S.themes[0].name : null;
     saved = snapshot();
     render();
@@ -237,8 +242,29 @@
     chips("emoji", S.emoji, function (name) { return document.createTextNode(S.emoji[name]); }, function () {});
   }
 
+  function fillSelect(node, options, value, apply) {
+    node.replaceChildren();
+    options.forEach(function (opt) { node.appendChild(el("option", { value: opt.value, text: opt.label })); });
+    node.value = value;
+    if (!node.pfBound) {
+      node.pfBound = true;
+      node.addEventListener("change", function () { apply(node.value); markDirty(); });
+    }
+  }
+
+  function renderType() {
+    var font = $("type-font"), size = $("type-size");
+    if (!font || !size || !S.type) return;
+    fillSelect(font, S.fonts.map(function (face) {
+      return { value: face.name, label: face.label };
+    }), S.type.font, function (value) { S.type.font = value; });
+    fillSelect(size, S.sizes.map(function (n) {
+      return { value: String(n), label: n + " px" };
+    }), String(S.type.size), function (value) { S.type.size = parseInt(value, 10); });
+  }
+
   function render() {
-    renderList(); renderEditor(); renderLibraries(); markDirty();
+    renderList(); renderEditor(); renderLibraries(); renderType(); markDirty();
   }
 
   // ---- actions
@@ -249,7 +275,8 @@
       }),
       active: S.themes.filter(function (t) { return t.active; }).map(function (t) { return t.name; }),
       palette: S.palette,
-      emoji: S.emoji
+      emoji: S.emoji,
+      type: { font: S.type.font, size: Number(S.type.size) }
     };
   }
 
@@ -268,7 +295,7 @@
   $("save").addEventListener("click", save);
   $("revert").addEventListener("click", function () { init(); say("", ""); });
   $("reset-all").addEventListener("click", function () {
-    if (!confirm("Drop all of your themes, colours and emoji and go back to the tracked themes?")) return;
+    if (!confirm("Drop all of your themes, colours, emoji and the shared font and size, and go back to the tracked themes?")) return;
     api("/api/themes/reset", {}).then(function (res) {
       if (res.data.ok) { say("Reset. Reloading…", "ok"); setTimeout(function () { location.reload(); }, 600); }
       else say(res.data.error || "Could not reset.", "err");

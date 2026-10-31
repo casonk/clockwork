@@ -207,6 +207,28 @@ def test_asset_falls_back_to_the_vendored_copy_and_knows_only_three_names(monkey
     assert themes_admin.asset("secrets.txt") is None
 
 
+@needs_tool
+def test_the_shared_font_and_size_round_trip_and_a_bad_one_is_refused(client, themes_env):
+    html = client.get("/themes").get_data(as_text=True)
+    assert 'id="type-font"' in html and 'id="type-size"' in html
+    state = editor_state(client)
+    assert state["type"] == {"font": "system", "size": 14}
+    assert {face["name"] for face in state["fonts"]} == {"system", "serif", "mono"}
+    desired = {**unchanged(state), "palette": state["palette"], "emoji": state["emoji"]}
+    desired["type"] = {"font": "serif", "size": 18}
+    assert apply(client, desired).status_code == 200
+    assert editor_state(client)["type"] == {"font": "serif", "size": 18}
+    css = client.get("/theme-assets/theme.css").data
+    assert b"Iowan Old Style" in css and b"--font-size: 18px" in css
+    local = (themes_env / "themes.local.toml").read_text(encoding="utf-8")
+    assert 'font = "serif"' in local and "size = 18" in local
+    tracked = (SIBLING / "themes" / "themes.toml").read_text(encoding="utf-8")
+    assert 'font = "system"' in tracked and "size = 14" in tracked
+    refused = apply(client, {**desired, "type": {"font": "comic sans", "size": 13}})
+    assert refused.status_code == 400 and not refused.get_json()["ok"]
+    assert editor_state(client)["type"] == {"font": "serif", "size": 18}
+
+
 def test_the_home_page_has_a_themes_card(client):
     assert b'href="/themes"' in client.get("/home").data
 
