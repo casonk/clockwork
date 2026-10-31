@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Publish the top bar for other services: Clockwork writes `nav.json` (Home, Clockwork,
+  Lists, Media, Services from the wiring-harness registry) and `chrome.js` into the shared
+  directory the Caddy serves at `/_portfolio/` (`CLOCKWORK_CHROME_DIR`, default
+  `/srv/portfolio-chrome`), refreshed every five minutes while the web service runs.
+  `GET /api/site-nav` returns the same document. Services load the bar with
+  `<script src="/_portfolio/chrome.js" defer></script>`.
+
 - Adopt the portfolio system themes on every page (Midnight, Daylight, Ember, High
   contrast). Pages use the shared colour tokens instead of per-page palettes, and the
   top bar has a rotator button that steps to the next theme on each click; the choice
