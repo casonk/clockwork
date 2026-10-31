@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Clockwork no longer has its own top-bar icon: it is the first entry of the Services menu (⏰ Clockwork, the jobs page), and the published `nav.json` drops the top-level item. A name or icon you set for the old top-bar item (`nav:clockwork`) no longer applies; rename the Services entry (`/`) instead.
 - The top bar has a font rotator and a size rotator, each like the theme rotator: the button steps to the next choice, and the menu beside it lists that choice only.
 - Themes page: colours are named by what they are for (Success, Error, Warning, Highlight, Accent, Page and panels, Text) and grouped, each with a one-line note on where it is used. Every icon and colour opens a picker over the shared library (search, your own first, or type one), and both libraries can be browsed and added to your own. A new theme is made with an inline form (title plus a start-from theme) that derives a valid internal name, instead of a browser prompt; save and reset errors now show as "Could not save: ..." in a bar that stays in view.
 - The shared size is a page scale: tiny, small, medium, or large (80%, 90%, 100%, 125%). It zooms the whole page, so text that sets its own pixel size scales with the headings. Medium is the current page. The Aa control and the Themes page use these names.
