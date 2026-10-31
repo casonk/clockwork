@@ -21,6 +21,7 @@ job.
 - `src/clockwork/render.py`: cron, `systemd`, and launchd rendering helpers
 - `src/clockwork/cli.py`: CLI entry point for render/install flows
 - `web/app.py`: Flask web UI for browsing, enabling, and disabling jobs
+- `web/code_triage.py`: auto-sorts a To Code item with a blank group or repo using a System One decision model (stdlib client, thresholded, `unknown` when unsure)
 - `web/site_chrome.py`: builds and publishes `nav.json` and `chrome.js` for the shared top
   bar other services load from `/_portfolio/` (menus mirror `_site_nav.html`; a test checks
   the two agree)

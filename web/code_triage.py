@@ -16,12 +16,13 @@ from __future__ import annotations
 
 import json
 import os
-import tomllib
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+
+import tomllib
 
 UNKNOWN = "unknown"
 DEFAULT_URL = "http://localhost:11434/v1/systemone"

@@ -52,7 +52,7 @@ def test_fills_both_blank_fields_and_uses_a_model_per_question():
     result = classify(client=model)
     assert (result.group, result.repo) == ("util", "scheduler-service")
     assert (result.group_confidence, result.repo_confidence) == (0.8, 0.85)
-    (group_call, repo_call) = model.calls
+    group_call, repo_call = model.calls
     assert group_call[0] == code_triage.GROUP_MODEL and repo_call[0] == code_triage.REPO_MODEL
     assert (
         "archive" not in group_call[2] or True
@@ -146,7 +146,9 @@ def _saved(list_files):
     return json.loads(list_files["CODE_LIST_FILE"].read_text())["categories"]
 
 
-def test_the_form_sorts_an_item_with_no_group_or_repo(client, list_files, fake, monkeypatch):  # noqa: F811
+def test_the_form_sorts_an_item_with_no_group_or_repo(
+    client, list_files, fake, monkeypatch
+):  # noqa: F811
     monkeypatch.setenv("CLOCKWORK_CODE_EXTRA_REPOS", "scheduler-service")
     response = client.post(
         "/to-code/add-item",
@@ -168,7 +170,9 @@ def test_the_form_sorts_an_item_with_no_group_or_repo(client, list_files, fake, 
     assert "archive" not in fake.calls[0][2]  # finished groups are never offered
 
 
-def test_an_unsure_form_item_lands_in_unknown_and_is_still_saved(client, list_files, monkeypatch):  # noqa: F811
+def test_an_unsure_form_item_lands_in_unknown_and_is_still_saved(
+    client, list_files, monkeypatch
+):  # noqa: F811
     unsure = FakeModel(
         group={"util": 0.3, "doc": 0.3, "sec": 0.3, "unknown": 0.1}, repo={"a": 0.3, "unknown": 0.7}
     )
@@ -188,7 +192,9 @@ def test_an_unsure_form_item_lands_in_unknown_and_is_still_saved(client, list_fi
     assert unknown["items"] == [{"title": "Think about stuff", "done": False, "repo": "unknown"}]
 
 
-def test_the_api_reports_how_an_item_was_sorted(client, list_files, fake, monkeypatch):  # noqa: F811
+def test_the_api_reports_how_an_item_was_sorted(
+    client, list_files, fake, monkeypatch
+):  # noqa: F811
     monkeypatch.setenv("CLOCKWORK_CODE_EXTRA_REPOS", "scheduler-service")
     response = client.post(
         "/api/code/add-item",
@@ -212,7 +218,9 @@ def test_a_given_group_and_repo_skip_the_model(client, list_files, fake):  # noq
     assert fake.calls == []
 
 
-def test_with_auto_sorting_off_a_missing_repo_is_still_refused(client, list_files, monkeypatch):  # noqa: F811
+def test_with_auto_sorting_off_a_missing_repo_is_still_refused(
+    client, list_files, monkeypatch
+):  # noqa: F811
     monkeypatch.setattr(web_app.code_triage, "enabled", lambda env=None: False)
     response = client.post(
         "/api/code/add-item",
