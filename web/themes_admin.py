@@ -65,6 +65,40 @@ def asset(name: str) -> Path | None:
     return rendered if rendered.is_file() else VENDORED[name]
 
 
+_labels_cache: tuple[tuple[float, int], dict[str, dict[str, str]]] | None = None
+
+
+def labels() -> dict[str, dict[str, str]]:
+    """Your names and icons for cards, menu entries and top-bar items, by id (see traction-control's
+    ``[labels]``), read from the rendered ``labels.json``; empty when there is none or it is unreadable.
+
+    Read on every page, so it is cached by file time and size.
+    """
+    global _labels_cache
+    path = rendered_dir() / "labels.json"
+    try:
+        stat = path.stat()
+    except OSError:
+        return {}
+    key = (stat.st_mtime, stat.st_size)
+    if _labels_cache is None or _labels_cache[0] != key:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        clean = (
+            {
+                str(ident): {k: str(v) for k, v in entry.items() if k in ("name", "icon")}
+                for ident, entry in data.items()
+                if isinstance(entry, dict)
+            }
+            if isinstance(data, dict)
+            else {}
+        )
+        _labels_cache = (key, clean)
+    return _labels_cache[1]
+
+
 def _run(args: list[str], stdin: str | None = None) -> str:
     script = tool()
     if script is None:
