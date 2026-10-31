@@ -212,21 +212,24 @@ def test_the_shared_font_and_size_round_trip_and_a_bad_one_is_refused(client, th
     html = client.get("/themes").get_data(as_text=True)
     assert 'id="type-font"' in html and 'id="type-size"' in html
     state = editor_state(client)
-    assert state["type"] == {"font": "system", "size": 14}
+    assert state["type"] == {"font": "system", "size": "medium"}
+    assert [item["name"] for item in state["sizes"]] == ["tiny", "small", "medium", "large"]
     assert {face["name"] for face in state["fonts"]} == {"system", "serif", "mono"}
     desired = {**unchanged(state), "palette": state["palette"], "emoji": state["emoji"]}
-    desired["type"] = {"font": "serif", "size": 18}
+    desired["type"] = {"font": "serif", "size": "large"}
     assert apply(client, desired).status_code == 200
-    assert editor_state(client)["type"] == {"font": "serif", "size": 18}
+    assert editor_state(client)["type"] == {"font": "serif", "size": "large"}
     css = client.get("/theme-assets/theme.css").data
-    assert b"Iowan Old Style" in css and b"--font-size: 18px" in css
+    assert b"Iowan Old Style" in css and b"zoom: 1.25;" in css and b"--font-size: 14px" in css
     local = (themes_env / "themes.local.toml").read_text(encoding="utf-8")
-    assert 'font = "serif"' in local and "size = 18" in local
+    assert 'font = "serif"' in local and 'size = "large"' in local
     tracked = (SIBLING / "themes" / "themes.toml").read_text(encoding="utf-8")
-    assert 'font = "system"' in tracked and "size = 14" in tracked
-    refused = apply(client, {**desired, "type": {"font": "comic sans", "size": 13}})
+    assert 'font = "system"' in tracked and 'size = "medium"' in tracked
+    refused = apply(client, {**desired, "type": {"font": "comic sans", "size": "huge"}})
     assert refused.status_code == 400 and not refused.get_json()["ok"]
-    assert editor_state(client)["type"] == {"font": "serif", "size": 18}
+    refused_size = apply(client, {**desired, "type": {"font": "serif", "size": 13}})
+    assert refused_size.status_code == 400 and not refused_size.get_json()["ok"]
+    assert editor_state(client)["type"] == {"font": "serif", "size": "large"}
 
 
 def test_the_home_page_has_a_themes_card(client):

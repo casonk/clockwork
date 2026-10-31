@@ -69,7 +69,10 @@ def test_top_bar_has_a_font_and_size_switcher():
     assert "var(--font)" in css and "var(--font-size)" in css
     theme = (STATIC / "portfolio-theme.css").read_text()
     assert "--font-size: 14px" in theme and 'html[data-font="serif"]' in theme
-    assert "data-type-menu" in (STATIC / "portfolio-theme.js").read_text()
+    assert 'html[data-size="tiny"]' in theme and "zoom: 0.8" in theme
+    assert 'html[data-size="large"]' in theme and "zoom: 1.25" in theme
+    script = (STATIC / "portfolio-theme.js").read_text()
+    assert "data-type-menu" in script and '"Tiny"' in script
 
 
 def test_pages_use_the_shared_font_instead_of_a_private_stack():
