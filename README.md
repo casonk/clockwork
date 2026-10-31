@@ -405,6 +405,18 @@ genre folder, type, quality, codec and year range, sorted by title, year
 moves and renames keep), rating or size; `GET /api/library` returns the same data
 as JSON. `examples/clockwork/media-library.toml` runs `sync` every 30 minutes.
 
+### Themes
+
+`/themes` (the Themes card on Home) edits your own portfolio themes: rename and recolour any theme with a live
+preview, create themes of your own from a tracked one, choose which are offered and in what order, and keep named
+colour and emoji libraries to pick from. The changes live in an owner-only file,
+`~/.config/traction-control/themes.local.toml`, written by traction-control's `scripts/portfolio_themes.py`,
+which validates them and renders the merged themes once; the tracked themes are never edited, and every other
+repository keeps working from its vendored fallback. Clockwork's pages load the rendered themes from
+`/theme-assets/` (falling back to the vendored copies) and publishes a copy to the Caddy-served
+`/srv/portfolio-chrome`. Set `CLOCKWORK_TRACTION_CONTROL_DIR` if traction-control is not the sibling checkout.
+See traction-control `docs/system-theme.md`.
+
 ## mTLS and Caddy
 
 mTLS provisioning, Caddyfile generation, and DNS setup live in the

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Themes - Clockwork</title>
+  {% include "_theme_head.html" %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+    h1 { margin: 0; font-size: 18px; } h2 { margin: 0 0 8px; font-size: 14px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+    .muted { color: var(--muted); font-size: 12px; }
+    main { max-width: 1100px; margin: 0 auto; padding: 16px 14px 80px; display: grid; gap: 14px; }
+    .layout { display: grid; grid-template-columns: minmax(240px, 320px) 1fr; gap: 14px; align-items: start; }
+    @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+    button, input, select { font: inherit; color: var(--text); background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; }
+    button { cursor: pointer; } button:disabled { opacity: .5; cursor: default; }
+    button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+    button.small { padding: 2px 8px; font-size: 12px; }
+    ul { list-style: none; margin: 0; padding: 0; }
+    .theme-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-radius: 6px; cursor: pointer; }
+    .theme-row.selected { background: var(--accent-dim); }
+    .theme-row .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .swatch { display: inline-flex; width: 38px; height: 18px; border-radius: 4px; overflow: hidden; border: 1px solid var(--border); flex: none; }
+    .swatch i { flex: 1; }
+    .badge { font-size: 11px; padding: 0 6px; border-radius: 8px; background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+    .badge.changed { color: var(--yellow); border-color: var(--yellow); }
+    .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-bottom: 12px; }
+    .fields label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+    .fields input, .fields select { width: 100%; }
+    .tokens { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; margin-bottom: 12px; }
+    .token { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; align-items: center; }
+    .token input[type=color] { width: 38px; height: 30px; padding: 0; }
+    .token input[type=text] { width: 86px; font-family: ui-monospace, monospace; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 14px; padding: 1px 4px 1px 8px; background: var(--surface2); }
+    .chip .dot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--border); }
+    .chip button { border: 0; background: none; padding: 0 4px; color: var(--muted); }
+    .preview { border-radius: 8px; padding: 12px; border: 1px solid var(--border); background: var(--bg); color: var(--text); margin-bottom: 12px; }
+    .preview .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-top: 8px; }
+    .preview .acc { display: inline-block; background: var(--accent); color: var(--accent-ink); padding: 3px 10px; border-radius: 6px; font-weight: 600; }
+    .preview .st { display: inline-block; padding: 1px 8px; border-radius: 8px; margin-right: 6px; font-size: 12px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    #msg { padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); }
+    #msg.ok { background: var(--green-dim); color: var(--green); border-color: var(--green); }
+    #msg.err { background: var(--red-dim); color: var(--red); border-color: var(--red); }
+    .add-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
+  </style>
+</head>
+<body>
+{% include "_site_nav.html" %}
+<header>
+  <div>
+    <h1>🎨 Themes</h1>
+    <div class="muted">Your own themes, colours and emoji. Saved owner-only; the tracked themes are never edited.</div>
+  </div>
+  <div class="actions"><a href="/home" title="Home">🏠 Home</a></div>
+</header>
+<main data-csrf="{{ csrf_token }}" data-tool="{{ 'yes' if tool_found else 'no' }}">
+  <div id="msg" hidden></div>
+  {% if not tool_found %}
+  <div class="panel">traction-control's <code>portfolio_themes.py</code> was not found, so themes cannot be edited here.
+    Set <code>CLOCKWORK_TRACTION_CONTROL_DIR</code> to its checkout.</div>
+  {% endif %}
+  <div class="layout">
+    <aside class="panel">
+      <h2>Themes</h2>
+      <p class="muted">Tick the ones to offer; the order here is the menu order.</p>
+      <ul id="theme-list"></ul>
+      <div class="add-row"><button id="new-theme" type="button">＋ New theme</button></div>
+    </aside>
+    <section class="panel" id="editor"><p class="muted">Pick a theme to edit it.</p></section>
+  </div>
+  <section class="panel">
+    <h2>Colours</h2>
+    <p class="muted">Named colours for editing: click a token's colour on a theme, then click one of these to use it for that token.</p>
+    <div class="chips" id="palette"></div>
+    <div class="add-row">
+      <input id="pal-name" type="text" placeholder="name (e.g. brand)" maxlength="32" aria-label="Colour name">
+      <input id="pal-color" type="color" value="#5b7fff" aria-label="Colour">
+      <button id="pal-add" type="button">Add colour</button>
+    </div>
+  </section>
+  <section class="panel">
+    <h2>Emoji</h2>
+    <p class="muted">Named emoji you can click to use as a theme's icon.</p>
+    <div class="chips" id="emoji"></div>
+    <div class="add-row">
+      <input id="emo-name" type="text" placeholder="name (e.g. rocket)" maxlength="32" aria-label="Emoji name">
+      <input id="emo-glyph" type="text" placeholder="🚀" maxlength="16" size="6" aria-label="Emoji">
+      <button id="emo-add" type="button">Add emoji</button>
+    </div>
+  </section>
+  <div class="actions">
+    <button id="save" class="primary" type="button">Save</button>
+    <button id="revert" type="button">Revert changes</button>
+    <button id="reset-all" type="button">Reset to the tracked themes</button>
+    <span class="muted" id="dirty"></span>
+  </div>
+</main>
+<script src="{{ url_for('static', filename='themes-editor.js') }}"></script>
+</body>
+</html>

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add a Themes page (`/themes`, a Home card) for your own portfolio themes: rename and recolour any theme with a live preview, create themes of your own from a tracked one, choose which are offered and in what order, and keep named colour and emoji libraries to pick from. It edits an owner-only layer (`~/.config/traction-control/themes.local.toml`) through traction-control's `portfolio_themes.py`, which does the validation and renders the merged themes once; Clockwork never edits another repository's files. Clockwork's own pages load the rendered themes (`/theme-assets/theme.css`, `theme.js`, `chrome.js`, falling back to the vendored copies), and the Caddy-served `/srv/portfolio-chrome` gets a copy of them (Caddy cannot follow a link into an owner-only home). Set `CLOCKWORK_TRACTION_CONTROL_DIR` if traction-control is not the sibling checkout.
 - Tradility chart labels format date-only market points in UTC so local time
   zones cannot shift them to the prior day, and range summaries use the
   producer's calendar-period return when available.
