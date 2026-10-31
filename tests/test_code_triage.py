@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 
 import pytest
@@ -196,9 +197,12 @@ def test_the_form_sorts_an_item_with_no_group_or_repo(client, list_files, fake):
         follow_redirects=True,
     )
     assert "auto-sorted to util / scheduler-service (85%)" in response.get_data(as_text=True)
-    assert {"title": "Show next run", "done": False, "repo": "scheduler-service"} in _items(
-        list_files, "util"
-    )
+    assert {
+        "title": "Show next run",
+        "done": False,
+        "repo": "scheduler-service",
+        "added": dt.date.today().isoformat(),
+    } in _items(list_files, "util")
     assert fake.calls[0][2] == [
         "docs-site",
         "scheduler-service",
@@ -218,7 +222,12 @@ def test_an_unsure_form_item_lands_in_unknown_and_is_still_saved(client, list_fi
         },
     )
     assert _items(list_files, "unknown") == [
-        {"title": "Think about stuff", "done": False, "repo": "unknown"}
+        {
+            "title": "Think about stuff",
+            "done": False,
+            "repo": "unknown",
+            "added": dt.date.today().isoformat(),
+        }
     ]
 
 
@@ -243,11 +252,9 @@ def test_a_given_repo_in_another_case_is_normalised_and_gives_its_group(client, 
         headers={"X-CSRF-Token": _csrf(client, "/api/code")},
     )
     assert response.status_code == 200
-    assert _items(list_files, "util")[-1] == {
-        "title": "Another one",
-        "done": False,
-        "repo": "scheduler-service",
-    }
+    last = _items(list_files, "util")[-1]
+    last.pop("added")  # stamped on creation; covered in test_code_age
+    assert last == {"title": "Another one", "done": False, "repo": "scheduler-service"}
     assert fake.calls == []
 
 

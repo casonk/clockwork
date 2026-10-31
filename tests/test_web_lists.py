@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import sys
@@ -561,6 +562,7 @@ def test_to_code_list_renders_grouped_repositories_and_accepts_backlog_items(cli
         "title": "Add reconciliation report",
         "done": False,
         "repo": "sample-app",
+        "added": dt.date.today().isoformat(),
     }
     assert json.loads(list_files["CODE_LIST_FILE"].read_text()) == added.get_json()["data"]
     grouped_page = client.get("/to-code").get_data(as_text=True)
