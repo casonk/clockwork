@@ -117,3 +117,15 @@ def test_publish_everywhere_does_nothing_when_no_target_exists(tmp_path, monkeyp
     monkeypatch.setenv("PORTFOLIO_STORE", str(tmp_path / "no-store"))
     assert site_chrome.chrome_dirs() == []
     assert site_chrome.publish_everywhere(site_chrome.build_nav("https://c.example", [])) is False
+
+
+def test_every_list_and_media_page_in_the_nav_has_a_home_card():
+    """A page added to the top bar's Lists or Media menu must also get a Home card (Tradility
+    once had a nav entry but no card)."""
+    from web import app as web_app
+
+    with web_app.app.test_request_context("/home"):
+        groups = dict(web_app._load_portal_groups())
+    urls = {card["url"] for card in groups["Clockwork"]}
+    for _, _, path in (*site_chrome.LISTS_MENU, *site_chrome.MEDIA_MENU):
+        assert path in urls, f"{path} is in the top bar but has no Home card"

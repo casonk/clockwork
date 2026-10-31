@@ -6524,6 +6524,16 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
             "icon": "📈",
         }
     )
+    groups["Clockwork"].append(
+        {
+            "name": "clockwork-to-tradility",
+            "display": "Tradility",
+            "url": "/to-tradility",
+            "hostname": "",
+            "access_mode": "shared-mtls",
+            "icon": "📊",
+        }
+    )
 
     ordered = _GROUP_ORDER + sorted(set(groups) - set(_GROUP_ORDER))
     return [(g, cards) for g in ordered if (cards := groups.get(g))]
