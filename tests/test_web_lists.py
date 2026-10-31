@@ -125,6 +125,8 @@ def test_tradility_page_distinguishes_reload_from_refresh(client):
     assert "Technical market rating" in html
     assert "async function openTickerDetail" in html
     assert "URLSearchParams(window.location.search)" in html
+    assert "timeZone: 'UTC'" in html
+    assert "detailRecord.returns[detailRange]" in html
 
 
 def test_tradility_list_omits_history_and_ticker_detail_returns_it(client, list_files, monkeypatch):
