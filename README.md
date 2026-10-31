@@ -122,6 +122,8 @@ use **Save all targets** in the sticky page header or press **Enter** in a targe
 or basket-total field; both submit category modes, basket totals, and ticker
 targets as the same complete batch. Clockwork validates that batch before
 writing it, so one invalid or stale row cannot leave a partially saved plan.
+After the resulting page reload, Clockwork restores the focused row—or the row
+that was visible beneath the sticky header—to the same viewport position.
 
 ### Media library
 
