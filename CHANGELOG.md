@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Tradility chart labels format date-only market points in UTC so local time
+  zones cannot shift them to the prior day, and range summaries use the
+  producer's calendar-period return when available.
 - Tradility stock cards now open a responsive historical-performance dialog
   with range-selectable price charts, period returns, 52-week range, technical
   rating components, indicators, and data-source provenance. The list API omits
