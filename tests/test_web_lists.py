@@ -781,7 +781,7 @@ def test_to_watch_renders_torrent_and_library_controls(client, list_files):
     assert 'href="/api/watch-check"' not in html
     assert 'data-query="Napoleon Dynamite 2004"' in html
     assert 'data-query="Brazil 1985"' in html  # watched items can still be searched
-    assert html.count('class="search-panel"') == 1
+    assert html.count('class="search-panel"') == 2
     assert "/api/torrent-add" in html
     assert "/api/series-build" in html
     assert "Add selected episodes" in html
