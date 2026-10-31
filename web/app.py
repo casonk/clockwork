@@ -4029,25 +4029,23 @@ def _extra_code_repos() -> list[str]:
 def _auto_sort_code_item(text: str, category: str, repo: str, data: dict):
     """Fill in a blank group and/or repository with a decision model (web/code_triage.py).
 
-    Only called when one is blank. A model that is unreachable or unsure leaves ``unknown``."""
-    groups = [c["name"] for c in data["categories"] if c["name"].lower() != "archive"]
-    repos = sorted(
-        {str(i.get("repo") or "") for c in data["categories"] for i in c["items"]}
-        | set(_extra_code_repos()) - {""},
-        key=str.casefold,
-    )
+    Only called when one is blank. The group follows from the repository; a model that is
+    unreachable or unsure leaves ``unknown``."""
+    names = [str(i.get("repo") or "") for c in data["categories"] for i in c["items"]]
+    canonical = code_triage.canonical_repos([*names, *_extra_code_repos()])
     env = os.environ
     return code_triage.classify(
         text,
         group=category,
-        repo=repo,
-        groups=groups,
-        repos=code_triage.repo_catalog(BASE_DIR.parents[1], repos),
+        repo=canonical.get(repo.casefold(), repo) if repo else "",
+        group_of_repo=code_triage.groups_by_repo(data),
+        repos=code_triage.repo_catalog(
+            BASE_DIR.parents[1], sorted(canonical.values(), key=str.casefold)
+        ),
         client=code_triage.systemone_client(
             env.get("CLOCKWORK_TRIAGE_URL", code_triage.DEFAULT_URL)
         ),
-        group_model=env.get("CLOCKWORK_TRIAGE_GROUP_MODEL", code_triage.GROUP_MODEL),
-        repo_model=env.get("CLOCKWORK_TRIAGE_REPO_MODEL", code_triage.REPO_MODEL),
+        model=env.get("CLOCKWORK_TRIAGE_MODEL", code_triage.MODEL),
         threshold=float(env.get("CLOCKWORK_TRIAGE_THRESHOLD", code_triage.THRESHOLD)),
     )
 
