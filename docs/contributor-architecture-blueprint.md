@@ -57,6 +57,16 @@ workload logic.
 - Favor deterministic text rendering over runtime mutation or hidden side
   effects.
 
+## Web Data Consumer Boundary
+
+- Clockwork may present read-only downstream artifacts without taking ownership
+  of their generation. Tradility's collection endpoint returns compact card
+  summaries; its exact-ticker detail endpoint reads chart history, performance,
+  ratings, and provenance from the same generated artifact on demand.
+- Dense per-item series must not be copied into every collection response.
+  Keep the producer artifact authoritative and load detail only after explicit
+  user interaction.
+
 ## GPU Workload Handoff
 
 - The ECU observes active HLS ffmpeg processes as GPU activities. Its local

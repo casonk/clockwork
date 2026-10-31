@@ -256,6 +256,10 @@ should change how future sessions work in this repo.
 - Importing a web/control module must not rewrite tracked manifests by default.
   Keep migration helpers explicit opt-ins so read-only tests and diagnostics
   remain read-only.
+- Keep dense chart series out of collection endpoints. Persist them with the
+  producer artifact, strip them from card/list responses, and expose an exact
+  item-detail endpoint so the browser pays the history cost only after a user
+  opens that item.
 
 ### 2026-10-18 — Wikidata lookups for media titles
 

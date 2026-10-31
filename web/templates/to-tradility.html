@@ -150,16 +150,20 @@
       border-radius: 9px;
       border: 1px solid var(--border);
       padding: 10px 12px;
-      cursor: default;
+      cursor: pointer;
       transition: transform 0.12s, box-shadow 0.12s;
       position: relative;
       overflow: hidden;
+      width: 100%; text-align: left; font: inherit; color: inherit;
+      appearance: none; background: var(--surface);
     }
     .ticker-card:hover {
       transform: translateY(-2px);
       box-shadow: 0 6px 20px rgba(0,0,0,0.5);
     }
     .ticker-card.no-data { background: var(--surface); opacity: 0.55; }
+    .ticker-card:disabled { cursor: default; }
+    .ticker-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
     .card-ticker {
       font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
@@ -205,6 +209,68 @@
 
     /* VWAP delta */
     .vwap-delta { font-size: 10px; font-weight: 600; margin-top: 4px; }
+    .card-detail-cue { margin-top: 7px; font-size: 9px; color: var(--muted-fg); }
+
+    /* ── Stock detail dialog ── */
+    body.detail-open { overflow: hidden; }
+    .detail-overlay {
+      position: fixed; inset: 0; z-index: 1000;
+      background: color-mix(in srgb, var(--bg) 82%, transparent);
+      backdrop-filter: blur(7px); padding: 20px;
+      display: grid; place-items: center;
+    }
+    .detail-overlay[hidden] { display: none; }
+    .detail-panel {
+      width: min(980px, 100%); max-height: calc(100vh - 40px); overflow: auto;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.55); padding: 20px;
+    }
+    .detail-header { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 16px; }
+    .detail-title { flex: 1; min-width: 0; }
+    .detail-ticker { font: 800 24px ui-monospace, monospace; letter-spacing: 0.6px; }
+    .detail-name { color: var(--muted-fg); font-size: 12px; }
+    .detail-price { font-size: 22px; font-weight: 750; white-space: nowrap; }
+    .detail-close {
+      border: 1px solid var(--border); background: var(--surface2); color: var(--text);
+      border-radius: 8px; width: 34px; height: 34px; cursor: pointer; font-size: 18px;
+    }
+    .detail-layout { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(240px, 1fr); gap: 16px; }
+    .detail-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 11px; padding: 14px; }
+    .detail-card-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--muted-fg); font-weight: 750; margin-bottom: 9px; }
+    .detail-range-buttons { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+    .detail-range-btn {
+      border: 1px solid var(--border); background: transparent; color: var(--muted-fg);
+      border-radius: 99px; padding: 3px 10px; cursor: pointer; font-size: 11px; font-weight: 700;
+    }
+    .detail-range-btn.active { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+    .detail-chart-wrap { position: relative; height: 310px; }
+    #detail-chart { width: 100%; height: 100%; display: block; }
+    .detail-chart-summary { display: flex; justify-content: space-between; gap: 12px; color: var(--muted-fg); font-size: 11px; margin-top: 5px; }
+    .detail-rating { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+    .detail-rating-label { font-size: 22px; font-weight: 800; }
+    .rating-positive { color: var(--green); }
+    .rating-negative { color: var(--red); }
+    .rating-neutral { color: var(--yellow); }
+    .detail-disclaimer { color: var(--muted-fg); font-size: 10px; margin-top: 6px; }
+    .component-list { display: grid; gap: 6px; margin-top: 12px; }
+    .component-row, .detail-meta-row { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; }
+    .component-row span:first-child, .detail-meta-row span:first-child { color: var(--muted-fg); }
+    .return-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+    .return-cell { text-align: center; background: var(--surface3); border-radius: 7px; padding: 7px 3px; }
+    .return-label { display: block; color: var(--muted-fg); font-size: 9px; text-transform: uppercase; }
+    .return-value { display: block; font: 700 12px ui-monospace, monospace; margin-top: 2px; }
+    .range-track { height: 7px; background: var(--surface3); border-radius: 99px; position: relative; margin: 14px 0 5px; }
+    .range-marker { position: absolute; top: -4px; width: 3px; height: 15px; background: var(--accent); border-radius: 2px; transform: translateX(-50%); }
+    .range-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted-fg); }
+    .detail-stack { display: grid; gap: 12px; }
+    .detail-loading { padding: 70px 20px; text-align: center; color: var(--muted-fg); }
+    @media (max-width: 720px) {
+      .detail-overlay { padding: 0; place-items: stretch; }
+      .detail-panel { max-height: 100vh; width: 100%; border-radius: 0; padding: 15px; }
+      .detail-layout { grid-template-columns: 1fr; }
+      .detail-chart-wrap { height: 260px; }
+      .return-grid { grid-template-columns: repeat(3, 1fr); }
+    }
 
     /* State messages */
     .state-msg { text-align: center; color: var(--muted-fg); padding: 60px 24px; font-size: 14px; }
@@ -276,6 +342,21 @@
 <main>
   <div id="grid-container"><div class="state-msg">Loading…</div></div>
 </main>
+
+<div class="detail-overlay" id="detail-overlay" hidden
+     role="dialog" aria-modal="true" aria-labelledby="detail-dialog-title">
+  <section class="detail-panel" id="detail-panel">
+    <div class="detail-header">
+      <div class="detail-title">
+        <div class="detail-ticker" id="detail-dialog-title">Stock details</div>
+        <div class="detail-name" id="detail-dialog-name"></div>
+      </div>
+      <div class="detail-price" id="detail-dialog-price"></div>
+      <button class="detail-close" type="button" onclick="closeTickerDetail()" aria-label="Close details">×</button>
+    </div>
+    <div id="detail-content"><div class="detail-loading">Loading historical performance…</div></div>
+  </section>
+</div>
 
 <script>
   // ── matplotlib RdYlGn colormap (11 stops, t=0 → red, t=1 → green) ─────────
@@ -387,6 +468,9 @@
   let activeClasses   = new Set(['all']);
   let allClasses      = [];
   let csrfToken       = '';
+  let detailRecord    = null;
+  let detailRange     = '5y';
+  let detailTrigger   = null;
 
   // ── Data load ────────────────────────────────────────────────────────────────
   async function loadData() {
@@ -545,8 +629,15 @@
 
     for (const t of tickers) {
       const pal   = cardPalette(t._t);
-      const card  = document.createElement('div');
+      const card  = document.createElement('button');
+      card.type = 'button';
+      card.dataset.ticker = t.ticker;
       card.className = 'ticker-card' + (pal ? '' : ' no-data');
+      card.disabled = !t.detail_available;
+      if (t.detail_available) {
+        card.title = `Open ${t.ticker} historical performance`;
+        card.addEventListener('click', () => openTickerDetail(t.ticker, card));
+      }
 
       if (pal) {
         card.style.background   = pal.bg;
@@ -617,6 +708,7 @@
           <span class="card-ind-value" style="${indValFg}">${indValue}</span>
         </div>
         ${extraHtml}
+        ${t.detail_available ? '<div class="card-detail-cue">View chart and rating →</div>' : ''}
       `;
       grid.appendChild(card);
     }
@@ -624,6 +716,218 @@
     const container = document.getElementById('grid-container');
     container.innerHTML = '';
     container.appendChild(grid);
+  }
+
+  // ── Historical-performance detail ───────────────────────────────────────────
+  async function openTickerDetail(ticker, trigger) {
+    detailTrigger = trigger || null;
+    detailRecord = null;
+    detailRange = '5y';
+    const overlay = document.getElementById('detail-overlay');
+    overlay.hidden = false;
+    document.body.classList.add('detail-open');
+    document.getElementById('detail-dialog-title').textContent = ticker;
+    document.getElementById('detail-dialog-name').textContent = '';
+    document.getElementById('detail-dialog-price').textContent = '';
+    document.getElementById('detail-content').innerHTML =
+      '<div class="detail-loading">Loading historical performance…</div>';
+    overlay.querySelector('.detail-close').focus();
+
+    try {
+      const res = await fetch(`/api/tradility-analysis/${encodeURIComponent(ticker)}`);
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      detailRecord = data.ticker;
+      renderTickerDetail(data);
+    } catch (err) {
+      document.getElementById('detail-content').innerHTML =
+        `<div class="error-card">Could not load ${esc(ticker)} details: ${esc(err.message)}</div>`;
+    }
+  }
+
+  function closeTickerDetail() {
+    document.getElementById('detail-overlay').hidden = true;
+    document.body.classList.remove('detail-open');
+    detailRecord = null;
+    if (detailTrigger) detailTrigger.focus();
+    detailTrigger = null;
+  }
+
+  function ratingLabel(value) {
+    return String(value || 'unknown').split('_').map(part =>
+      part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+  }
+
+  function ratingClass(value) {
+    if (value === 'buy' || value === 'strong_buy') return 'rating-positive';
+    if (value === 'sell' || value === 'strong_sell') return 'rating-negative';
+    return 'rating-neutral';
+  }
+
+  function formatReturn(value) {
+    if (value == null || !Number.isFinite(Number(value))) return '—';
+    const number = Number(value);
+    return `${number >= 0 ? '+' : ''}${number.toFixed(2)}%`;
+  }
+
+  function returnClass(value) {
+    if (value == null || Number(value) === 0) return '';
+    return Number(value) > 0 ? 'rating-positive' : 'rating-negative';
+  }
+
+  function renderTickerDetail(data) {
+    const t = data.ticker;
+    const returns = t.returns || {};
+    const components = t.technical_components || {};
+    const position = Math.min(100, Math.max(0, Number(t.range_position_52w ?? 0)));
+    const returnLabels = [['1m','1M'], ['3m','3M'], ['1y','1Y'], ['3y','3Y'], ['5y','5Y']];
+    document.getElementById('detail-dialog-title').textContent = t.ticker || 'Stock details';
+    document.getElementById('detail-dialog-name').textContent =
+      [t.asset_class, t.name].filter(Boolean).join(' · ');
+    document.getElementById('detail-dialog-price').textContent = fmtPrice(t.last_price);
+
+    document.getElementById('detail-content').innerHTML = `
+      <div class="detail-layout">
+        <div class="detail-stack">
+          <section class="detail-card">
+            <div class="detail-card-title">Historical close</div>
+            <div class="detail-range-buttons">
+              ${returnLabels.map(([key, label]) =>
+                `<button type="button" class="detail-range-btn ${key === detailRange ? 'active' : ''}" data-range="${key}" onclick="setDetailRange('${key}')">${label}</button>`
+              ).join('')}
+            </div>
+            <div class="detail-chart-wrap"><canvas id="detail-chart"></canvas></div>
+            <div class="detail-chart-summary" id="detail-chart-summary"></div>
+          </section>
+          <section class="detail-card">
+            <div class="detail-card-title">Period performance</div>
+            <div class="return-grid">
+              ${returnLabels.map(([key, label]) => `<div class="return-cell">
+                <span class="return-label">${label}</span>
+                <span class="return-value ${returnClass(returns[key])}">${formatReturn(returns[key])}</span>
+              </div>`).join('')}
+            </div>
+          </section>
+        </div>
+        <div class="detail-stack">
+          <section class="detail-card">
+            <div class="detail-card-title">Technical market rating</div>
+            <div class="detail-rating">
+              <span class="detail-rating-label ${ratingClass(t.technical_rating)}">${esc(ratingLabel(t.technical_rating))}</span>
+              <strong>${Number(t.technical_score ?? 0) >= 0 ? '+' : ''}${Number(t.technical_score ?? 0)} / 4</strong>
+            </div>
+            <div class="component-list">
+              <div class="component-row"><span>Long-term trend</span><strong>${Number(components.long_term_trend ?? 0) >= 0 ? '+' : ''}${Number(components.long_term_trend ?? 0)}</strong></div>
+              <div class="component-row"><span>VWAP momentum</span><strong>${Number(components.vwap_momentum ?? 0) >= 0 ? '+' : ''}${Number(components.vwap_momentum ?? 0)}</strong></div>
+              <div class="component-row"><span>RSI reversion</span><strong>${Number(components.rsi_reversion ?? 0) >= 0 ? '+' : ''}${Number(components.rsi_reversion ?? 0)}</strong></div>
+            </div>
+            <p class="detail-disclaimer">Rule-based technical composite—not analyst consensus or investment advice. Authorized analyst ratings remain a separate planned data source.</p>
+          </section>
+          <section class="detail-card">
+            <div class="detail-card-title">52-week range</div>
+            <div class="range-track"><span class="range-marker" style="left:${position}%"></span></div>
+            <div class="range-labels"><span>${fmtPrice(t.low_52w)}</span><span>${fmtPrice(t.high_52w)}</span></div>
+            <div class="component-row" style="margin-top:8px"><span>Current position</span><strong>${t.range_position_52w == null ? '—' : Number(t.range_position_52w).toFixed(1) + '%'}</strong></div>
+          </section>
+          <section class="detail-card">
+            <div class="detail-card-title">Indicators and provenance</div>
+            <div class="component-list">
+              <div class="detail-meta-row"><span>RSI 14</span><strong>${t.rsi_14 == null ? '—' : Number(t.rsi_14).toFixed(1)} · ${esc(t.rsi_14_signal || 'unknown')}</strong></div>
+              <div class="detail-meta-row"><span>VWAP 20</span><strong>${fmtPrice(t.vwap_20)} · ${esc(t.vwap_20_signal || 'unknown')}</strong></div>
+              <div class="detail-meta-row"><span>Trend</span><strong>${esc(t.long_term_trend || 'unknown')}</strong></div>
+              <div class="detail-meta-row"><span>Source</span><strong>${esc(t.data_source || 'unknown')}</strong></div>
+              <div class="detail-meta-row"><span>Coverage</span><strong>${esc(t.period_start || '—')} → ${esc(t.period_end || '—')}</strong></div>
+              <div class="detail-meta-row"><span>Generated</span><strong>${data.generated_at ? new Date(data.generated_at).toLocaleString() : '—'}</strong></div>
+            </div>
+            ${t.fallback_reason ? `<p class="detail-disclaimer">Fallback: ${esc(t.fallback_reason)}</p>` : ''}
+          </section>
+        </div>
+      </div>`;
+    requestAnimationFrame(drawDetailChart);
+  }
+
+  function setDetailRange(range) {
+    detailRange = range;
+    document.querySelectorAll('.detail-range-btn').forEach(button =>
+      button.classList.toggle('active', button.dataset.range === range));
+    drawDetailChart();
+  }
+
+  function detailPointsForRange() {
+    const points = (detailRecord && detailRecord.price_history || [])
+      .filter(point => point && point.date && Number.isFinite(Number(point.close)))
+      .map(point => ({date: new Date(`${point.date}T00:00:00Z`), close: Number(point.close)}));
+    if (!points.length || detailRange === '5y') return points;
+    const end = new Date(points[points.length - 1].date);
+    const start = new Date(end);
+    if (detailRange === '1m') start.setUTCMonth(start.getUTCMonth() - 1);
+    if (detailRange === '3m') start.setUTCMonth(start.getUTCMonth() - 3);
+    if (detailRange === '1y') start.setUTCFullYear(start.getUTCFullYear() - 1);
+    if (detailRange === '3y') start.setUTCFullYear(start.getUTCFullYear() - 3);
+    return points.filter(point => point.date >= start);
+  }
+
+  function drawDetailChart() {
+    const canvas = document.getElementById('detail-chart');
+    if (!canvas || !detailRecord) return;
+    const points = detailPointsForRange();
+    const summary = document.getElementById('detail-chart-summary');
+    if (points.length < 2) {
+      summary.textContent = 'Not enough history for this range.';
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const width = Math.max(300, rect.width);
+    const height = Math.max(220, rect.height);
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+
+    const pad = {left: 58, right: 12, top: 12, bottom: 28};
+    const plotW = width - pad.left - pad.right;
+    const plotH = height - pad.top - pad.bottom;
+    const prices = points.map(point => point.close);
+    let min = Math.min(...prices), max = Math.max(...prices);
+    const pricePad = Math.max((max - min) * 0.08, max * 0.005, 0.01);
+    min -= pricePad; max += pricePad;
+    const t0 = points[0].date.getTime(), t1 = points[points.length - 1].date.getTime();
+    const x = point => pad.left + (point.date.getTime() - t0) / Math.max(1, t1 - t0) * plotW;
+    const y = point => pad.top + (max - point.close) / Math.max(0.000001, max - min) * plotH;
+    const styles = getComputedStyle(document.documentElement);
+    const muted = styles.getPropertyValue('--muted').trim() || '#8b949e';
+    const border = styles.getPropertyValue('--border').trim() || '#30363d';
+    const rising = points[points.length - 1].close >= points[0].close;
+    const line = styles.getPropertyValue(rising ? '--green' : '--red').trim() || (rising ? '#3fb950' : '#f85149');
+
+    ctx.font = '10px ui-monospace, monospace';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i <= 4; i++) {
+      const yy = pad.top + plotH * i / 4;
+      const value = max - (max - min) * i / 4;
+      ctx.strokeStyle = border; ctx.globalAlpha = 0.65; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(pad.left, yy); ctx.lineTo(width - pad.right, yy); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.fillStyle = muted;
+      ctx.fillText(fmtPrice(value), pad.left - 7, yy);
+    }
+
+    ctx.beginPath();
+    points.forEach((point, index) => index ? ctx.lineTo(x(point), y(point)) : ctx.moveTo(x(point), y(point)));
+    ctx.lineTo(x(points[points.length - 1]), pad.top + plotH);
+    ctx.lineTo(x(points[0]), pad.top + plotH);
+    ctx.closePath(); ctx.fillStyle = line; ctx.globalAlpha = 0.12; ctx.fill();
+    ctx.globalAlpha = 1; ctx.beginPath();
+    points.forEach((point, index) => index ? ctx.lineTo(x(point), y(point)) : ctx.moveTo(x(point), y(point)));
+    ctx.strokeStyle = line; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
+
+    ctx.fillStyle = muted; ctx.textBaseline = 'bottom';
+    ctx.textAlign = 'left'; ctx.fillText(points[0].date.toLocaleDateString(), pad.left, height - 3);
+    ctx.textAlign = 'right'; ctx.fillText(points[points.length - 1].date.toLocaleDateString(), width - pad.right, height - 3);
+    const change = (points[points.length - 1].close - points[0].close) / points[0].close * 100;
+    summary.innerHTML = `<span>${points.length.toLocaleString()} observations</span><strong class="${returnClass(change)}">${formatReturn(change)}</strong>`;
   }
 
   function fmtPrice(v) {
@@ -642,9 +946,27 @@
 
   // Repaint legend after fonts/layout settle
   window.addEventListener('load', paintLegend);
-  window.addEventListener('resize', paintLegend);
+  window.addEventListener('resize', () => {
+    paintLegend();
+    if (detailRecord) drawDetailChart();
+  });
+  document.getElementById('detail-overlay').addEventListener('click', event => {
+    if (event.target.id === 'detail-overlay') closeTickerDetail();
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !document.getElementById('detail-overlay').hidden) {
+      closeTickerDetail();
+    }
+  });
 
-  loadData();
+  loadData().then(() => {
+    const requestedTicker = new URLSearchParams(window.location.search).get('ticker');
+    if (!requestedTicker) return;
+    const normalized = requestedTicker.toUpperCase();
+    const trigger = [...document.querySelectorAll('.ticker-card')]
+      .find(card => card.dataset.ticker === normalized && !card.disabled);
+    if (trigger) openTickerDetail(normalized, trigger);
+  });
 </script>
 </body>
 </html>
