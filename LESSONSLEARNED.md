@@ -34,7 +34,10 @@ should change how future sessions work in this repo.
   visible batch action, validate and resolve every row before mutating any of
   them, keep that action in the sticky header when the edit surface is long,
   route Enter from any field through that same batch form, and warn about
-  navigation while unsaved edits remain.
+  navigation while unsaved edits remain. After a full-page batch submit,
+  restore a stable row anchor and its viewport offset rather than only a raw
+  scroll position, because banners and recalculated summaries can change the
+  document height.
 - When a public-code privacy refactor replaces a private checkout path with a
   neutral placeholder and an environment override, migrate every ignored
   host manifest and reinstall/restart the live service in the same rollout.
