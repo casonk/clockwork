@@ -482,8 +482,9 @@ def test_to_code_list_renders_grouped_repositories_and_accepts_backlog_items(cli
     assert all(group in html for group in ("archive", "doc", "health", "util", "sec", "dedicated"))
     assert 'href="/to-code"' in html
     assert 'name="repo"' in html
-    assert "Repository (e.g. my-repo)" in html
-    assert 'name="category" aria-label="Repo group" required' in html
+    assert "Repository (blank: auto)" in html
+    assert 'name="category" aria-label="Repo group">' in html
+    assert "Group: auto" in html
     assert html.count('action="/to-code/add-item"') == 1
 
     csrf = _csrf(client, "/api/code")
