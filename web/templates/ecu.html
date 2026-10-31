@@ -6,12 +6,7 @@
   <title>Machine load — Clockwork</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg: #0f1117; --surface: #1a1d27; --border: #2e3250;
-      --accent: #5b7fff; --green: #3ecf6e; --amber: #e0a752; --red: #e05252;
-      --text: #e2e4f0; --muted: #8890b0;
-      --mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
-    }
+    :root { --amber: var(--yellow); --mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace; }
     body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; min-height: 100vh; }
     main { max-width: 1000px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
     h1 { font-size: 18px; }
@@ -28,6 +23,7 @@
     .muted { color: var(--muted); }
     @media (max-width: 600px) { td, th { padding: 4px 4px; } }
   </style>
+  {% include "_theme_head.html" %}
   <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
 </head>
 <body>

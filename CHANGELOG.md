@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Adopt the portfolio system themes on every page (Midnight, Daylight, Ember, High
+  contrast). Pages use the shared colour tokens instead of per-page palettes, and the
+  top bar has a rotator button that steps to the next theme on each click; the choice
+  is saved in the browser and follows the system light/dark setting until chosen.
+  Grocery and shopping category badges, the Tradility heat map and the nav menus
+  adapt to the active theme. The theme files in `web/static/` are vendored from
+  traction-control (`docs/system-theme.md`).
+
 - Link **Machine load** from the Home page's Clockwork group.
 - Add a **Schedule** page (`/schedule`, JSON at `/api/schedule`): all user and
   system timers in one list ordered by next run, with time until it fires, the

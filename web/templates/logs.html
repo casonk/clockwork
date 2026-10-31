@@ -6,12 +6,7 @@
   <title>{{ unit }} — Clockwork Logs</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --bg: #0f1117; --surface: #1a1d27; --border: #2e3250;
-      --accent: #5b7fff; --green: #3ecf6e; --red: #e05252;
-      --text: #e2e4f0; --muted: #8890b0;
-      --mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
-    }
+    :root { --mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace; }
     body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; min-height: 100vh; }
 
     header {
@@ -47,7 +42,7 @@
     }
 
     .log-line { display: block; }
-    .log-line:hover { background: rgba(255,255,255,0.03); }
+    .log-line:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
     .log-line.err  { color: var(--red); }
     .log-line.ok   { color: var(--green); }
     .log-line.muted { color: var(--muted); }
@@ -57,13 +52,14 @@
     #jump-bottom { position: fixed; bottom: 20px; right: 20px; }
     .fab {
       width: 40px; height: 40px; border-radius: 50%;
-      background: var(--accent); color: #fff; border: none;
+      background: var(--accent); color: var(--accent-ink); border: none;
       font-size: 18px; cursor: pointer; display: flex;
       align-items: center; justify-content: center;
       box-shadow: 0 4px 12px rgba(0,0,0,0.4);
     }
     .fab:hover { filter: brightness(1.15); }
   </style>
+  {% include "_theme_head.html" %}
   <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
 </head>
 <body>
