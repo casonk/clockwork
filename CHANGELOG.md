@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add the missing **Tradility** card to the Home page, and a test that every page in the top bar's Lists and Media menus has a Home card.
+
 - Also publish the navigation into traction-control's portfolio site store (`~/.config/traction-control/sites/_shared`,
   `PORTFOLIO_STORE` to move it) when it exists, so pages served without a Caddy in front still get the top bar's menus.
 
