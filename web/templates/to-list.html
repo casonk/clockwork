@@ -46,6 +46,13 @@
     .category-allocation-stat { white-space:nowrap; }
     .category-allocation-stat strong { color:var(--text); font-size:12px; }
     .category-allocation .allocation-delta { font-size:10px; }
+    .category-target-settings { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .category-target-settings label { display:flex; align-items:center; gap:5px; white-space:nowrap; }
+    .category-target-settings select, .category-target-settings input { padding:3px 5px; background:var(--bg); border:1px solid var(--border); border-radius:5px; color:var(--text); font-size:11px; }
+    .category-target-settings input { width:68px; text-align:right; }
+    .category-target-settings select:focus, .category-target-settings input:focus { border-color:var(--accent); outline:none; }
+    .category-target-settings .dirty { border-color:var(--yellow); }
+    .basket-target-control[hidden] { display:none; }
     .items { padding:6px 0; }
     .item { display:flex; align-items:center; gap:8px; padding:5px 14px; min-height:44px; border-bottom:1px solid rgba(46,50,80,.4); }
     .item:last-child { border-bottom:none; }
@@ -229,7 +236,7 @@
     {% else %}
       <span class="allocation-stat">Over target total <strong>{{ "%.2f"|format(-invest_summary.target_remaining) }}%</strong></span>
     {% endif %}
-    <span class="allocation-note">Current percentages use the latest aggregate market value, including cash in the denominator. Delta colors fade from green when underweight through neutral at target to red when overweight. Targets are local and remain unchanged by sync.</span>
+    <span class="allocation-note">Current percentages use the latest aggregate market value, including cash in the denominator. Global inputs are portfolio percentages; basket inputs are shares within a category and use its basket total to derive global targets. Delta colors fade from green when underweight through neutral at target to red when overweight. Targets are local and remain unchanged by sync.</span>
   </div>
   {% endif %}
 
@@ -245,8 +252,23 @@
           {% set cat_delta_abs = cat_delta|abs %}
           {% set cat_delta_strength = cat_delta_abs / 5 if cat_delta_abs < 5 else 1 %}
           <span class="category-allocation" aria-label="{{ cat.name }} allocation summary">
+            <span class="category-target-settings">
+              <label>Input
+                <select class="allocation-target-mode" data-category="{{ cat.name }}" aria-label="Target input mode for {{ cat.name }}">
+                  <option value="global" {% if cat_allocation.mode == "global" %}selected{% endif %}>Global %</option>
+                  <option value="basket" {% if cat_allocation.mode == "basket" %}selected{% endif %}>Basket %</option>
+                </select>
+              </label>
+              <label class="basket-target-control" {% if cat_allocation.mode != "basket" %}hidden{% endif %}>Basket total
+                <input class="allocation-basket-target-input" type="number" min="0" max="100" step="0.01"
+                       value="{{ cat.basket_target_pct or '' }}" placeholder="Target %"
+                       aria-label="Basket total target for {{ cat.name }}" data-category="{{ cat.name }}">
+                <span>% global</span>
+              </label>
+            </span>
             <span class="category-allocation-stat">Now <strong>{{ "%.2f"|format(cat_allocation.current) }}%</strong></span>
-            <span class="category-allocation-stat">Target <strong>{{ "%.2f"|format(cat_allocation.target) }}%</strong></span>
+            <span class="category-allocation-stat">Global target <strong>{{ "%.2f"|format(cat_allocation.target) }}%</strong></span>
+            {% if cat_allocation.mode == "basket" %}<span class="category-allocation-stat">Basket assigned <strong>{{ "%.2f"|format(cat_allocation.input_total) }}%</strong></span>{% endif %}
             <span class="allocation-delta {% if cat_delta > 0.005 %}over{% elif cat_delta < -0.005 %}under{% else %}on-target{% endif %}"
                   data-delta-scope="category" data-delta="{{ "%.4f"|format(cat_delta) }}"
                   style="--delta-tone:{{ "%.1f"|format(35 + cat_delta_strength * 65) }}%; --delta-wash:{{ "%.1f"|format(5 + cat_delta_strength * 13) }}%; --delta-border:{{ "%.1f"|format(15 + cat_delta_strength * 30) }}%">
@@ -287,11 +309,17 @@
                 {% set current_pct = item.allocation_pct|default("0")|float %}
                 {% if item.allocation_pct is defined %}<span class="allocation-meta">Now {{ "%.3f"|format(current_pct) }}%</span>{% endif %}
                 {% if item.target_pct is defined %}
-                  {% set target_pct = item.target_pct|float %}
+                  {% set target_info = cat_allocation.item_targets[value] %}
+                  {% set target_input_pct = target_info.input %}
+                  {% set target_pct = target_info.global %}
                   {% set delta = current_pct - target_pct %}
                   {% set delta_abs = delta|abs %}
                   {% set delta_strength = delta_abs / 5 if delta_abs < 5 else 1 %}
-                  <span class="allocation-meta">Target {{ "%.3f"|format(target_pct) }}%</span>
+                  {% if cat_allocation.mode == "basket" %}
+                    <span class="allocation-meta">Basket {{ "%.3f"|format(target_input_pct) }}% → Global {{ "%.3f"|format(target_pct) }}%</span>
+                  {% else %}
+                    <span class="allocation-meta">Global target {{ "%.3f"|format(target_pct) }}%</span>
+                  {% endif %}
                   <span class="allocation-meta allocation-delta {% if delta > 0.005 %}over{% elif delta < -0.005 %}under{% else %}on-target{% endif %}"
                         data-delta="{{ "%.4f"|format(delta) }}"
                         style="--delta-tone:{{ "%.1f"|format(35 + delta_strength * 65) }}%; --delta-wash:{{ "%.1f"|format(5 + delta_strength * 13) }}%; --delta-border:{{ "%.1f"|format(15 + delta_strength * 30) }}%">
@@ -302,7 +330,10 @@
             </div>
             {% if cfg.key == "invest" %}
               <div class="allocation-target-control">
-                <input class="allocation-target-input" type="number" min="0" max="100" step="0.01" value="{{ item.target_pct or '' }}" placeholder="Target %" aria-label="Target percentage for {{ value }}" data-category="{{ cat.name }}" data-ticker="{{ value }}">
+                <input class="allocation-target-input" type="number" min="0" max="100" step="0.01" value="{{ item.target_pct or '' }}"
+                       placeholder="{{ 'Basket %' if cat_allocation.mode == 'basket' else 'Global %' }}"
+                       aria-label="{{ 'Basket percentage' if cat_allocation.mode == 'basket' else 'Global target percentage' }} for {{ value }}"
+                       data-category="{{ cat.name }}" data-ticker="{{ value }}">
               </div>
             {% endif %}
             {% if find_torrent %}
@@ -375,28 +406,56 @@
   const payload = document.getElementById('allocation-targets-json');
   const save = document.getElementById('allocation-targets-save');
   const inputs = [...document.querySelectorAll('.allocation-target-input')];
+  const modes = [...document.querySelectorAll('.allocation-target-mode')];
+  const basketInputs = [...document.querySelectorAll('.allocation-basket-target-input')];
   let dirty = false;
 
-  for (const input of inputs) {
-    input.addEventListener('input', () => {
-      dirty = true;
-      input.classList.add('dirty');
-      save.disabled = false;
-      save.textContent = 'Save all targets *';
-    });
-    input.addEventListener('keydown', event => {
-      if (event.key !== 'Enter' || event.isComposing) return;
-      event.preventDefault();
-      if (!save.disabled) form.requestSubmit(save);
+  const markDirty = control => {
+    dirty = true;
+    control.classList.add('dirty');
+    save.disabled = false;
+    save.textContent = 'Save all targets *';
+  };
+  const submitOnEnter = event => {
+    if (event.key !== 'Enter' || event.isComposing) return;
+    event.preventDefault();
+    if (!save.disabled) form.requestSubmit(save);
+  };
+  const applyMode = select => {
+    const basketMode = select.value === 'basket';
+    const summary = select.closest('.category-allocation');
+    summary.querySelector('.basket-target-control').hidden = !basketMode;
+    for (const input of inputs.filter(input => input.dataset.category === select.dataset.category)) {
+      input.placeholder = basketMode ? 'Basket %' : 'Global %';
+      input.setAttribute('aria-label', `${basketMode ? 'Basket percentage' : 'Global target percentage'} for ${input.dataset.ticker}`);
+    }
+  };
+
+  for (const input of [...inputs, ...basketInputs]) {
+    input.addEventListener('input', () => markDirty(input));
+    input.addEventListener('keydown', submitOnEnter);
+  }
+  for (const select of modes) {
+    applyMode(select);
+    select.addEventListener('change', () => {
+      applyMode(select);
+      markDirty(select);
     });
   }
 
   form.addEventListener('submit', () => {
-    payload.value = JSON.stringify(inputs.map(input => ({
-      category: input.dataset.category,
-      ticker: input.dataset.ticker,
-      target_pct: input.value,
-    })));
+    payload.value = JSON.stringify({
+      categories: modes.map(select => ({
+        category: select.dataset.category,
+        target_mode: select.value,
+        basket_target_pct: select.closest('.category-allocation').querySelector('.allocation-basket-target-input').value,
+      })),
+      items: inputs.map(input => ({
+        category: input.dataset.category,
+        ticker: input.dataset.ticker,
+        target_pct: input.value,
+      })),
+    });
     dirty = false;
   });
 
