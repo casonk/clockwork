@@ -13,7 +13,15 @@ import os
 from pathlib import Path
 from urllib.parse import urljoin
 
-CHROME_SCRIPT = Path(__file__).resolve().parent / "static" / "portfolio-chrome.js"
+STATIC = Path(__file__).resolve().parent / "static"
+CHROME_SCRIPT = STATIC / "portfolio-chrome.js"
+# Published name -> vendored source. theme.css and theme.js give a page the shared colour
+# tokens and apply the saved theme before first paint (see traction-control docs/system-theme.md).
+PUBLISHED_FILES = {
+    "chrome.js": CHROME_SCRIPT,
+    "theme.css": STATIC / "portfolio-theme.css",
+    "theme.js": STATIC / "portfolio-theme.js",
+}
 DEFAULT_CHROME_DIR = Path(os.environ.get("CLOCKWORK_CHROME_DIR", "/srv/portfolio-chrome"))
 
 # These mirror web/templates/_site_nav.html; tests/test_site_chrome.py fails if they drift.
@@ -95,11 +103,12 @@ def _write_if_changed(path: Path, data: bytes) -> bool:
 
 
 def publish(nav: dict, directory: Path = DEFAULT_CHROME_DIR) -> bool:
-    """Write nav.json and chrome.js into the shared directory; False when it is absent."""
+    """Write nav.json, chrome.js, theme.css and theme.js into the shared directory; False when it is absent."""
     if not directory.is_dir():
         return False
     changed = _write_if_changed(directory / "nav.json", (json.dumps(nav, indent=2) + "\n").encode())
-    changed |= _write_if_changed(directory / "chrome.js", CHROME_SCRIPT.read_bytes())
+    for name, source in PUBLISHED_FILES.items():
+        changed |= _write_if_changed(directory / name, source.read_bytes())
     return changed
 
 
