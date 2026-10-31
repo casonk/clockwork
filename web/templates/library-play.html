@@ -395,6 +395,24 @@
     video.autoplay = false;
     show("");
   });
+  // Tell Clockwork when this video has (nearly) been watched, so the To Watch list can show it.
+  (function () {
+    let sent = false;
+    function report() {
+      if (sent || !video.duration || video.currentTime / video.duration < 0.9) return;
+      sent = true;
+      fetch({{ url_for('library_pages.log_watched', rel=info.rel)|tojson }}, {
+        method: "POST",
+        credentials: "same-origin",
+        keepalive: true,
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": {{ csrf_token|tojson }} },
+        body: JSON.stringify({ position: video.currentTime, duration: video.duration }),
+      }).catch(function () { sent = false; });
+    }
+    video.addEventListener("timeupdate", report);
+    video.addEventListener("ended", report);
+    window.addEventListener("pagehide", report);
+  })();
   window.addEventListener("popstate", function () { window.location.reload(); });
   select.addEventListener("change", function () {
     remember(select.value);

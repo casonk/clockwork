@@ -45,3 +45,6 @@ config/*.archive.json
 
 # Media library catalog and rename journal (local library state).
 config/media-library*
+
+# Personal viewing history (the library viewer logs what was watched)
+config/watch-log.jsonl
