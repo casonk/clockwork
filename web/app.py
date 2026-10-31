@@ -4131,7 +4131,18 @@ def _normalize_simple_list_data(data: dict, cfg: dict) -> dict:
                 if cleaned:
                     normalized_item[field] = cleaned
             items.append(normalized_item)
-        normalized["categories"].append({"name": name, "items": items})
+        normalized_category = {"name": name, "items": items}
+        if cfg.get("key") == "invest":
+            target_mode = str(cat.get("target_mode") or "global").strip().lower()
+            if target_mode == "basket":
+                normalized_category["target_mode"] = "basket"
+            try:
+                basket_target = _clean_invest_target(cat.get("basket_target_pct"))
+            except ValueError:
+                basket_target = ""
+            if basket_target:
+                normalized_category["basket_target_pct"] = basket_target
+        normalized["categories"].append(normalized_category)
     if not normalized["categories"]:
         return _simple_list_default_data(cfg)
     return normalized
@@ -4367,7 +4378,12 @@ def _invest_allocation_summary(data: dict) -> tuple[dict, dict[str, dict]]:
     category_totals: dict[str, dict] = {}
     has_current = False
     for category in data["categories"]:
-        category_current = category_target = 0.0
+        target_mode = "basket" if category.get("target_mode") == "basket" else "global"
+        basket_target = 0.0
+        with contextlib.suppress(TypeError, ValueError):
+            basket_target = float(category.get("basket_target_pct") or 0)
+        category_current = category_input_total = category_target = 0.0
+        item_targets = {}
         for item in category["items"]:
             if "allocation_pct" in item:
                 with contextlib.suppress(TypeError, ValueError):
@@ -4375,12 +4391,27 @@ def _invest_allocation_summary(data: dict) -> tuple[dict, dict[str, dict]]:
                     has_current = True
             if "target_pct" in item:
                 with contextlib.suppress(TypeError, ValueError):
-                    category_target += float(item["target_pct"])
+                    target_input = float(item["target_pct"])
+                    global_target = (
+                        basket_target * target_input / 100
+                        if target_mode == "basket"
+                        else target_input
+                    )
+                    category_input_total += target_input
+                    category_target += global_target
+                    item_targets[item["ticker"]] = {
+                        "input": target_input,
+                        "global": global_target,
+                    }
         current_total += category_current
         target_total += category_target
         category_totals[category["name"]] = {
             "current": category_current,
             "target": category_target,
+            "mode": target_mode,
+            "basket_target": basket_target,
+            "input_total": category_input_total,
+            "item_targets": item_targets,
         }
     return (
         {
@@ -4789,14 +4820,47 @@ def update_invest_targets():
         payload = json.loads(request.form.get("targets_json", ""))
     except (TypeError, json.JSONDecodeError):
         payload = None
-    if not isinstance(payload, list) or len(payload) > 5000:
+    if isinstance(payload, list):
+        raw_categories = []
+        raw_items = payload
+    elif isinstance(payload, dict):
+        raw_categories = payload.get("categories")
+        raw_items = payload.get("items")
+    else:
+        raw_categories = raw_items = None
+    if (
+        not isinstance(raw_categories, list)
+        or not isinstance(raw_items, list)
+        or len(raw_categories) > 1000
+        or len(raw_items) > 5000
+    ):
         flash("Target batch is invalid.", "error")
         return redirect(url_for("to_invest"))
 
+    category_updates: list[tuple[str, str, str]] = []
+    seen_categories: set[str] = set()
     updates: list[tuple[str, str, str]] = []
     seen: set[tuple[str, str]] = set()
     try:
-        for raw in payload:
+        for raw in raw_categories:
+            if not isinstance(raw, dict):
+                raise ValueError("target batch contains an invalid category")
+            category = str(raw.get("category") or "").strip()
+            target_mode = str(raw.get("target_mode") or "").strip().lower()
+            if not category:
+                raise ValueError("target batch contains a category without a name")
+            category_key = category.casefold()
+            if category_key in seen_categories:
+                raise ValueError(f'target batch contains duplicate category "{category}"')
+            if target_mode not in {"global", "basket"}:
+                raise ValueError(f'target mode for "{category}" must be global or basket')
+            seen_categories.add(category_key)
+            basket_target = _clean_invest_target(raw.get("basket_target_pct", ""))
+            if target_mode == "basket" and not basket_target:
+                raise ValueError(f'basket target for "{category}" is required')
+            category_updates.append((category, target_mode, basket_target))
+
+        for raw in raw_items:
             if not isinstance(raw, dict):
                 raise ValueError("target batch contains an invalid row")
             category = str(raw.get("category") or "").strip()
@@ -4809,10 +4873,19 @@ def update_invest_targets():
             seen.add(key)
             updates.append((category, ticker, _clean_invest_target(raw.get("target_pct", ""))))
     except ValueError as exc:
-        flash(str(exc).capitalize() + ".", "error")
+        message = str(exc)
+        flash(message[:1].upper() + message[1:] + ".", "error")
         return redirect(url_for("to_invest"))
 
     data = load_simple_list("invest")
+    resolved_categories: list[tuple[dict, str, str, str]] = []
+    for category, target_mode, basket_target in category_updates:
+        cat = _find_simple_category(data, category)
+        if cat is None:
+            flash(f'Category "{category}" not found. No targets were saved.', "error")
+            return redirect(url_for("to_invest"))
+        resolved_categories.append((cat, category, target_mode, basket_target))
+
     resolved: list[tuple[dict, str, str, str]] = []
     for category, ticker, target in updates:
         cat = _find_simple_category(data, category)
@@ -4823,6 +4896,23 @@ def update_invest_targets():
         resolved.append((item, category, ticker, target))
 
     changed = 0
+    for cat, _category, target_mode, basket_target in resolved_categories:
+        current_mode = "basket" if cat.get("target_mode") == "basket" else "global"
+        if current_mode != target_mode:
+            if target_mode == "basket":
+                cat["target_mode"] = "basket"
+            else:
+                cat.pop("target_mode", None)
+            changed += 1
+        current_basket_target = str(cat.get("basket_target_pct") or "")
+        if basket_target:
+            if current_basket_target != basket_target:
+                cat["basket_target_pct"] = basket_target
+                changed += 1
+        elif "basket_target_pct" in cat:
+            cat.pop("basket_target_pct", None)
+            changed += 1
+
     for item, _category, _ticker, target in resolved:
         current = str(item.get("target_pct") or "")
         if target:
@@ -4838,7 +4928,9 @@ def update_invest_targets():
     _log_event(
         cfg["history_file"],
         "targets",
-        detail=f"changed={changed}, submitted={len(resolved)}",
+        detail=(
+            f"changed={changed}, submitted={len(resolved)}, categories={len(resolved_categories)}"
+        ),
     )
     if changed:
         flash(f"Saved {changed} target change{'s' if changed != 1 else ''}.", "success")
