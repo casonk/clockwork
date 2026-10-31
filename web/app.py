@@ -37,6 +37,7 @@ try:
         read_sources,
         release_sources,
         site_chrome,
+        watch_log,
     )
     from web import personal_library as personal_media
     from web.library_pages import library_pages
@@ -57,6 +58,7 @@ except ModuleNotFoundError:
     import read_sources
     import release_sources
     import site_chrome
+    import watch_log
     from library_pages import library_pages
     from personal_library import personal_library
     from security import same_origin_host, validate_remote_bind
@@ -4581,10 +4583,19 @@ def _render_simple_list(key: str):
     invest_summary, invest_category_totals = (
         _invest_allocation_summary(data) if key == "invest" else ({}, {})
     )
+    watch_badges: dict[str, str] = {}
+    if key == "watch":
+        stats = watch_log.stats_by_title(watch_log.read())
+        for category in data["categories"]:
+            for item in category["items"]:
+                row = stats.get(watch_log.normalize_title(str(item.get("title", ""))))
+                if row:
+                    watch_badges[str(item["title"])] = watch_log.badge(row)
     return render_template(
         "to-list.html",
         cfg=cfg,
         data=data,
+        watch_badges=watch_badges,
         total=total,
         done_count=done_count,
         todo_count=total - done_count,
