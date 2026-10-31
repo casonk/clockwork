@@ -121,6 +121,47 @@ def test_tradility_page_distinguishes_reload_from_refresh(client):
     assert "> Run refresh" in html
     assert "Trend 50/200" in html
     assert "async function runRefresh()" in html
+    assert "Historical close" in html
+    assert "Technical market rating" in html
+    assert "async function openTickerDetail" in html
+    assert "URLSearchParams(window.location.search)" in html
+
+
+def test_tradility_list_omits_history_and_ticker_detail_returns_it(client, list_files, monkeypatch):
+    list_files["TRADILITY_ANALYSIS_FILE"].write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-10-31T06:28:39Z",
+                "history_period": "5y",
+                "tickers": [
+                    {
+                        "ticker": "AAPL",
+                        "last_price": 313.62,
+                        "technical_rating": "buy",
+                        "price_history": [
+                            {"date": "2025-10-31", "close": 270.0},
+                            {"date": "2026-10-30", "close": 313.62},
+                        ],
+                    }
+                ],
+            }
+        )
+    )
+    monkeypatch.setattr(web_app, "_systemctl", lambda *_args, **_kwargs: (3, "inactive"))
+
+    summary = client.get("/api/tradility-analysis").get_json()
+
+    assert summary["tickers"][0]["detail_available"] is True
+    assert "price_history" not in summary["tickers"][0]
+
+    detail = client.get("/api/tradility-analysis/aapl")
+
+    assert detail.status_code == 200
+    payload = detail.get_json()
+    assert payload["history_period"] == "5y"
+    assert payload["ticker"]["technical_rating"] == "buy"
+    assert len(payload["ticker"]["price_history"]) == 2
+    assert client.get("/api/tradility-analysis/MISSING").status_code == 404
 
 
 @pytest.mark.parametrize(

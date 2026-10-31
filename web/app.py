@@ -5322,6 +5322,11 @@ def api_tradility_analysis():
         data = json.loads(TRADILITY_ANALYSIS_FILE.read_text(encoding="utf-8"))
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
+    for ticker in data.get("tickers", []):
+        if not isinstance(ticker, dict):
+            continue
+        history = ticker.pop("price_history", [])
+        ticker["detail_available"] = bool(history)
     generated_at = str(data.get("generated_at", "")).strip()
     age_seconds = None
     if generated_at:
@@ -5350,6 +5355,36 @@ def api_tradility_analysis():
     data["csrf_token"] = _csrf_token()
     data["ok"] = True
     return jsonify(data)
+
+
+@app.get("/api/tradility-analysis/<path:ticker>")
+def api_tradility_ticker_detail(ticker: str):
+    """Return chart and rating detail for one ticker without bloating the list response."""
+    if not TRADILITY_ANALYSIS_FILE.exists():
+        return jsonify({"ok": False, "error": "Tradility analysis file not found"}), 404
+    try:
+        data = json.loads(TRADILITY_ANALYSIS_FILE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+    normalized = ticker.strip().upper()
+    record = next(
+        (
+            item
+            for item in data.get("tickers", [])
+            if isinstance(item, dict) and str(item.get("ticker", "")).strip().upper() == normalized
+        ),
+        None,
+    )
+    if record is None:
+        return jsonify({"ok": False, "error": "Ticker not found"}), 404
+    return jsonify(
+        {
+            "ok": True,
+            "generated_at": data.get("generated_at"),
+            "history_period": data.get("history_period"),
+            "ticker": record,
+        }
+    )
 
 
 @app.post("/api/tradility-refresh")
