@@ -239,7 +239,7 @@
   {% for cat in data.categories %}
     {% set active = cat["items"] | rejectattr(cfg.status) | list %}
     {% set completed = cat["items"] | selectattr(cfg.status) | list %}
-    <section class="category" id="{{ cat.name|lower|replace(' ', '-') }}">
+    <section class="category" id="{{ cat.name|lower|replace(' ', '-') }}"{% if cfg.key == "invest" %} data-invest-anchor="category:{{ cat.name }}"{% endif %}>
       <div class="category-header{% if cfg.key == "invest" %} invest-category-header{% endif %}">
         <span class="category-name">{{ cat.name }}</span>
         {% if cfg.key == "invest" %}
@@ -290,7 +290,7 @@
           {% endif %}
           {% set find_torrent = cfg.key == "watch" and not item[cfg.status] %}
           {% set find_media = cfg.key in ("read", "listen") and not item[cfg.status] %}
-          <div class="item" data-group="{{ grp }}"{% if cfg.key in ("watch", "read", "listen") %} data-title="{{ value }}" data-year="{{ item.year or '' }}" data-category="{{ cat.name }}"{% endif %}>
+          <div class="item" data-group="{{ grp }}"{% if cfg.key in ("watch", "read", "listen") %} data-title="{{ value }}" data-year="{{ item.year or '' }}" data-category="{{ cat.name }}"{% elif cfg.key == "invest" %} data-invest-anchor="item:{{ cat.name }}:{{ value }}"{% endif %}>
             <form method="post" action="/{{ cfg.page }}/toggle-item">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <input type="hidden" name="category" value="{{ cat.name }}">
@@ -404,7 +404,49 @@
   const inputs = [...document.querySelectorAll('.allocation-target-input')];
   const modes = [...document.querySelectorAll('.allocation-target-mode')];
   const basketInputs = [...document.querySelectorAll('.allocation-basket-target-input')];
+  const scrollKey = 'clockwork:to-invest:target-scroll';
   let dirty = false;
+
+  const restoreView = () => {
+    let saved;
+    try {
+      saved = JSON.parse(sessionStorage.getItem(scrollKey));
+      sessionStorage.removeItem(scrollKey);
+    } catch (_) {
+      return;
+    }
+    if (!saved || Date.now() - saved.savedAt > 120000) return;
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const anchor = [...document.querySelectorAll('[data-invest-anchor]')]
+        .find(node => node.dataset.investAnchor === saved.anchor);
+      if (anchor && Number.isFinite(saved.offset)) {
+        window.scrollBy(0, anchor.getBoundingClientRect().top - saved.offset);
+      } else if (Number.isFinite(saved.scrollY)) {
+        window.scrollTo(0, saved.scrollY);
+      }
+    }));
+  };
+  const rememberView = () => {
+    let anchor = document.activeElement?.closest?.('[data-invest-anchor]');
+    if (!anchor) {
+      const headerBottom = document.querySelector('body > header')?.getBoundingClientRect().bottom || 0;
+      const x = Math.max(0, Math.min(window.innerWidth - 1, Math.round(window.innerWidth / 2)));
+      for (let y = Math.max(0, Math.round(headerBottom + 8)); y < window.innerHeight; y += 32) {
+        anchor = document.elementFromPoint(x, y)?.closest?.('[data-invest-anchor]');
+        if (anchor) break;
+      }
+    }
+    const state = {
+      anchor: anchor?.dataset.investAnchor || '',
+      offset: anchor ? anchor.getBoundingClientRect().top : null,
+      scrollY: window.scrollY,
+      savedAt: Date.now(),
+    };
+    try { sessionStorage.setItem(scrollKey, JSON.stringify(state)); } catch (_) { /* save still works */ }
+  };
+
+  restoreView();
 
   const markDirty = control => {
     dirty = true;
@@ -440,6 +482,7 @@
   }
 
   form.addEventListener('submit', () => {
+    rememberView();
     payload.value = JSON.stringify({
       categories: modes.map(select => ({
         category: select.dataset.category,

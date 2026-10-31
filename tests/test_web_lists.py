@@ -362,6 +362,10 @@ def test_to_invest_renders_delta_spectrum_and_enter_batch_submit(client, list_fi
     assert "Δ on target" in html
     assert "event.key !== 'Enter'" in html
     assert "form.requestSubmit(save)" in html
+    assert "clockwork:to-invest:target-scroll" in html
+    assert "document.elementFromPoint" in html
+    assert "window.scrollBy" in html
+    assert 'data-invest-anchor="item:Stocks:OVER"' in html
     assert 'aria-label="Stocks allocation summary"' in html
     assert "Now <strong>21.50%</strong>" in html
     assert "Global target <strong>20.00%</strong>" in html
