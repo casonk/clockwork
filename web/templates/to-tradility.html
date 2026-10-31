@@ -770,6 +770,10 @@
     return `${number >= 0 ? '+' : ''}${number.toFixed(2)}%`;
   }
 
+  function formatChartDate(value) {
+    return value.toLocaleDateString(undefined, {timeZone: 'UTC'});
+  }
+
   function returnClass(value) {
     if (value == null || Number(value) === 0) return '';
     return Number(value) > 0 ? 'rating-positive' : 'rating-negative';
@@ -924,10 +928,12 @@
     ctx.strokeStyle = line; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
 
     ctx.fillStyle = muted; ctx.textBaseline = 'bottom';
-    ctx.textAlign = 'left'; ctx.fillText(points[0].date.toLocaleDateString(), pad.left, height - 3);
-    ctx.textAlign = 'right'; ctx.fillText(points[points.length - 1].date.toLocaleDateString(), width - pad.right, height - 3);
+    ctx.textAlign = 'left'; ctx.fillText(formatChartDate(points[0].date), pad.left, height - 3);
+    ctx.textAlign = 'right'; ctx.fillText(formatChartDate(points[points.length - 1].date), width - pad.right, height - 3);
     const change = (points[points.length - 1].close - points[0].close) / points[0].close * 100;
-    summary.innerHTML = `<span>${points.length.toLocaleString()} observations</span><strong class="${returnClass(change)}">${formatReturn(change)}</strong>`;
+    const calendarReturn = detailRecord.returns && detailRecord.returns[detailRange];
+    const displayedReturn = calendarReturn == null ? change : Number(calendarReturn);
+    summary.innerHTML = `<span>${points.length.toLocaleString()} observations</span><strong class="${returnClass(displayedReturn)}">${formatReturn(displayedReturn)}</strong>`;
   }
 
   function fmtPrice(v) {
