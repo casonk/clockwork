@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ title }} - Clockwork</title>
   <style>
-    :root { color-scheme:dark; --bg:#0f1117; --panel:#1a1d27; --border:#2e3250; --text:#e2e4f0; --muted:#8890b0; --accent:#5b9eff; }
+    :root { --panel: var(--surface); }
     * { box-sizing:border-box; }
     body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 system-ui,sans-serif; }
     header { padding:12px 18px; background:var(--panel); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
@@ -27,6 +27,7 @@
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js" integrity="sha384-ZqmkDa/1AGF4SKdSmXgEG+3G+Gsb6yNqUSq2Mqp0jDf1GWk+UY5eNbEd7hgwiywI" crossorigin="anonymous"></script>
   {% endif %}
+  {% include "_theme_head.html" %}
   <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
 </head>
 <body>

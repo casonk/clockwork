@@ -7,20 +7,7 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    :root {
-      --bg:        #0f1117;
-      --surface:   #1a1d27;
-      --surface2:  #22263a;
-      --border:    #2e3250;
-      --accent:    #5b7fff;
-      --accent-dim:#2d3f8a;
-      --purple:    #a06fff;
-      --purple-dim:#3a1f70;
-      --red:       #e05252;
-      --red-dim:   #4d1a1a;
-      --text:      #e2e4f0;
-      --muted:     #8890b0;
-    }
+
 
     body {
       background: var(--bg);
@@ -168,6 +155,7 @@
       .card-grid { grid-template-columns: 1fr; }
     }
   </style>
+  {% include "_theme_head.html" %}
   <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
 </head>
 <body>

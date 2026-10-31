@@ -7,18 +7,7 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    :root {
-      --bg:         #0f1117;
-      --surface:    #1a1d27;
-      --surface2:   #22263a;
-      --surface3:   #191c2a;
-      --border:     #2e3250;
-      --accent:     #5b7fff;
-      --accent-dim: #2d3f8a;
-      --muted-fg:   #8890b0;
-      --muted-dim:  #1e2133;
-      --text:       #e2e4f0;
-    }
+    :root { --surface3: color-mix(in srgb, var(--bg) 50%, var(--surface)); --muted-fg: var(--muted); }
 
     body {
       background: var(--bg);
@@ -124,9 +113,9 @@
       max-width: 340px; margin-top: 1px;
       font-size: 10px; font-weight: 700;
     }
-    .legend-lbl-buy  { color: #66c45a; }
-    .legend-lbl-mid  { color: #c8c87f; }
-    .legend-lbl-sell { color: #c45a5a; }
+    .legend-lbl-buy  { color: var(--green); }
+    .legend-lbl-mid  { color: var(--yellow); }
+    .legend-lbl-sell { color: var(--red); }
     .legend-no-data {
       margin-top: 6px; display: flex; align-items: center; gap: 6px;
       font-size: 10px; color: var(--muted-fg);
@@ -199,7 +188,7 @@
     /* RSI progress bar */
     .rsi-bar-wrap {
       margin-top: 7px; height: 4px; border-radius: 2px; overflow: hidden;
-      background: rgba(255,255,255,0.07);
+      background: color-mix(in srgb, var(--text) 8%, transparent);
       position: relative;
     }
     .rsi-bar-fill { height: 100%; border-radius: 2px; }
@@ -207,7 +196,7 @@
     .rsi-bar-wrap::before,
     .rsi-bar-wrap::after {
       content: ''; position: absolute; top: 0; bottom: 0; width: 1px;
-      background: rgba(255,255,255,0.18);
+      background: color-mix(in srgb, var(--text) 18%, transparent);
     }
     .rsi-bar-wrap::before { left: 30%; }
     .rsi-bar-wrap::after  { left: 70%; }
@@ -220,9 +209,10 @@
     .error-card {
       border-radius: 9px; border: 1px solid var(--border);
       background: var(--surface); padding: 16px;
-      font-size: 13px; margin-bottom: 12px; color: #e05252;
+      font-size: 13px; margin-bottom: 12px; color: var(--red);
     }
   </style>
+  {% include "_theme_head.html" %}
   <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
 </head>
 <body>
@@ -329,19 +319,11 @@
   function cardPalette(t) {
     if (t === null) return null;
     const [r, g, b] = rdylgn(t);
-    // Dark-blended background (15% colormap over #0f1117)
-    const base = [15, 17, 23];
-    const dr = Math.round(r * 0.15 + base[0] * 0.85);
-    const dg = Math.round(g * 0.15 + base[1] * 0.85);
-    const db = Math.round(b * 0.15 + base[2] * 0.85);
-    // Slightly brighter tint for gradient corner
-    const tr = Math.round(r * 0.28 + base[0] * 0.72);
-    const tg = Math.round(g * 0.28 + base[1] * 0.72);
-    const tb = Math.round(b * 0.28 + base[2] * 0.72);
+    const rgb = `rgb(${r},${g},${b})`;
     return {
-      bg:     `linear-gradient(135deg, rgb(${tr},${tg},${tb}) 0%, rgb(${dr},${dg},${db}) 100%)`,
+      bg:     `linear-gradient(135deg, color-mix(in srgb, ${rgb} 28%, var(--bg)) 0%, color-mix(in srgb, ${rgb} 15%, var(--bg)) 100%)`,
       border: `rgba(${r},${g},${b},0.42)`,
-      fg:     `rgb(${r},${g},${b})`,
+      fg:     `color-mix(in srgb, ${rgb} 75%, var(--text))`,
       fgDim:  `rgba(${r},${g},${b},0.55)`,
       fill:   `rgb(${r},${g},${b})`,
     };
