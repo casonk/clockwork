@@ -104,6 +104,13 @@
     .badge-shared-mtls     { background: var(--accent-dim); color: var(--accent); }
     .badge-snowbridge-mtls { background: var(--purple-dim); color: var(--purple); }
     .badge-vpn-only-direct { background: var(--red-dim);    color: var(--red);    }
+    .badge-placeholder     { background: var(--yellow-dim); color: var(--yellow); }
+    .card-placeholder { cursor: default; }
+    .card-placeholder:hover {
+      border-color: var(--border);
+      transform: none;
+      box-shadow: none;
+    }
 
     /* Split-action card (e.g. Guacamole: Login + Rebuild) */
     .card-split {
@@ -204,6 +211,17 @@
             <button type="submit" class="btn-action btn-rebuild"
               onclick="this.disabled=true;this.textContent='…';this.form.submit()">Rebuild</button>
           </form>
+        </div>
+      </div>
+      {% elif card.placeholder %}
+      <div class="card card-placeholder">
+        <div class="card-top">
+          <span class="card-icon">{{ card.icon }}</span>
+          <span class="card-name">{{ card.display }}</span>
+        </div>
+        <div class="card-footer">
+          <span class="card-host">not built yet</span>
+          <span class="badge badge-placeholder">Planned</span>
         </div>
       </div>
       {% else %}
