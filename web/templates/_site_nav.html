@@ -2,7 +2,6 @@
   {% set menus = site_menus %}
   <a class="cw-site-nav__brand" href="/home" aria-label="{{ menus.home.label }}" {% if request.path == '/home' %}aria-current="page"{% endif %}>{{ menus.home.icon }} <span>{{ menus.home.label }}</span></a>
   <div class="cw-site-nav__groups">
-    <a class="cw-site-nav__direct" href="/" aria-label="{{ menus.clockwork.label }}" {% if request.path == '/' %}aria-current="page"{% endif %}>{{ menus.clockwork.icon }} <span class="cw-site-nav__desktop-label">{{ menus.clockwork.label }}</span><span class="cw-site-nav__mobile-label">{{ menus.clockwork.mobile }}</span></a>
     {% for menu in [menus.lists, menus.media] %}
     <details class="cw-site-nav__group">
       <summary>{{ menu.icon }} <span>{{ menu.label }}</span></summary>
