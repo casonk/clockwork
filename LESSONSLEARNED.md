@@ -14,6 +14,10 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
+- **Keep the navigation menus in one place when a second consumer appears.** The top bar for
+  other services is built from `web/site_chrome.py`, which mirrors `_site_nav.html`;
+  `tests/test_site_chrome.py` compares the two so adding a page to one without the other fails.
+
 - **Style pages with the system theme tokens; pass category hues through `--hue`.** A literal
   colour ignores the theme rotator and goes unreadable in the light theme. For data that needs
   its own hue (grocery type badges, heat maps), set `--hue` and mix it with tokens
