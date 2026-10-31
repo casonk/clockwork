@@ -27,13 +27,14 @@ from flask import (
 )
 
 try:
-    from web import episode_guide, streaming, upscale
+    from web import episode_guide, streaming, upscale, watch_log
     from web import media_library as ml
 except ModuleNotFoundError:
     import episode_guide
     import media_library as ml
     import streaming
     import upscale
+    import watch_log
 
 library_pages = Blueprint("library_pages", __name__)
 
@@ -476,6 +477,36 @@ def play_page(rel: str):
         ai=ai,
         live=[q for q in qualities if not q["name"].startswith("ai-") and q["name"] != "original"],
     )
+
+
+@library_pages.post("/library/play/<path:rel>/watched")
+def log_watched(rel: str):
+    """The viewer reports a (nearly) finished video; log it so the To Watch list can show it."""
+    video = _resolve(rel)
+    if not video.is_file() or video.suffix.lower() not in ml.VIDEO_EXTS:
+        abort(404)
+    payload = request.get_json(silent=True) or {}
+    try:
+        position, duration = float(payload.get("position", 0)), float(payload.get("duration", 0))
+    except (TypeError, ValueError):
+        abort(400)
+    conn = _catalog()
+    try:
+        info = _file_info(conn, video)
+    finally:
+        if conn is not None:
+            conn.close()
+    event = watch_log.record(
+        watch_log.default_file(),
+        rel=_rel(video),
+        title=_title_dir(video).name,
+        filename=video.name,
+        position=position,
+        duration=duration,
+        season=info.get("season"),
+        episode=info.get("episode"),
+    )
+    return jsonify({"logged": event is not None})
 
 
 @library_pages.post("/library/play/<path:rel>/upscale")
