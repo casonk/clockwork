@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Refresh the vendored portfolio theme: adds the Hulk (purple and green) and Neon themes.
+
 - Add the High contrast white and Liberty themes, rename High contrast to High contrast dark, and
   give the top bar's theme control a drop-down menu of every theme beside the rotator button. The
   bar shows the theme's stripe under it (Liberty has a red, white and blue one). The vendored theme
