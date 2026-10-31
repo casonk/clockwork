@@ -32,6 +32,9 @@
     .item:last-child { border-bottom: 0; }
     .item-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
     .item-title.done { color: var(--muted); text-decoration: line-through; }
+    .age-badge { font-size: 12px; color: var(--muted); white-space: nowrap; }
+    .age-badge.stale { color: var(--accent); font-weight: 600; }
+    .sort-form { margin: 0; }
     .item form { display: contents; }
     .item button { padding: 3px 8px; }
     .item .done-toggle { color: var(--accent); }
@@ -92,6 +95,12 @@
       {% for p in priorities %}<option value="{{ p }}">{{ p }} · {{ priority_labels[p] }}</option>{% endfor %}
       <option value="unrated">Unrated</option>
     </select>
+    <form method="get" action="/to-code" class="sort-form">
+      <select name="sort" aria-label="Sort items" onchange="this.form.submit()">
+        {% for opt in sorts %}<option value="{{ opt }}" {{ 'selected' if opt == sort else '' }}>Sort: {{ {'priority': 'priority', 'newest': 'newest first', 'oldest': 'oldest first'}[opt] }}</option>{% endfor %}
+      </select>
+    </form>
+    <span class="muted" title="Open items added {{ stale_days }} or more days ago">⏳ {{ stale_count }} stale</span>
     <label class="muted"><input type="checkbox" data-in-person-only> 🖥 In person only ({{ flag_counts.in_person }})</label>
     <label class="muted"><input type="checkbox" data-ready-only> ✅ Ready for an agent ({{ ready_count }})</label>
     <input type="search" placeholder="Search backlog…" aria-label="Search backlog" data-list-search>
@@ -132,6 +141,7 @@
             <button class="done-toggle" type="submit" title="Toggle done">{{ '✓' if item.done else '○' }}</button>
           </form>
           <span class="item-title {{ 'done' if item.done else '' }}">{{ item.title }}</span>
+          <span class="age-badge {{ 'stale' if item.stale else '' }}" title="{{ ('Added ' ~ item.added_on) if item.added_on else 'No entry date recorded' }}">{{ item.age_label }}</span>
           <form method="post" action="/to-code/update-item" data-autosubmit>
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="category" value="{{ cat.name }}">

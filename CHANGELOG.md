@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- To Code items now carry an entry date and a staleness rank. New items are stamped with `added`; older ones are dated at render time from the history log's `add` event or a `[manual:YYYY-MM-DD]` title prefix, without rewriting the backlog. Each item shows its age (stale after 30 days), the filter bar counts stale open items, and a Sort control orders each repository by priority (default), newest first or oldest first, with undated items last.
 - To Code auto-sorting now classifies only the repository and takes the group from it. Checked on the real
   backlog (27 repositories, leave-one-out), no repository spans two groups, and asking a model for the group
   was right about 46% of the time against 73% for always answering the commonest group. It also uses one
