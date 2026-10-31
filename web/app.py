@@ -46,6 +46,7 @@ try:
         code_age,
         code_triage,
         media_library,
+        placeholders,
         read_sources,
         release_sources,
         site_chrome,
@@ -69,6 +70,7 @@ except ModuleNotFoundError:
     import code_triage
     import media_library
     import personal_library as personal_media
+    import placeholders
     import read_sources
     import release_sources
     import site_chrome
@@ -4784,6 +4786,112 @@ def api_themes_reset():
     return _themes_change(themes_admin.reset)
 
 
+def _code_repo_groups() -> list[str]:
+    """To Code groups a placeholder may be filed under: the known families, plus any this list already has."""
+    names = list(SIMPLE_LIST_CONFIGS["code"]["default_categories"])
+    for category in load_simple_list("code").get("categories", []):
+        name = str(category.get("name") or "").strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def _add_placeholder_backlog(card: dict) -> str:
+    """File the work to build a placeholder. Returns ``added`` or ``already listed``."""
+    title = f"Implement the {card['name']} placeholder card at {card['id']}"
+    cfg = _simple_list_config("code")
+    data = load_simple_list("code")
+    category = _find_simple_category(data, card["repo_group"])
+    if category is None:
+        category = {"name": card["repo_group"], "items": []}
+        data["categories"].append(category)
+    if _find_simple_item(category, title, cfg, repo=card["repo"]):
+        return "already listed"
+    item = _parse_simple_item(title, cfg)
+    item["repo"] = card["repo"]
+    item["added"] = datetime.date.today().isoformat()
+    category["items"].append(item)
+    save_simple_list("code", data)
+    _log_event(
+        cfg["history_file"], "add", item=title, category=card["repo_group"], detail=card["repo"]
+    )
+    return "added"
+
+
+def _placeholder_response(payload: dict):
+    return jsonify(
+        {
+            "ok": True,
+            "csrf_token": _csrf_token(),
+            "cards": placeholders.load(),
+            "groups": _placeholder_groups(),
+            "repo_groups": _code_repo_groups(),
+            **payload,
+        }
+    )
+
+
+def _placeholder_groups() -> list[str]:
+    names = [*_GROUP_ORDER, "Other"]
+    for card in placeholders.load():
+        if card["group"] not in names:
+            names.append(card["group"])
+    return names
+
+
+@app.get("/api/placeholders")
+def api_placeholders():
+    try:
+        cards = placeholders.load(strict=True)
+    except placeholders.PlaceholderError as exc:
+        return jsonify({"ok": False, "error": str(exc), "csrf_token": _csrf_token()}), 400
+    return jsonify(
+        {
+            "ok": True,
+            "cards": cards,
+            "groups": _placeholder_groups(),
+            "repo_groups": _code_repo_groups(),
+            "csrf_token": _csrf_token(),
+        }
+    )
+
+
+@app.post("/api/placeholders")
+def api_placeholders_add():
+    if not _has_valid_csrf_token():
+        return jsonify({"ok": False, "error": "invalid csrf token"}), 403
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"ok": False, "error": "send the card as a JSON object"}), 400
+    try:
+        existing = placeholders.load(strict=True)
+        if len(existing) >= placeholders.MAX_CARDS:
+            raise placeholders.PlaceholderError(
+                f"at most {placeholders.MAX_CARDS} placeholder cards"
+            )
+        taken = {item["id"] for item in _label_catalog()}
+        card = placeholders.prepare(payload, taken, repo_groups=_code_repo_groups())
+        code = _add_placeholder_backlog(card)
+        placeholders.add(card)
+    except placeholders.PlaceholderError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return _placeholder_response({"card": card, "code": code})
+
+
+@app.post("/api/placeholders/remove")
+def api_placeholders_remove():
+    if not _has_valid_csrf_token():
+        return jsonify({"ok": False, "error": "invalid csrf token"}), 403
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"ok": False, "error": "send the card as a JSON object"}), 400
+    try:
+        removed = placeholders.remove(str(payload.get("id") or ""))
+    except placeholders.PlaceholderError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return _placeholder_response({"card": removed})
+
+
 @app.get("/api/<list_key>")
 def api_simple_list(list_key):
     key = list_key[3:] if list_key.startswith("to-") else list_key
@@ -6601,8 +6709,10 @@ def _site_service_groups(groups: list[tuple[str, list[dict]]]) -> list[dict]:
     for label, cards in groups:
         if label == "Clockwork":
             continue
-        pinned.extend(card for card in cards if card.get("top_bar"))
-        unpinned = [card for card in cards if not card.get("top_bar")]
+        pinned.extend(card for card in cards if card.get("top_bar") and not card.get("placeholder"))
+        unpinned = [
+            card for card in cards if not card.get("top_bar") and not card.get("placeholder")
+        ]
         if unpinned:
             remaining.append({"label": label, "services": unpinned})
     if pinned:
@@ -6636,14 +6746,15 @@ def _label_catalog() -> list[dict]:
             ident = _card_label_id(card)
             if ident and ident not in seen:
                 seen.add(ident)
-                items.append(
-                    {
-                        "id": ident,
-                        "group": group,
-                        "name": str(card.get("display", ident)),
-                        "icon": str(card.get("icon", "")),
-                    }
-                )
+                item = {
+                    "id": ident,
+                    "group": group,
+                    "name": str(card.get("display", ident)),
+                    "icon": str(card.get("icon", "")),
+                }
+                if card.get("placeholder"):
+                    item["placeholder"] = True
+                items.append(item)
     return items
 
 
@@ -6817,6 +6928,19 @@ def _load_portal_groups(apply_labels: bool = True) -> list[tuple[str, list[dict]
             "icon": "🎨",
         }
     )
+
+    for card in placeholders.load():
+        groups.setdefault(card["group"], []).append(
+            {
+                "name": "placeholder-" + card["id"].strip("/").replace("/", "-"),
+                "display": card["name"],
+                "url": card["id"],
+                "hostname": "",
+                "access_mode": "placeholder",
+                "icon": card["icon"],
+                "placeholder": True,
+            }
+        )
 
     mine = themes_admin.labels() if apply_labels else {}
     for cards in groups.values():

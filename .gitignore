@@ -38,6 +38,7 @@ config/web/caddy/*.local
 config/todo.json
 config/todo.*.json
 config/to-*.json
+config/placeholders.json
 config/*-history.jsonl
 config/*.hot.json
 config/*.cold.json

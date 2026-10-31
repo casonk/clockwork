@@ -495,7 +495,8 @@
         var reset = el("button", { class: "small", type: "button", text: "Default" });
         reset.addEventListener("click", function () { delete S.labels[item.id]; name.value = ""; markDirty(); renderLabels(); });
         sync();
-        row.append(icon, name, el("span", { class: "muted", text: (item.icon || "") + " " + item.name }), reset);
+        var note = (item.icon || "") + " " + item.name + (item.placeholder ? " · planned" : "");
+        row.append(icon, name, el("span", { class: "muted", text: note }), reset);
         details.appendChild(row);
       });
       box.appendChild(details);
@@ -630,5 +631,103 @@
   window.addEventListener("beforeunload", function (ev) {
     if (S && snapshot() !== saved) { ev.preventDefault(); ev.returnValue = ""; }
   });
+  var PLACEHOLDERS = [];
+
+  function fillPlaceholderChoices(data) {
+    var groups = $("ph-groups");
+    if (groups) {
+      groups.replaceChildren();
+      (data.groups || []).forEach(function (name) {
+        groups.appendChild(el("option", { value: name }));
+      });
+    }
+    var repo = $("ph-repo-group");
+    if (!repo) return;
+    var current = repo.value || "util";
+    repo.replaceChildren();
+    (data.repo_groups || ["util"]).forEach(function (name) {
+      var option = el("option", { value: name, text: name });
+      if (name === current) option.selected = true;
+      repo.appendChild(option);
+    });
+    if (!repo.value && repo.options.length) repo.value = repo.options[0].value;
+  }
+
+  function renderPlaceholders() {
+    var box = $("placeholders");
+    if (!box) return;
+    box.replaceChildren();
+    if (!PLACEHOLDERS.length) {
+      box.appendChild(el("p", { class: "muted", text: "No placeholder cards yet." }));
+      return;
+    }
+    PLACEHOLDERS.forEach(function (card) {
+      var remove = el("button", { class: "small", type: "button", text: "Remove", "aria-label": "Remove " + card.name });
+      remove.addEventListener("click", function () { removePlaceholder(card); });
+      box.appendChild(el("div", { class: "label-row" }, [
+        el("span", { text: card.icon || "" }),
+        el("span", { text: card.name }),
+        el("span", { class: "muted", text: card.group + " · " + card.id + " · " + card.repo_group + "/" + card.repo }),
+        remove
+      ]));
+    });
+  }
+
+  function placeholderBody() {
+    return {
+      name: $("ph-name").value.trim(),
+      icon: $("ph-icon").value.trim(),
+      group: $("ph-group").value.trim(),
+      path: $("ph-path").value.trim(),
+      repo_group: $("ph-repo-group").value,
+      repo: $("ph-repo").value.trim()
+    };
+  }
+
+  function unsavedThemes() {
+    return S && snapshot() !== saved;
+  }
+
+  function registerPlaceholder() {
+    var body = placeholderBody();
+    if (!body.name) { say("Give the placeholder a name.", "err"); return; }
+    if (!body.repo) { say("Name the repository the To Code item belongs to.", "err"); return; }
+    if (unsavedThemes() && !confirm("You have unsaved theme edits. Registering reloads this page and drops them.")) return;
+    say("Registering…", "");
+    api("/api/placeholders", body).then(function (res) {
+      if (!res.data.ok) { say(res.data.error || "Could not register the placeholder.", "err"); return; }
+      var where = res.data.card.repo_group + "/" + res.data.card.repo;
+      var extra = res.data.code === "already listed"
+        ? " That To Code item was already listed."
+        : " Added a To Code item in " + where + ".";
+      say("Registered " + res.data.card.name + "." + extra + " Reloading…", "ok");
+      setTimeout(function () { location.reload(); }, 700);
+    }).catch(function () { say("Could not reach Clockwork.", "err"); });
+  }
+
+  function removePlaceholder(card) {
+    if (!confirm("Remove the " + card.name + " card? The To Code item stays.")) return;
+    if (unsavedThemes() && !confirm("You have unsaved theme edits. Removing reloads this page and drops them.")) return;
+    api("/api/placeholders/remove", { id: card.id }).then(function (res) {
+      if (!res.data.ok) { say(res.data.error || "Could not remove the placeholder.", "err"); return; }
+      say("Removed " + card.name + ". Reloading…", "ok");
+      setTimeout(function () { location.reload(); }, 500);
+    }).catch(function () { say("Could not reach Clockwork.", "err"); });
+  }
+
+  function initPlaceholders() {
+    var form = $("placeholder-form");
+    if (!form) return;
+    form.addEventListener("submit", function (ev) { ev.preventDefault(); registerPlaceholder(); });
+    api("/api/placeholders").then(function (res) {
+      if (res.data.csrf_token) CSRF = res.data.csrf_token;
+      if (!res.data.ok) { say(res.data.error || "Could not load placeholder cards.", "err"); return; }
+      PLACEHOLDERS = res.data.cards || [];
+      fillPlaceholderChoices(res.data);
+      renderPlaceholders();
+    }).catch(function () { say("Could not reach Clockwork.", "err"); });
+  }
+
+  initPlaceholders();
   if (main.dataset.tool === "yes") init();
 })();
