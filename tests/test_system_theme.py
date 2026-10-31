@@ -54,6 +54,16 @@ def test_top_bar_has_a_theme_rotator():
     assert ".cw-site-nav__theme" in css
 
 
+def test_top_bar_offers_a_theme_menu_beside_the_rotator():
+    nav = (TEMPLATES / "_site_nav.html").read_text()
+    assert "data-theme-menu" in nav
+    assert 'aria-label="Choose a theme"' in nav
+    css = (STATIC / "site-nav.css").read_text()
+    assert ".cw-site-nav__group--theme" in css and "var(--stripe" in css
+    assert "contrast-light" in (STATIC / "portfolio-theme.css").read_text()
+    assert "liberty" in (STATIC / "portfolio-theme.css").read_text()
+
+
 def test_rendered_page_includes_theme_assets_and_rotator():
     from web import app as web_app
 

@@ -35,6 +35,12 @@
       </div>
     </details>
   </div>
-  <button type="button" class="cw-site-nav__theme" data-theme-cycle><span data-theme-icon aria-hidden="true">🌙</span><span class="cw-site-nav__desktop-label" data-theme-name>Midnight</span></button>
+  <div class="cw-site-nav__themewrap">
+    <button type="button" class="cw-site-nav__theme" data-theme-cycle><span data-theme-icon aria-hidden="true">🌙</span><span class="cw-site-nav__desktop-label" data-theme-name>Midnight</span></button>
+    <details class="cw-site-nav__group cw-site-nav__group--theme">
+      <summary aria-label="Choose a theme" title="Choose a theme"></summary>
+      <div class="cw-site-nav__menu" data-theme-menu></div>
+    </details>
+  </div>
 </nav>
 <script src="{{ url_for('static', filename='site-nav.js') }}" defer></script>
