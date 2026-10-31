@@ -10,8 +10,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def template_links() -> dict[str, list[str]]:
-    """The paths in each menu of web/templates/_site_nav.html, by group."""
-    html = (ROOT / "web" / "templates" / "_site_nav.html").read_text()
+    """The paths in each menu of the server-rendered top bar (web/templates/_site_nav.html), by group."""
+    from web import app as web_app
+
+    with web_app.app.test_request_context("/home"):
+        html = web_app.render_template("_site_nav.html", **web_app._inject_site_navigation())
     out = {}
     for label, body in re.findall(
         r"<summary>[^<]*<span[^>]*>([^<]*)</span>.*?</summary>(.*?)</details>", html, re.S

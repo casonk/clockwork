@@ -307,7 +307,10 @@ def _inject_nav_categories() -> dict[str, object]:
 
 @app.context_processor
 def _inject_site_navigation() -> dict[str, object]:
-    return {"site_service_groups": _site_service_groups(_load_portal_groups())}
+    return {
+        "site_service_groups": _site_service_groups(_load_portal_groups()),
+        "site_menus": site_chrome.site_menus(themes_admin.labels()),
+    }
 
 
 def _return_path(default: str = "/home") -> str:
@@ -1833,7 +1836,7 @@ def _clockwork_origin(default: str) -> str:
 
 def _site_nav_document(default_origin: str) -> dict:
     groups = _site_service_groups(_load_portal_groups())
-    return site_chrome.build_nav(_clockwork_origin(default_origin), groups)
+    return site_chrome.build_nav(_clockwork_origin(default_origin), groups, themes_admin.labels())
 
 
 def _publish_site_chrome() -> bool:
@@ -4743,7 +4746,14 @@ def themes_page():
 @app.get("/api/themes")
 def api_themes():
     try:
-        return jsonify({"ok": True, "state": themes_admin.state(), "csrf_token": _csrf_token()})
+        return jsonify(
+            {
+                "ok": True,
+                "state": themes_admin.state(),
+                "catalog": _label_catalog(),
+                "csrf_token": _csrf_token(),
+            }
+        )
     except themes_admin.ThemesError as exc:
         return jsonify({"ok": False, "error": str(exc), "csrf_token": _csrf_token()}), 503
 
@@ -4756,7 +4766,9 @@ def _themes_change(action):
     except themes_admin.ThemesError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     _publish_site_chrome()  # the Caddy copy follows the render
-    return jsonify({"ok": True, "state": state, "csrf_token": _csrf_token()})
+    return jsonify(
+        {"ok": True, "state": state, "catalog": _label_catalog(), "csrf_token": _csrf_token()}
+    )
 
 
 @app.post("/api/themes/apply")
@@ -6598,7 +6610,44 @@ def _site_service_groups(groups: list[tuple[str, list[dict]]]) -> list[dict]:
     return remaining
 
 
-def _load_portal_groups() -> list[tuple[str, list[dict]]]:
+def _card_label_id(card: dict) -> str:
+    """What a name/icon override is keyed by: a Clockwork page's path, else the service's name."""
+    url = str(card.get("url", ""))
+    return url if url.startswith("/") else str(card.get("name", ""))
+
+
+def _label_catalog() -> list[dict]:
+    """Everything whose name or icon you can change, with its defaults, for the Themes page."""
+    items = [
+        {"id": key, "group": "Top bar", "name": label, "icon": icon}
+        for key, (label, icon) in site_chrome.FIXED_ITEMS.items()
+    ]
+    seen = set()
+    for group, rows in (
+        ("Lists menu", site_chrome.LISTS_MENU),
+        ("Media menu", site_chrome.MEDIA_MENU),
+        ("Services menu", site_chrome.SERVICES_MENU),
+    ):
+        for label, icon, path in rows:
+            items.append({"id": path, "group": group, "name": label, "icon": icon})
+            seen.add(path)
+    for group, cards in _load_portal_groups(apply_labels=False):
+        for card in cards:
+            ident = _card_label_id(card)
+            if ident and ident not in seen:
+                seen.add(ident)
+                items.append(
+                    {
+                        "id": ident,
+                        "group": group,
+                        "name": str(card.get("display", ident)),
+                        "icon": str(card.get("icon", "")),
+                    }
+                )
+    return items
+
+
+def _load_portal_groups(apply_labels: bool = True) -> list[tuple[str, list[dict]]]:
     local = WIRING_HARNESS_DIR / "services.local.toml"
     base = WIRING_HARNESS_DIR / "services.toml"
     path = local if local.exists() else base
@@ -6768,6 +6817,15 @@ def _load_portal_groups() -> list[tuple[str, list[dict]]]:
             "icon": "🎨",
         }
     )
+
+    mine = themes_admin.labels() if apply_labels else {}
+    for cards in groups.values():
+        for card in cards:
+            override = mine.get(_card_label_id(card), {})
+            if "name" in override:
+                card["display"] = override["name"]
+            if "icon" in override:
+                card["icon"] = override["icon"]
 
     ordered = _GROUP_ORDER + sorted(set(groups) - set(_GROUP_ORDER))
     return [(g, cards) for g in ordered if (cards := groups.get(g))]
