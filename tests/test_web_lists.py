@@ -251,11 +251,10 @@ def test_to_invest_targets_are_saved_as_one_validated_batch(client, list_files):
     assert response.status_code == 200
     assert "Saved 2 target changes." in html
     assert "Target 15.250%" in html
-    assert "2.750% under" in html
+    assert "Δ -2.750% underweight" in html
     data = client.get("/api/invest").get_json()["data"]
     assert data["categories"][0]["items"][0]["target_pct"] == "15.25"
     assert data["categories"][0]["items"][1]["target_pct"] == "10"
-
     invalid = client.post(
         "/to-invest/update-targets",
         data={
@@ -308,6 +307,61 @@ def test_to_invest_targets_are_saved_as_one_validated_batch(client, list_files):
     data = client.get("/api/invest").get_json()["data"]
     assert "target_pct" not in data["categories"][0]["items"][0]
     assert data["categories"][0]["items"][1]["target_pct"] == "10"
+
+
+def test_to_invest_renders_delta_spectrum_and_enter_batch_submit(client, list_files):
+    list_files["INVEST_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {
+                        "name": "Stocks",
+                        "items": [
+                            {
+                                "ticker": "OVER",
+                                "holding": True,
+                                "allocation_pct": "10",
+                                "target_pct": "5",
+                            },
+                            {
+                                "ticker": "SLIGHT",
+                                "holding": True,
+                                "allocation_pct": "5.5",
+                                "target_pct": "5",
+                            },
+                            {
+                                "ticker": "UNDER",
+                                "holding": True,
+                                "allocation_pct": "1",
+                                "target_pct": "5",
+                            },
+                            {
+                                "ticker": "EVEN",
+                                "holding": True,
+                                "allocation_pct": "5.004",
+                                "target_pct": "5",
+                            },
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+
+    html = client.get("/to-invest").get_data(as_text=True)
+
+    assert "allocation-delta over" in html
+    assert 'data-delta="5.0000"' in html
+    assert "--delta-tone:100.0%" in html
+    assert 'data-delta="0.5000"' in html
+    assert "--delta-tone:41.5%" in html
+    assert "allocation-delta under" in html
+    assert 'data-delta="-4.0000"' in html
+    assert "--delta-tone:87.0%" in html
+    assert "allocation-delta on-target" in html
+    assert "Δ on target" in html
+    assert "event.key !== 'Enter'" in html
+    assert "form.requestSubmit(save)" in html
 
 
 def test_to_invest_sync_reports_missing_holdings_file_without_mutating_list(client, list_files):
