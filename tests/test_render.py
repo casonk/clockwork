@@ -232,3 +232,16 @@ def test_render_traction_control_ci_repair_interval_example():
     assert 'Environment="CI_REPAIR_AGENTIC_MODEL="' in systemd_rendered["ci-repair-agentic.service"]
     assert "OnBootSec=1h" in systemd_rendered["ci-repair-agentic.timer"]
     assert "OnUnitActiveSec=2d" in systemd_rendered["ci-repair-agentic.timer"]
+
+
+def test_no_example_cron_command_contains_an_unescaped_percent():
+    """In a crontab line `%` means newline, so systemd's `%h` must not leak into cron."""
+    import re
+
+    examples = Path(__file__).resolve().parent.parent / "examples"
+    offenders = []
+    for path in sorted(examples.glob("**/*.toml")):
+        for job in load_manifest(path).jobs:
+            if job.cron is not None and re.search(r"(?<!\\)%", job.cron.command):
+                offenders.append(f"{path.relative_to(examples)}:{job.name}")
+    assert offenders == []
