@@ -11,6 +11,12 @@
 - Tradility indicators are now selectable together. RSI 14, VWAP 20 and Trend 50/200 are toggles (at least one stays on); with several selected each card shows a joint buy probability (each indicator's read combined as independent evidence on an even prior, P = Πp / (Πp + Π(1−p)), each held off 0 and 1), the per-indicator reads, and how many signals were available. The colour, buy/sell/neutral counts, badge, sort and legend all follow the joint value. One indicator behaves as before.
 - Remove the ← button from the Tradility header: it duplicated Home in the top bar and led to the Clockwork jobs page.
 - Re-vendor the portfolio theme files: the top bar's theme menu has This site / Everywhere and "Follow the global theme" (the global theme is set through traction-control's theme writer; without it the choice stays per site).
+- The Tradility page replaces the ambiguous Reload and Run refresh controls
+  with one **Update market data** action. It starts or follows the systemd job,
+  shows elapsed progress, polls a lightweight artifact-version endpoint, and
+  automatically loads the completed analysis; startup, no-change, provider,
+  and 15-minute timeout failures remain visible without discarding current
+  cards.
 - Tradility ticker details now include an on-demand company/fund overview with
   canonical name, sourced description, sector/industry or fund classification,
   headquarters, website, exchange, employees, entity type, and profile
