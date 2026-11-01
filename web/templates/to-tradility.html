@@ -242,6 +242,7 @@
     .account-flag.warn { border-color: var(--red); color: var(--red); }
     .account-warning { grid-column: 1 / -1; color: var(--red); font-size: 11px; margin-top: 6px; }
     .trade-box { border: 1px solid var(--border); border-radius: 9px; padding: 10px; margin-top: 10px; }
+    .impact-table { margin: 6px 0 4px; }
     .trade-box h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted-fg); }
     .trade-box .trade-warn { color: var(--red); font-size: 11px; }
     .trade-box input[type=text] { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; font-size: 12px; width: 150px; }
@@ -1485,14 +1486,41 @@
     </div>`;
   }
 
+  function signed(v) {
+    return (v >= 0 ? '+' : '−') + money(Math.abs(v));
+  }
+
+  function pctText(v) {
+    return v == null ? '—' : v.toFixed(2) + '%';
+  }
+
+  // How the order changes the position: dollars, shares and the share of the account and of everything
+  // you own, before and after, plus what is left to trade with.
+  function impactTable(im) {
+    if (!im) return '<div class="orders-sync">Position impact is not available right now.</div>';
+    const a = im.account, o = im.overall;
+    const row = (label, q, v, p, total) => `<tr><td>${esc(label)}</td>
+      <td class="num">${esc(String(+q.before.toFixed(6)))} → ${esc(String(+q.after.toFixed(6)))}</td>
+      <td class="num">${money(v.before)} → ${money(v.after)} <span class="${v.after >= v.before ? 'ret-pos' : 'ret-neg'}">(${signed(v.after - v.before)})</span></td>
+      <td class="num">${pctText(p.before)} → ${pctText(p.after)}</td><td class="num">${money(total)}</td></tr>`;
+    return `<table class="orders-table impact-table"><thead><tr><th>${esc(im.symbol)} position</th><th class="num">Shares</th><th class="num">Value</th><th class="num">Share of total</th><th class="num">Total</th></tr></thead><tbody>
+      ${row(a.label || 'This account', a.quantity, a.value, a.percent, a.total)}
+      ${row('All accounts', o.quantity, o.value, o.percent, o.total)}
+      </tbody></table>
+      <div class="orders-sync">${a.cash_after == null ? '' : `Cash available to trade after: ${money(a.cash_after)}`}${a.buying_power_after == null ? '' : ` · buying power after: ${money(a.buying_power_after)}`}</div>`;
+  }
+
   function confirmPanel() {
     const st = tradeStep;
+    const button = st.kind === 'place' && st.confirmation === 'button';
     return `<div>
       <p>${st.summary}</p>
+      ${st.kind === 'place' ? impactTable(st.impact) : ''}
       ${(st.warnings || []).map(w => `<div class="trade-warn">${esc(w)}</div>`).join('')}
-      <p>Type <strong>${esc(st.phrase)}</strong> to confirm. ${st.kind === 'cancel' ? 'This cancels a real order.' : 'This sends a real order.'}</p>
-      <input type="text" id="trade-phrase" autocomplete="off" aria-label="Confirmation phrase">
-      <button type="button" class="primary" id="trade-go">Send order</button>
+      ${button ? `<p>${'This sends a real order.'}</p>`
+               : `<p>Type <strong>${esc(st.phrase)}</strong> to confirm. ${st.kind === 'cancel' ? 'This cancels a real order.' : 'This sends a real order.'}</p>
+      <input type="text" id="trade-phrase" autocomplete="off" aria-label="Confirmation phrase">`}
+      <button type="button" class="primary" id="trade-go">${button ? 'Place order' : (st.kind === 'cancel' ? 'Cancel order' : 'Send order')}</button>
       <button type="button" id="trade-discard">Discard</button>
     </div>`;
   }
@@ -1610,7 +1638,7 @@
       const pv = await tradeCall('preview', {ticker: detailTicker, account: f.account || '', side: f.side, kind: f.kind, quantity: f.quantity, price: f.kind === 'limit' ? f.price : null, ...(f.session ? {session: f.session, tif: f.tif} : {})});
       const o = pv.order;
       tradeStep = {
-        kind: 'place', previewId: pv.preview_id, phrase: pv.phrase, warnings: pv.warnings,
+        kind: 'place', previewId: pv.preview_id, phrase: pv.phrase, warnings: pv.warnings, impact: pv.impact, confirmation: pv.confirmation,
         summary: `${esc(o.side)} ${esc(String(o.quantity))} ${esc(o.ticker)} ${o.kind === 'limit' ? 'at ' + fmtPrice(o.price) + ' (' + (TIF_LABEL[o.tif] || o.tif) + (HOURS_LABEL[o.session] || '') + ')' : 'at market'} on ${esc(pv.broker)}${o.account ? ' account …' + esc(o.account) : ''}, about ${fmtPrice(pv.notional)} (last price ${fmtPrice(pv.last_price)})`,
       };
     } catch (err) {
@@ -1636,7 +1664,8 @@
 
   async function sendStep() {
     const st = tradeStep;
-    const phrase = document.getElementById('trade-phrase').value;
+    const phraseInput = document.getElementById('trade-phrase');
+    const phrase = phraseInput ? phraseInput.value : '';
     tradeStep = null;   // a preview is single use; start over after any outcome
     try {
       if (st.kind === 'place') await tradeCall('confirm', {preview_id: st.previewId, phrase});
