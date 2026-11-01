@@ -1865,6 +1865,58 @@
       ${holdingsTable(im.symbol, im.holdings, null)}`;
   }
 
+  // The optional browser step: have the service fill in Fidelity's own ticket, press its Preview and check it.
+  function fidelityStagePanel() {
+    const mode = (tradeStatus && tradeStatus.fidelity_automation) || 'off';
+    const st = tradeStep;
+    if (st.staged) {
+      const ok = (st.staged.checks || []).map(c => `<li>${esc(c)}</li>`).join('');
+      const submit = mode === 'submit';
+      return `<div class="orders-sync"><strong>Staged on Fidelity and checked.</strong> Fidelity's own preview shows this order:
+          <ul style="margin:4px 0 4px 18px">${ok}</ul>
+          ${st.staged.screenshot ? `Screenshot: ${esc(st.staged.screenshot)}.` : ''}</div>
+        ${submit
+          ? `<p>This sends a real order through Fidelity's website.</p>
+             ${st.confirmation === 'phrase' ? `<p>Type <strong>${esc(st.phrase)}</strong> to confirm.</p><input type="text" id="fid-phrase" autocomplete="off" aria-label="Confirmation phrase" style="width:260px">` : ''}
+             <button type="button" class="primary" id="fid-submit">Place order at Fidelity</button>`
+          : '<p>Submitting from here is off (the policy says <code>stage</code>). Submit it on Fidelity yourself, then record it below.</p>'}`;
+    }
+    if (mode === 'off') return "<p>Nothing is sent from here. Review these fields on Fidelity's trade page and submit the order there, then record it.</p>";
+    return `<p>Nothing has been sent. You can have the service fill in Fidelity's trade ticket in its browser and check Fidelity's own preview against this order${mode === 'submit' ? ', and then place it' : ''}.</p>
+      <button type="button" id="fid-stage">Stage on Fidelity</button>`;
+  }
+
+  async function stageOnFidelity() {
+    const st = tradeStep;
+    tradeFail('Filling in Fidelity’s ticket…');
+    try {
+      const data = await tradeCall('fidelity-stage', {ticker: detailTicker, ...st.ticket.order});
+      tradeStep = {...st, ticket: data, staged: data.staged, previewId: data.preview_id, phrase: data.phrase, confirmation: data.confirmation, warnings: data.warnings};
+    } catch (err) {
+      renderOrders();
+      tradeFail(err.message);
+      return;
+    }
+    renderOrders();
+    tradeFail('');
+  }
+
+  async function submitOnFidelity() {
+    const st = tradeStep;
+    const phraseInput = document.getElementById('fid-phrase');
+    const phrase = phraseInput ? phraseInput.value : '';
+    tradeStep = null;   // single use, whatever happens next
+    try {
+      await tradeCall('fidelity-submit', {preview_id: st.previewId, phrase});
+    } catch (err) {
+      renderOrders();
+      tradeFail(err.message);
+      return;
+    }
+    await loadOrders(detailTicker);
+    tradeFail('Sent through Fidelity’s website. Fidelity is not read live, so record it below or check Fidelity for the fill.');
+  }
+
   function fidelityPanel() {
     const t = tradeStep.ticket;
     return `<div>
@@ -1872,7 +1924,7 @@
       <table class="orders-table"><tbody>${t.fields.map(([k, v]) => `<tr><td>${esc(k)}</td><td><strong>${esc(v)}</strong></td></tr>`).join('')}</tbody></table>
       ${impactTable(t.impact)}
       ${(t.warnings || []).map(w => `<div class="trade-warn">${esc(w)}</div>`).join('')}
-      <p>Nothing is sent from here. Review these fields on Fidelity's trade page and submit the order there, then record it.</p>
+      ${fidelityStagePanel()}
       <button type="button" id="fid-copy">Copy ticket</button>
       <a class="company-link" href="${esc(t.url)}" target="_blank" rel="noopener noreferrer">Open Fidelity's trade page ↗</a>
       <button type="button" class="primary" id="fid-record">I placed it at Fidelity</button>
@@ -2182,6 +2234,10 @@
       if (tradeQuote && tradeQuote.ticker === detailTicker) { fillDefaults(); paintTemplates(); }
       else if (!tradeQuote) loadQuote();
     }
+    const stage = box.querySelector('#fid-stage');
+    if (stage) stage.addEventListener('click', stageOnFidelity);
+    const fidSubmit = box.querySelector('#fid-submit');
+    if (fidSubmit) fidSubmit.addEventListener('click', submitOnFidelity);
     const copy = box.querySelector('#fid-copy');
     if (copy) copy.addEventListener('click', copyTicket);
     const record = box.querySelector('#fid-record');
