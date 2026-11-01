@@ -486,6 +486,14 @@ technical-rating components, indicator context, and source provenance. The
 technical label is explicitly not analyst consensus or investment advice.
 Details can be deep-linked with `/to-tradility?ticker=AAPL`.
 
+The page loads the latest completed artifact automatically. **Update market
+data** is the single manual lifecycle action: it starts the same user-systemd
+job as the weekday timer (or follows one already running), displays elapsed
+progress, polls `GET /api/tradility-refresh/status`, and loads the new artifact
+when its version changes. The status endpoint uses file metadata rather than
+reparsing the large analysis JSON on every poll. A failed or timed-out refresh
+leaves the last completed cards visible.
+
 ### macOS Clockwork web LaunchAgent
 
 The tracked macOS manifest is deliberately a non-installable template: it has

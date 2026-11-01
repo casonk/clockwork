@@ -347,11 +347,9 @@
     <option value="price-desc">Sort: price ↓</option>
   </select>
 
-  <button class="refresh-btn" id="reload-btn" onclick="loadData()">
-    <span class="refresh-icon">↻</span> Reload
-  </button>
   <button class="refresh-btn" id="refresh-btn" onclick="runRefresh()">
-    <span class="refresh-icon">▶</span> Run refresh
+    <span class="refresh-icon">↻</span>
+    <span id="refresh-label">Update market data</span>
   </button>
 </div>
 
@@ -547,61 +545,147 @@
   let detailTicker    = null;
   let detailOrders    = null;   // {position, orders} for the open card, from /api/tradility-orders
   let shownOrder      = [];   // tickers with details, in the order the grid shows them
+  let artifactVersion = '';
+  let refreshWatch    = null;
+
+  const REFRESH_POLL_INTERVAL_MS = 5000;
+  const REFRESH_START_GRACE_MS = 30000;
+  const REFRESH_TIMEOUT_MS = 15 * 60 * 1000;
+
+  function delay(ms) {
+    return new Promise(resolve => window.setTimeout(resolve, ms));
+  }
+
+  function formatElapsed(milliseconds) {
+    const seconds = Math.max(0, Math.floor(milliseconds / 1000));
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
+  }
+
+  function setRefreshControl(running, label = 'Update market data') {
+    const btn = document.getElementById('refresh-btn');
+    document.getElementById('refresh-label').textContent = label;
+    btn.disabled = running;
+    btn.classList.toggle('spinning', running);
+  }
+
+  function applyAnalysisData(data) {
+    csrfToken = data.csrf_token || csrfToken;
+    artifactVersion = data.artifact_version || '';
+    allTickers = data.tickers || [];
+    if (data.generated_at) {
+      const d = new Date(data.generated_at);
+      const meta = document.getElementById('meta-generated');
+      const stale = Boolean(data.freshness && data.freshness.stale);
+      meta.textContent = `${stale ? '⚠ Stale — ' : ''}Updated ${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
+      meta.classList.toggle('stale', stale);
+    }
+    const classSet = new Set();
+    for (const t of allTickers) if (t.asset_class) classSet.add(t.asset_class);
+    allClasses = [...classSet].sort();
+    buildClassFilters();
+    renderGrid();
+  }
 
   // ── Data load ────────────────────────────────────────────────────────────────
-  async function loadData() {
-    const btn = document.getElementById('reload-btn');
-    btn.classList.add('spinning');
+  async function loadData({followActiveRefresh = true} = {}) {
+    let data = null;
     try {
-      const res  = await fetch('/api/tradility-analysis');
+      const res  = await fetch('/api/tradility-analysis', {cache: 'no-store'});
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      data = await res.json();
       if (!data.ok) throw new Error(data.error || 'Unknown error');
-      csrfToken = data.csrf_token || '';
-      allTickers = data.tickers || [];
-      if (data.generated_at) {
-        const d = new Date(data.generated_at);
-        const meta = document.getElementById('meta-generated');
-        const stale = Boolean(data.freshness && data.freshness.stale);
-        meta.textContent = `${stale ? '⚠ Stale — ' : ''}Updated ${d.toLocaleDateString()} ${d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`;
-        meta.classList.toggle('stale', stale);
+      applyAnalysisData(data);
+      if (followActiveRefresh && data.refresh && data.refresh.active) {
+        void watchRefresh(artifactVersion, true);
       }
-      const classSet = new Set();
-      for (const t of allTickers) if (t.asset_class) classSet.add(t.asset_class);
-      allClasses = [...classSet].sort();
-      buildClassFilters();
-      renderGrid();
     } catch (err) {
       document.getElementById('grid-container').innerHTML =
-        `<div class="error-card">⚠ Could not load analysis: ${err.message}</div>`;
-    } finally {
-      btn.classList.remove('spinning');
+        `<div class="error-card">⚠ Could not load analysis: ${esc(err.message)}</div>`;
     }
+    return data;
   }
 
   async function runRefresh() {
-    const btn = document.getElementById('refresh-btn');
-    btn.classList.add('spinning');
-    btn.disabled = true;
+    if (refreshWatch) return refreshWatch;
+    setRefreshControl(true, 'Starting update…');
     try {
-      if (!csrfToken) await loadData();
+      if (!csrfToken) {
+        const loaded = await loadData({followActiveRefresh: false});
+        if (!loaded || !csrfToken) throw new Error('Could not load refresh credentials');
+      }
+      const baselineVersion = artifactVersion;
       const res = await fetch('/api/tradility-refresh', {
         method: 'POST',
         headers: {'X-CSRF-Token': csrfToken},
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      const meta = document.getElementById('meta-generated');
-      meta.textContent = 'Refresh started… reload in a few minutes';
-      meta.classList.remove('stale');
+      return watchRefresh(baselineVersion, false);
     } catch (err) {
-      const meta = document.getElementById('meta-generated');
-      meta.textContent = `Refresh failed: ${err.message}`;
-      meta.classList.add('stale');
-    } finally {
-      btn.classList.remove('spinning');
-      btn.disabled = false;
+      showRefreshError(err);
+      setRefreshControl(false);
+      return null;
     }
+  }
+
+  function watchRefresh(baselineVersion, alreadyActive) {
+    if (refreshWatch) return refreshWatch;
+    refreshWatch = monitorRefresh(baselineVersion, alreadyActive)
+      .catch(showRefreshError)
+      .finally(() => {
+        refreshWatch = null;
+        setRefreshControl(false);
+      });
+    return refreshWatch;
+  }
+
+  async function monitorRefresh(baselineVersion, alreadyActive) {
+    const startedAt = Date.now();
+    let seenActive = alreadyActive;
+    let consecutiveErrors = 0;
+    while (Date.now() - startedAt < REFRESH_TIMEOUT_MS) {
+      const elapsed = Date.now() - startedAt;
+      setRefreshControl(true, `Updating… ${formatElapsed(elapsed)}`);
+      const meta = document.getElementById('meta-generated');
+      meta.textContent = `Updating market data… ${formatElapsed(elapsed)}`;
+      meta.classList.remove('stale');
+
+      let status;
+      try {
+        const res = await fetch('/api/tradility-refresh/status', {cache: 'no-store'});
+        status = await res.json();
+        if (!res.ok || !status.ok) throw new Error(status.error || `HTTP ${res.status}`);
+        consecutiveErrors = 0;
+      } catch (err) {
+        consecutiveErrors += 1;
+        if (consecutiveErrors >= 3) throw err;
+        await delay(REFRESH_POLL_INTERVAL_MS);
+        continue;
+      }
+
+      const active = Boolean(status.refresh && status.refresh.active);
+      seenActive = seenActive || active;
+      if (status.artifact_version && status.artifact_version !== baselineVersion) {
+        const loaded = await loadData({followActiveRefresh: false});
+        if (!loaded) throw new Error('New market data was written but could not be loaded');
+        return;
+      }
+      if (!active && seenActive) {
+        throw new Error('Update finished, but no new market-data artifact was written');
+      }
+      if (!active && !seenActive && elapsed >= REFRESH_START_GRACE_MS) {
+        throw new Error('The market-data update did not start');
+      }
+      await delay(REFRESH_POLL_INTERVAL_MS);
+    }
+    throw new Error('Market-data update timed out after 15 minutes');
+  }
+
+  function showRefreshError(err) {
+    const meta = document.getElementById('meta-generated');
+    meta.textContent = `Update failed: ${err.message}`;
+    meta.classList.add('stale');
   }
 
   // ── Indicator switch ─────────────────────────────────────────────────────────
