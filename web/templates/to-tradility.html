@@ -30,8 +30,6 @@
       top: 0;
       z-index: 100;
     }
-    .back-link { font-size: 20px; text-decoration: none; opacity: 0.7; transition: opacity 0.15s; }
-    .back-link:hover { opacity: 1; }
     .header-title { font-size: 17px; font-weight: 700; letter-spacing: -0.3px; flex: 1; }
     .header-meta { font-size: 11px; color: var(--muted-fg); white-space: nowrap; }
     .header-meta.stale { color: var(--red); font-weight: 700; }
@@ -295,7 +293,6 @@
 {% include "_site_nav.html" %}
 
 <header>
-  <a href="/" class="back-link" title="Home">←</a>
   <span class="header-title">📈 Tradility</span>
   <span class="header-meta" id="meta-generated"></span>
 </header>
