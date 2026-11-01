@@ -229,6 +229,18 @@
     .detail-ticker { font: 800 24px var(--mono); letter-spacing: 0.6px; }
     .detail-name { color: var(--muted-fg); font-size: 12px; }
     .detail-price { font-size: 22px; font-weight: 750; white-space: nowrap; }
+    .accounts-panel { margin: 8px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+    .accounts-panel > summary { cursor: pointer; padding: 8px 12px; font-weight: 700; font-size: 13px; }
+    .accounts-total { color: var(--muted-fg); font-weight: 500; margin-left: 8px; }
+    .accounts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; padding: 0 12px 12px; }
+    .account-card { border: 1px solid var(--border); border-radius: 9px; padding: 10px; background: var(--surface2); font-size: 12px; }
+    .account-card h4 { margin: 0 0 6px; font-size: 13px; display: flex; justify-content: space-between; gap: 8px; }
+    .account-card dl { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; }
+    .account-card dt { color: var(--muted-fg); }
+    .account-card dd { margin: 0; text-align: right; font-family: var(--mono); }
+    .account-flag { font-size: 10px; border: 1px solid var(--border); border-radius: 99px; padding: 0 7px; color: var(--muted-fg); }
+    .account-flag.warn { border-color: var(--red); color: var(--red); }
+    .account-warning { grid-column: 1 / -1; color: var(--red); font-size: 11px; margin-top: 6px; }
     .trade-box { border: 1px solid var(--border); border-radius: 9px; padding: 10px; margin-top: 10px; }
     .trade-box h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted-fg); }
     .trade-box .trade-warn { color: var(--red); font-size: 11px; }
@@ -375,6 +387,10 @@
   </div>
 </div>
 
+<details class="accounts-panel" id="accounts-panel">
+  <summary>Accounts <span class="accounts-total" id="accounts-total"></span></summary>
+  <div id="accounts-body"><div class="state-msg">Open to load your account details.</div></div>
+</details>
 <div class="stats-bar" id="stats-bar"></div>
 
 <main>
@@ -1244,6 +1260,84 @@
               && ((tradeStatus.tickers || []).includes('*') || (tradeStatus.tickers || []).includes(detailTicker)));
   }
 
+  // ── Accounts ─────────────────────────────────────────────────────────────────
+  let accountsData = null;
+
+  async function loadAccounts() {
+    const body = document.getElementById('accounts-body');
+    body.innerHTML = '<div class="state-msg">Loading accounts…</div>';
+    try {
+      const res = await fetch('/api/tradility-accounts');
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      accountsData = data;
+    } catch (err) {
+      accountsData = null;
+      body.innerHTML = `<div class="error-card">Could not load accounts: ${esc(err.message)}. Account details need the trader service to be running.</div>`;
+      return;
+    }
+    renderAccounts();
+  }
+
+  function row(label, value) {
+    return value == null ? '' : `<dt>${esc(label)}</dt><dd>${value}</dd>`;
+  }
+
+  function renderAccounts() {
+    const body = document.getElementById('accounts-body');
+    const accounts = (accountsData && accountsData.accounts) || [];
+    const sources = (accountsData && accountsData.sources) || {};
+    const failed = Object.entries(sources).filter(([, v]) => !v.ok).map(([k, v]) => `${sourceLabel(k)}: ${esc(v.error || 'unavailable')}`);
+    const total = accounts.reduce((sum, a) => sum + (a.total_value || 0), 0);
+    document.getElementById('accounts-total').textContent = accounts.length ? `· ${money(total)} across ${accounts.length}` : '';
+    body.innerHTML = `<div class="accounts-grid">${accounts.map(a => `
+      <div class="account-card">
+        <h4><span>${esc(a.label)}</span>
+          <span>
+            <span class="account-flag">${esc(a.type)}</span>
+            ${a.margin_eligible ? '<span class="account-flag">margin eligible</span>' : ''}
+            ${a.day_trader ? '<span class="account-flag warn">pattern day trader</span>' : ''}
+            ${a.closing_only ? '<span class="account-flag warn">closing only</span>' : ''}
+            ${a.in_call ? '<span class="account-flag warn">margin call</span>' : ''}
+          </span>
+        </h4>
+        <dl>
+          ${row('Total value', a.total_value == null ? null : money(a.total_value))}
+          ${row('Cash', a.cash == null ? null : money(a.cash))}
+          ${row('Cash available to trade', a.cash_available_to_trade == null ? null : money(a.cash_available_to_trade))}
+          ${row('Buying power', a.buying_power == null ? null : money(a.buying_power))}
+          ${row('Available funds', a.available_funds == null ? null : money(a.available_funds))}
+          ${row('Day-trading buying power', a.day_trading_buying_power == null ? null : money(a.day_trading_buying_power))}
+          ${row('Margin balance', a.margin_balance == null ? null : money(a.margin_balance))}
+          ${row('Market value of holdings', a.long_market_value == null ? null : money(a.long_market_value))}
+          ${row('Equity', a.equity_percentage == null ? null : a.equity_percentage.toFixed(1) + '%')}
+          ${row('Positions', a.positions == null ? null : String(a.positions))}
+          ${a.broker === 'binance' ? row('Key can trade', a.can_trade ? 'yes' : 'no') + row('Key can withdraw', a.can_withdraw ? 'YES' : 'no') : ''}
+        </dl>
+        ${a.broker === 'binance' && a.can_withdraw ? '<div class="account-warning">This API key can withdraw funds. Use a key with withdrawals disabled.</div>' : ''}
+      </div>`).join('')}
+      ${failed.length ? `<div class="account-warning">Not available: ${failed.join(' · ')}</div>` : ''}
+    </div>
+    <div class="orders-sync" style="padding:0 12px 10px">Updated ${esc(new Date(accountsData.generated_at).toLocaleTimeString())} · <a href="#" id="accounts-refresh">Refresh</a></div>`;
+    document.getElementById('accounts-refresh').addEventListener('click', event => { event.preventDefault(); loadAccounts(); });
+  }
+
+  document.getElementById('accounts-panel').addEventListener('toggle', event => {
+    if (event.target.open && !accountsData) loadAccounts();
+  });
+
+  // The selected account's funds, shown under the order form.
+  function showAccountFunds() {
+    const note = document.getElementById('trade-funds');
+    const form = document.getElementById('trade-form');
+    if (!note || !form) return;
+    const mask = form.elements.account ? form.elements.account.value : '';
+    const acct = ((accountsData && accountsData.accounts) || []).find(a => a.broker === (isCrypto() ? 'binance' : 'schwab') && (isCrypto() || a.id === mask));
+    note.textContent = acct
+      ? `${acct.label}: buying power ${money(acct.buying_power)} · cash ${money(acct.cash)} · ${acct.margin_eligible ? 'margin account' : 'cash account'}`
+      : '';
+  }
+
   function money(v) {
     return '$' + Number(v || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
   }
@@ -1267,6 +1361,7 @@
         <button type="submit" class="primary">Preview</button>
       </form>
       <div class="orders-sync" id="trade-default"></div>
+      <div class="orders-sync" id="trade-funds"></div>
       <div id="trade-confirm">${tradeStep ? confirmPanel() : ''}</div>
       <div class="order-error" id="trade-error" role="alert"></div>
     </div>`;
@@ -1435,6 +1530,11 @@
     if (tradeForm) {
       tradeForm.addEventListener('submit', event => { event.preventDefault(); startPreview(tradeForm); });
       tradeForm.elements.side.addEventListener('change', fillDefaults);
+      if (tradeForm.elements.account) tradeForm.elements.account.addEventListener('change', async () => {
+        if (!accountsData) await loadAccounts();
+        showAccountFunds();
+      });
+      if (isCrypto()) (accountsData ? Promise.resolve() : loadAccounts()).then(showAccountFunds);
       tradeForm.elements.kind.addEventListener('change', () => {
         tradeForm.elements.price.disabled = tradeForm.elements.kind.value === 'market';
         fillDefaults();
