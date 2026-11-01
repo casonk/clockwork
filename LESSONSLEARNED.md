@@ -22,6 +22,8 @@ should change how future sessions work in this repo.
 - A test for a view that merges multiple local data sources must redirect every
   source, including read-only companion exports. Redirecting only the writable
   store can leak live owner data into failures and make the suite host-dependent.
+  Stub external probe commands in route tests when binary availability is not
+  the behavior under test.
 - When tests import repo-root modules such as `web` or sibling modules under
   `tests`, include the repository root in pytest's declared `pythonpath`; an
   editable install covers only packages under `src`, and console-entry-point
