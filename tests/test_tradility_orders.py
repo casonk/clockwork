@@ -243,3 +243,72 @@ def test_the_table_shows_the_source_and_leaves_broker_rows_read_only():
         "o.source && o.source !== 'manual' ? ''",
     ):
         assert needle in html, needle
+
+
+# -- placing orders goes through the local trader service ---------------------------------------
+
+
+def test_trade_status_says_unavailable_when_the_service_is_not_running(api, monkeypatch):
+    c, _ = api
+    monkeypatch.setenv("CLOCKWORK_TRADILITY_TRADER_URL", "http://127.0.0.1:9")  # nothing listens
+    got = c.get("/api/tradility-trade/status").get_json()
+    assert got == {"ok": True, "available": False, "enabled": False}
+    code = c.post("/api/tradility-trade/preview", json={"ticker": "AAPL"})
+    assert code.status_code == 503 and "not running" in code.get_json()["error"]
+
+
+def test_trade_steps_are_forwarded_with_the_service_header_and_errors_pass_through(
+    api, monkeypatch
+):
+    c, _ = api
+    seen = []
+
+    def fake(method, path, body=None):
+        seen.append((method, path, body))
+        if path == "/preview":
+            return 200, {"ok": True, "preview_id": "tok", "phrase": "BUY AAPL"}
+        if path == "/confirm":
+            return 422, {"ok": False, "error": 'type exactly "BUY AAPL" to confirm'}
+        return 200, {"ok": True, "enabled": True}
+
+    monkeypatch.setattr(t, "call_trader", fake)
+    assert c.get("/api/tradility-trade/status").get_json()["available"] is True
+    assert (
+        c.post("/api/tradility-trade/preview", json={"ticker": "AAPL"}).get_json()["preview_id"]
+        == "tok"
+    )
+    refused = c.post("/api/tradility-trade/confirm", json={"preview_id": "tok", "phrase": "no"})
+    assert refused.status_code == 422 and "type exactly" in refused.get_json()["error"]
+    assert [s[1] for s in seen] == ["/status", "/preview", "/confirm"]
+
+
+def test_only_the_three_steps_exist_and_a_body_is_required_and_csrf_applies(api, monkeypatch):
+    c, _ = api
+    monkeypatch.setattr(t, "call_trader", lambda *a, **k: (200, {"ok": True}))
+    assert c.post("/api/tradility-trade/withdraw", json={}).status_code == 404
+    assert (
+        c.post("/api/tradility-trade/preview", data="x", content_type="text/plain").status_code
+        == 400
+    )
+    del c.environ_base["HTTP_X_CSRF_TOKEN"]
+    c.environ_base["HTTP_ORIGIN"] = "https://evil.example"
+    assert c.post("/api/tradility-trade/preview", json={"ticker": "AAPL"}).status_code == 403
+
+
+def test_the_form_previews_then_requires_the_typed_phrase_and_never_auto_sends():
+    from pathlib import Path
+
+    html = (
+        Path(__file__).resolve().parents[1] / "web" / "templates" / "to-tradility.html"
+    ).read_text(encoding="utf-8")
+    for needle in (
+        "startPreview(",
+        'id="trade-phrase"',
+        "This sends a real order.",
+        "This cancels a real order.",
+        "tradeStep = null;   // a preview is single use",
+        "broker-cancel",
+        "canTrade()",
+    ):
+        assert needle in html, needle
+    assert html.index("tradeCall('preview'") < html.index("tradeCall('confirm'")
