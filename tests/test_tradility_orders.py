@@ -343,3 +343,38 @@ def test_the_form_defaults_to_a_gtc_limit_around_the_mark_and_makes_you_pick_the
         "account: f.account || ''",
     ):
         assert needle in html, needle
+
+
+def test_the_accounts_route_forwards_and_the_panel_shows_value_cash_buying_power_and_margin(
+    api, monkeypatch
+):
+    from pathlib import Path
+
+    c, _ = api
+    monkeypatch.setattr(
+        t,
+        "call_trader",
+        lambda m, p, b=None: (
+            (200, {"ok": True, "accounts": [], "sources": {}}) if p == "/accounts" else (500, {})
+        ),
+    )
+    assert c.get("/api/tradility-accounts").get_json()["ok"] is True
+    monkeypatch.setattr(
+        t,
+        "call_trader",
+        lambda *a, **k: (503, {"ok": False, "error": "the trader service is not running"}),
+    )
+    assert c.get("/api/tradility-accounts").status_code == 503
+    html = (
+        Path(__file__).resolve().parents[1] / "web" / "templates" / "to-tradility.html"
+    ).read_text(encoding="utf-8")
+    for needle in (
+        'id="accounts-panel"',
+        "margin eligible",
+        "Buying power",
+        "Total value",
+        "Key can withdraw",
+        "This API key can withdraw funds",
+        "function showAccountFunds",
+    ):
+        assert needle in html, needle

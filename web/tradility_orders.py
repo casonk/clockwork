@@ -364,6 +364,13 @@ def trade_status():
     return jsonify({**payload, "available": True})
 
 
+@bp.get("/api/tradility-accounts")
+def accounts():
+    """Read-only account details (value, cash, buying power, margin status) from the trader service."""
+    code, payload = call_trader("GET", "/accounts")
+    return jsonify(payload), code
+
+
 @bp.get("/api/tradility-trade/quote/<path:ticker>")
 def trade_quote(ticker: str):
     """The current mark and the policy's default limit prices (from the trader service)."""
