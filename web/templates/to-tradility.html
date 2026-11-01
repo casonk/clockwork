@@ -514,7 +514,14 @@
   let allClasses      = [];
   let csrfToken       = '';
   let detailRecord    = null;
-  let detailRange     = '5y';
+  // One chart range for every card: changing it on one chart changes all of them, and it is
+  // remembered in this browser.
+  const RANGES = ['1m', '3m', '1y', '3y', '5y'];
+  const RANGE_KEY = 'tradility-detail-range';
+  let detailRange = (() => {
+    try { const v = localStorage.getItem(RANGE_KEY); if (RANGES.includes(v)) return v; } catch (e) {}
+    return '5y';
+  })();
   let detailTrigger   = null;
   let detailTicker    = null;
   let shownOrder      = [];   // tickers with details, in the order the grid shows them
@@ -816,7 +823,6 @@
     detailTicker = ticker;
     paintDetailSteps();
     detailRecord = null;
-    detailRange = '5y';
     const overlay = document.getElementById('detail-overlay');
     overlay.hidden = false;
     document.body.classList.add('detail-open');
@@ -1005,7 +1011,9 @@
   }
 
   function setDetailRange(range) {
+    if (!RANGES.includes(range)) return;
     detailRange = range;
+    try { localStorage.setItem(RANGE_KEY, range); } catch (e) {}
     document.querySelectorAll('.detail-range-btn').forEach(button =>
       button.classList.toggle('active', button.dataset.range === range));
     drawDetailChart();
