@@ -312,3 +312,34 @@ def test_the_form_previews_then_requires_the_typed_phrase_and_never_auto_sends()
     ):
         assert needle in html, needle
     assert html.index("tradeCall('preview'") < html.index("tradeCall('confirm'")
+
+
+def test_the_quote_route_forwards_to_the_service_and_rejects_bad_tickers(api, monkeypatch):
+    c, _ = api
+    seen = []
+
+    def fake(method, path, body=None):
+        seen.append((method, path))
+        return 200, {"ok": True, "mark": 100.0, "buy_price": 97.5, "sell_price": 102.5}
+
+    monkeypatch.setattr(t, "call_trader", fake)
+    assert c.get("/api/tradility-trade/quote/aapl").get_json()["buy_price"] == 97.5
+    assert seen == [("GET", "/quote/AAPL")]
+    assert c.get("/api/tradility-trade/quote/not a ticker!").status_code == 404
+
+
+def test_the_form_defaults_to_a_gtc_limit_around_the_mark_and_makes_you_pick_the_account():
+    from pathlib import Path
+
+    html = (
+        Path(__file__).resolve().parents[1] / "web" / "templates" / "to-tradility.html"
+    ).read_text(encoding="utf-8")
+    for needle in (
+        '<option value="">Account…</option>',
+        "function fillDefaults",
+        "good-till-cancelled limit",
+        "tradeForm.elements.side.addEventListener('change', fillDefaults)",
+        "includes('*')",
+        "account: f.account || ''",
+    ):
+        assert needle in html, needle
