@@ -371,6 +371,25 @@ def accounts():
     return jsonify(payload), code
 
 
+@bp.get("/api/tradility-transfers")
+def transfers():
+    """Read-only deposit, withdrawal and transfer history from the trader service."""
+    code, payload = call_trader("GET", "/transfers")
+    return jsonify(payload), code
+
+
+@bp.post("/api/tradility-trade/withdraw/<step>")
+def withdraw_step(step: str):
+    """Preview or confirm a Binance.US withdrawal (the service enforces the policy and the phrase)."""
+    if step not in ("preview", "confirm"):
+        abort(404)
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"ok": False, "error": "send a JSON object"}), 400
+    code, payload = call_trader("POST", f"/withdraw/{step}", body)
+    return jsonify(payload), code
+
+
 @bp.get("/api/tradility-trade/quote/<path:ticker>")
 def trade_quote(ticker: str):
     """The current mark and the policy's default limit prices (from the trader service)."""

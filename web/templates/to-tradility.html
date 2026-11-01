@@ -1318,8 +1318,113 @@
       </div>`).join('')}
       ${failed.length ? `<div class="account-warning">Not available: ${failed.join(' · ')}</div>` : ''}
     </div>
-    <div class="orders-sync" style="padding:0 12px 10px">Updated ${esc(new Date(accountsData.generated_at).toLocaleTimeString())} · <a href="#" id="accounts-refresh">Refresh</a></div>`;
+    <div class="orders-sync" style="padding:0 12px 10px">Updated ${esc(new Date(accountsData.generated_at).toLocaleTimeString())} · <a href="#" id="accounts-refresh">Refresh</a></div>
+    <div id="money-box"></div>`;
     document.getElementById('accounts-refresh').addEventListener('click', event => { event.preventDefault(); loadAccounts(); });
+    loadMoney();
+  }
+
+  // ── Deposits, withdrawals and transfers ──────────────────────────────────────
+  let transfersData = null, moneyStep = null, includeJournals = false;
+
+  async function loadMoney() {
+    const box = document.getElementById('money-box');
+    if (!box) return;
+    try {
+      const [tr, st] = await Promise.all([
+        fetch('/api/tradility-transfers').then(r => r.json()),
+        tradeStatus ? Promise.resolve(tradeStatus) : fetch('/api/tradility-trade/status').then(r => r.json()),
+      ]);
+      if (!tr.ok) throw new Error(tr.error || 'unavailable');
+      transfersData = tr;
+      tradeStatus = st;
+    } catch (err) {
+      box.innerHTML = `<div class="account-warning" style="padding:0 12px 10px">Deposit and withdrawal history is not available: ${esc(err.message)}</div>`;
+      return;
+    }
+    renderMoney();
+  }
+
+  function renderMoney() {
+    const box = document.getElementById('money-box');
+    const rows = (transfersData.transfers || []).filter(r => includeJournals || r.kind !== 'journal');
+    const hidden = (transfersData.transfers || []).length - rows.length;
+    const sum = dir => rows.filter(r => r.direction === dir && r.asset === 'USD').reduce((a, r) => a + r.amount, 0);
+    const w = (tradeStatus && tradeStatus.withdrawals) || {};
+    box.innerHTML = `<div class="trade-box" style="margin:0 12px 12px">
+      <h4>Deposits and withdrawals · past year${rows.length ? ` · ${money(sum('in'))} in, ${money(sum('out'))} out (USD)` : ''}</h4>
+      <label class="orders-sync"><input type="checkbox" id="money-journals" ${includeJournals ? 'checked' : ''}> include internal journals${hidden ? ` (${hidden} hidden)` : ''}</label>
+      ${rows.length ? `<table class="orders-table"><thead><tr><th>Date</th><th>Where</th><th>Type</th><th class="num">Amount</th><th>Status</th><th>Note</th></tr></thead><tbody>
+        ${rows.slice(0, 40).map(r => `<tr><td>${esc(r.date)}</td><td>${esc(r.broker === 'schwab' ? 'Schwab …' + r.account : 'Binance.US')}</td><td>${esc(r.kind)}</td>
+          <td class="num">${r.direction === 'in' ? '+' : '−'}${r.asset === 'USD' ? money(r.amount) : esc(String(r.amount)) + ' ' + esc(r.asset)}</td><td>${esc(r.status)}</td><td>${esc(r.note || '')}</td></tr>`).join('')}
+        </tbody></table>${rows.length > 40 ? `<div class="orders-sync">Showing the latest 40 of ${rows.length}.</div>` : ''}`
+        : '<p class="company-description">No deposits or withdrawals found.</p>'}
+      <div class="orders-sync">Schwab does not offer money movement through its API, so transfers there are history only.</div>
+      ${withdrawSection(w)}
+    </div>`;
+    box.querySelector('#money-journals').addEventListener('change', e => { includeJournals = e.target.checked; renderMoney(); });
+    const form = box.querySelector('#withdraw-form');
+    if (form) form.addEventListener('submit', event => { event.preventDefault(); startWithdraw(form); });
+    const go = box.querySelector('#withdraw-go');
+    if (go) go.addEventListener('click', sendWithdraw);
+    const discard = box.querySelector('#withdraw-discard');
+    if (discard) discard.addEventListener('click', () => { moneyStep = null; renderMoney(); });
+  }
+
+  function withdrawSection(w) {
+    if (!w.enabled) return '<div class="orders-sync">Binance.US withdrawals are turned off in the trading policy.</div>';
+    if (!(w.destinations || []).length) return '<div class="orders-sync">No withdrawal destinations are listed in the policy.</div>';
+    return `<h4 style="margin-top:12px">Withdraw from Binance.US · only to destinations in your policy, up to ${money(w.per_withdrawal_usd)} each, ${money(w.daily_withdrawal_usd)} a day (${money(w.spent_today)} used)</h4>
+      <form class="order-form" id="withdraw-form" autocomplete="off">
+        <select name="label" aria-label="Destination" required>
+          <option value="">Destination…</option>
+          ${w.destinations.map(d => `<option value="${esc(d.label)}">${esc(d.label)} · ${esc(d.coin)} ${esc(d.network)} ${esc(d.to)}</option>`).join('')}
+        </select>
+        <input name="amount" type="number" step="any" min="0" placeholder="Amount" aria-label="Amount" required>
+        <button type="submit" class="primary">Preview</button>
+      </form>
+      ${moneyStep ? `<div><p>Withdraw ${esc(String(moneyStep.amount))} ${esc(moneyStep.coin)} (about ${money(moneyStep.notional)}) to <strong>${esc(moneyStep.label)}</strong> (${esc(moneyStep.network)} ${esc(moneyStep.to)}).</p>
+        <p>Type <strong>${esc(moneyStep.phrase)}</strong> to confirm. This sends real funds and cannot be undone.</p>
+        <input type="text" id="withdraw-phrase" autocomplete="off" aria-label="Confirmation phrase" style="width:260px">
+        <button type="button" class="primary" id="withdraw-go">Withdraw</button> <button type="button" id="withdraw-discard">Discard</button></div>` : ''}
+      <div class="order-error" id="withdraw-error" role="alert"></div>`;
+  }
+
+  async function withdrawCall(step, body) {
+    const res = await fetch(`/api/tradility-trade/withdraw/${step}`, {
+      method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken}, body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  }
+
+  async function startWithdraw(form) {
+    const f = Object.fromEntries(new FormData(form).entries());
+    try {
+      moneyStep = await withdrawCall('preview', {label: f.label, amount: f.amount});
+    } catch (err) {
+      moneyStep = null;
+      renderMoney();
+      document.getElementById('withdraw-error').textContent = err.message;
+      return;
+    }
+    renderMoney();
+  }
+
+  async function sendWithdraw() {
+    const step = moneyStep, phrase = document.getElementById('withdraw-phrase').value;
+    moneyStep = null;   // single use, whatever happens next
+    let message = 'Sent. It appears in the history once Binance.US lists it.';
+    try {
+      await withdrawCall('confirm', {preview_id: step.preview_id, phrase});
+    } catch (err) {
+      message = err.message;
+    }
+    tradeStatus = null;   // refresh today's total
+    await loadMoney();
+    const box = document.getElementById('withdraw-error');
+    if (box) box.textContent = message;
   }
 
   document.getElementById('accounts-panel').addEventListener('toggle', event => {

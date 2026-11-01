@@ -388,3 +388,59 @@ def test_a_crypto_ticker_explains_why_binance_trading_is_off():
         Path(__file__).resolve().parents[1] / "web" / "templates" / "to-tradility.html"
     ).read_text(encoding="utf-8")
     assert "Binance.US trading is not enabled" in html and "includes('binance')" in html
+
+
+def test_transfer_history_and_withdrawal_steps_are_forwarded_and_nothing_else_exists(
+    api, monkeypatch
+):
+    c, _ = api
+    seen = []
+
+    def fake(method, path, body=None):
+        seen.append((method, path))
+        return 200, {"ok": True, "transfers": [], "sources": {}}
+
+    monkeypatch.setattr(t, "call_trader", fake)
+    assert c.get("/api/tradility-transfers").get_json()["ok"] is True
+    assert (
+        c.post(
+            "/api/tradility-trade/withdraw/preview", json={"label": "x", "amount": 1}
+        ).status_code
+        == 200
+    )
+    assert (
+        c.post(
+            "/api/tradility-trade/withdraw/confirm", json={"preview_id": "t", "phrase": "p"}
+        ).status_code
+        == 200
+    )
+    assert c.post("/api/tradility-trade/withdraw/anything", json={}).status_code == 404
+    assert (
+        c.post(
+            "/api/tradility-trade/withdraw/preview", data="x", content_type="text/plain"
+        ).status_code
+        == 400
+    )
+    assert seen == [
+        ("GET", "/transfers"),
+        ("POST", "/withdraw/preview"),
+        ("POST", "/withdraw/confirm"),
+    ]
+
+
+def test_the_page_shows_history_without_journals_and_makes_withdrawals_use_a_typed_phrase():
+    from pathlib import Path
+
+    html = (
+        Path(__file__).resolve().parents[1] / "web" / "templates" / "to-tradility.html"
+    ).read_text(encoding="utf-8")
+    for needle in (
+        "Deposits and withdrawals",
+        "include internal journals",
+        "This sends real funds and cannot be undone.",
+        "Schwab does not offer money movement",
+        "moneyStep = null;   // single use",
+        "Binance.US withdrawals are turned off",
+    ):
+        assert needle in html, needle
+    assert html.index("withdrawCall('preview'") < html.index("withdrawCall('confirm'")
