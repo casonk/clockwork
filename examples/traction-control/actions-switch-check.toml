@@ -1,0 +1,25 @@
+
+[[jobs]]
+name = "actions-switch-check"
+launchd_label = "io.github.casonk.traction-control.actions-switch-check"
+description = "Tell the owner when GitHub Actions is left off after a month ends, is off without a recorded reason, has a stuck workflow, or private-repository minutes near the limit"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h/git/util-repos/traction-control"
+exec_start = "/usr/bin/python3 %h/git/util-repos/traction-control/scripts/actions_switch.py check --notify"
+after = ["network-online.target"]
+environment_files = ["-%h/.config/traction-control/actions-switch.env"]
+standard_output = "journal"
+standard_error = "journal"
+timer_description = "Run the daily GitHub Actions state check"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "*-*-* 08:30:00"
+persistent = true
+randomized_delay_sec = "300"
+
+[jobs.cron]
+expression = "30 8 * * *"
+command = "mkdir -p $HOME/.local/share/actions-switch && cd $HOME/git/util-repos/traction-control && /usr/bin/python3 %h/git/util-repos/traction-control/scripts/actions_switch.py check --notify >> $HOME/.local/share/actions-switch/cron.log 2>&1"
+comments = ["Auto-generated from systemd timer: daily at 08:30"]

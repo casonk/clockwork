@@ -576,6 +576,7 @@ def test_actual_traction_manifests_compose_ui_and_renderer_labels(monkeypatch):
         for job in manifest["jobs"]
     }
     expected = {
+        "actions-switch-check",
         "archility-daily",
         "archility-weekly",
         "bug-sweep-agentic",
@@ -727,7 +728,12 @@ def test_launchd_systemd_rich_manifest_requires_an_installed_reviewed_adapter(
     monkeypatch.setenv("HOME", str(tmp_path))
     examples_dir = Path(__file__).resolve().parent.parent / "examples"
     monkeypatch.setattr(web_app, "EXAMPLES_DIR", examples_dir)
-    job = web_app.scan_repos()["traction-control"]["manifests"][0]["jobs"][0]
+    manifest = next(
+        manifest
+        for manifest in web_app.scan_repos()["traction-control"]["manifests"]
+        if manifest["path"] == "traction-control/archility-daily.toml"
+    )
+    job = manifest["jobs"][0]
     manifest_path = examples_dir / "traction-control" / "archility-daily.toml"
     assert job["name"] == "archility-daily"
     monkeypatch.setattr(
