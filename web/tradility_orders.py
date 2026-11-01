@@ -23,6 +23,8 @@ import re
 import secrets
 import tempfile
 import threading
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -316,3 +318,58 @@ def delete_order(ticker: str, order_id: str):
             orders.pop(ticker)
         save(orders)
         return jsonify(summary(ticker, orders, _holdings_list(), load_export()))
+
+
+# -- placing orders -----------------------------------------------------------------------------
+# The web app never holds broker credentials or decides what may be traded. It forwards each step to
+# Tradility's local trader service (127.0.0.1 only), which applies the owner-only policy, validates
+# the order with the broker without placing it, and sends it only after the typed confirmation.
+
+TRADER_ACTIONS = ("preview", "confirm", "cancel")
+
+
+def trader_url() -> str:
+    return os.environ.get("CLOCKWORK_TRADILITY_TRADER_URL", "http://127.0.0.1:8768").rstrip("/")
+
+
+def call_trader(
+    method: str, path: str, body: dict[str, Any] | None = None
+) -> tuple[int, dict[str, Any]]:
+    """One request to the trader service; (503, ...) when it is not running."""
+    data = json.dumps(body).encode() if body is not None else None
+    request = urllib.request.Request(
+        f"{trader_url()}{path}",
+        data=data,
+        method=method,
+        headers={"X-Tradility-Trader": "1", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:  # noqa: S310
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            return exc.code, json.loads(exc.read().decode("utf-8"))
+        except ValueError:
+            return exc.code, {"ok": False, "error": f"trader service error ({exc.code})"}
+    except (urllib.error.URLError, OSError, ValueError):
+        return 503, {"ok": False, "error": "the trader service is not running"}
+
+
+@bp.get("/api/tradility-trade/status")
+def trade_status():
+    """Whether trading is available here, and the limits the policy sets (never any credential)."""
+    code, payload = call_trader("GET", "/status")
+    if code != 200 or not payload.get("ok"):
+        return jsonify({"ok": True, "available": False, "enabled": False})
+    return jsonify({**payload, "available": True})
+
+
+@bp.post("/api/tradility-trade/<action>")
+def trade_step(action: str):
+    if action not in TRADER_ACTIONS:
+        abort(404)
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"ok": False, "error": "send a JSON object"}), 400
+    code, payload = call_trader("POST", f"/{action}", body)
+    return jsonify(payload), code
