@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Re-vendor the portfolio theme files: the top bar's theme menu has This site / Everywhere and "Follow the global theme" (the global theme is set through traction-control's theme writer; without it the choice stays per site).
 - Tradility ticker details now include an on-demand company/fund overview with
   canonical name, sourced description, sector/industry or fund classification,
   headquarters, website, exchange, employees, entity type, and profile
