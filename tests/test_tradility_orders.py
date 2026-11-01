@@ -480,3 +480,26 @@ def test_the_form_offers_every_schwab_duration_and_session_and_keeps_to_valid_co
         "TIF_LABEL[o.tif]",
     ):
         assert needle in html, needle
+
+
+def test_the_form_offers_one_click_order_templates_priced_from_the_mark():
+    from pathlib import Path
+
+    html = (
+        Path(__file__).resolve().parents[1] / "web" / "templates" / "to-tradility.html"
+    ).read_text(encoding="utf-8")
+    for needle in (
+        'id="trade-templates"',
+        "function paintTemplates",
+        "function applyTemplate",
+        "tradeQuote.templates",
+        "form.elements.price.value = t.price",
+        "template: ${t.name}",
+    ):
+        assert needle in html, needle
+    # a template only fills the form; sending still needs a preview and the typed phrase
+    assert (
+        html.index("function applyTemplate")
+        < html.index("tradeCall('preview'")
+        < html.index("tradeCall('confirm'")
+    )
