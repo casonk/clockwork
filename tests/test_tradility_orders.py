@@ -17,18 +17,93 @@ HOLDINGS = [
 
 
 def test_average_entry_is_cost_basis_over_quantity_and_crypto_matches_its_usd_pair():
-    assert t.position_from_holdings("AAPL", HOLDINGS) == {
-        "quantity": 10.0,
-        "avg_entry": 150.0,
-        "source": "holdings",
-    }
+    aapl = t.position_from_holdings("AAPL", HOLDINGS)
+    assert (aapl["quantity"], aapl["avg_entry"], aapl["source"]) == (10.0, 150.0, "holdings")
+    assert aapl["partial"] is False and aapl["covered_quantity"] == 10.0
     assert t.position_from_holdings("BTC-USD", HOLDINGS)["avg_entry"] == 50000.0
     assert t.position_from_holdings("NOPE", HOLDINGS) is None
 
 
-def test_a_missing_or_partial_cost_basis_gives_no_average():
+def test_no_cost_basis_gives_no_average_and_a_partial_one_is_flagged_not_spread_over_every_share():
     assert t.position_from_holdings("MSFT", HOLDINGS)["avg_entry"] is None
-    assert t.position_from_holdings("PART", HOLDINGS)["avg_entry"] is None  # one lot unpriced
+    part = t.position_from_holdings(
+        "PART", HOLDINGS
+    )  # 3 shares cost $300, 1 share has no cost on record
+    assert (
+        part["avg_entry"] == 100.0 and part["covered_quantity"] == 3.0 and part["partial"] is True
+    )
+    assert part["quantity"] == 4.0
+
+
+VWO = [
+    {
+        "ticker": "VWO",
+        "total_quantity": 18.635,
+        "total_cost_basis": 673.88,  # only the Fidelity lot has a cost
+        "accounts": [
+            {"institution": "cs", "quantity": 4.0, "cost_basis": None},
+            {"institution": "fid", "quantity": 14.635, "cost_basis": 673.88},
+        ],
+    }
+]
+
+
+def test_the_average_is_not_diluted_by_shares_with_no_cost_on_record():
+    got = t.position_from_holdings("VWO", VWO)
+    assert got["avg_entry"] == pytest.approx(
+        673.88 / 14.635
+    )  # $46.05, not 673.88 / 18.635 = $36.16
+    assert got["partial"] is True and got["covered_quantity"] == pytest.approx(14.635)
+
+
+def test_schwabs_live_average_price_completes_the_picture_and_replaces_its_statement_lot():
+    live = [
+        {"broker": "schwab", "quantity": 4.0, "average_price": 58.665},
+        {"broker": "schwab", "quantity": 0.0},
+    ]
+    got = t.position_from_holdings("VWO", VWO, live)
+    assert got["avg_entry"] == pytest.approx((4 * 58.665 + 673.88) / 18.635)
+    assert (
+        got["partial"] is False
+        and got["source"] == "live+holdings"
+        and got["quantity"] == pytest.approx(18.635)
+    )
+    # Schwab no longer holds it: the statement's Schwab lot is dropped, only the Fidelity lot remains
+    sold = t.position_from_holdings("VWO", VWO, [{"broker": "schwab", "quantity": 0.0}])
+    assert sold["quantity"] == pytest.approx(14.635) and sold["avg_entry"] == pytest.approx(
+        673.88 / 14.635
+    )
+
+
+def test_the_orders_route_uses_the_live_rows_when_the_trader_service_answers(api, monkeypatch):
+    c, _ = api
+    web_app.HOLDINGS_AGGREGATE_FILE.write_text(
+        json.dumps({"holdings": VWO})
+    )  # the fixture's temp file
+    monkeypatch.setattr(
+        t,
+        "call_trader",
+        lambda m, p, b=None: (
+            200,
+            {
+                "ok": True,
+                "accounts": [{"broker": "schwab", "quantity": 4.0, "average_price": 58.665}],
+            },
+        ),
+    )
+    pos = c.get("/api/tradility-orders/VWO").get_json()["position"]
+    assert (
+        pos["source"] == "live+holdings"
+        and pos["partial"] is False
+        and round(pos["avg_entry"], 2) == 48.75
+    )
+    monkeypatch.setattr(t, "call_trader", lambda m, p, b=None: (503, {"ok": False}))
+    pos = c.get("/api/tradility-orders/VWO").get_json()["position"]
+    assert (
+        pos["source"] == "holdings"
+        and pos["partial"] is True
+        and round(pos["avg_entry"], 2) == 46.05
+    )
 
 
 def test_filled_buys_are_the_fallback_average_and_open_orders_are_not_counted():
@@ -72,6 +147,8 @@ def test_an_open_market_order_needs_no_price():
 @pytest.fixture
 def api(client, tmp_path, monkeypatch):  # noqa: F811
     monkeypatch.setenv("CLOCKWORK_TRADILITY_ORDERS_FILE", str(tmp_path / "orders.json"))
+    # never reach a trader service that may be running on this machine
+    monkeypatch.setenv("CLOCKWORK_TRADILITY_TRADER_URL", "http://127.0.0.1:9")
     monkeypatch.setenv("CLOCKWORK_TRADILITY_ORDERS_EXPORT", str(tmp_path / "broker-orders.json"))
     held = tmp_path / "holdings.json"
     held.write_text(json.dumps({"holdings": HOLDINGS}))
