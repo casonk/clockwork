@@ -364,6 +364,14 @@ def trade_status():
     return jsonify({**payload, "available": True})
 
 
+@bp.get("/api/tradility-trade/quote/<path:ticker>")
+def trade_quote(ticker: str):
+    """The current mark and the policy's default limit prices (from the trader service)."""
+    ticker = _ticker(ticker)
+    code, payload = call_trader("GET", f"/quote/{ticker}")
+    return jsonify(payload), code
+
+
 @bp.post("/api/tradility-trade/<action>")
 def trade_step(action: str):
     if action not in TRADER_ACTIONS:
