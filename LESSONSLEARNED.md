@@ -14,6 +14,15 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
+- An AI batch action that normally fills missing values must make replacement
+  of user-authored values an explicit, confirmed scope. Enforce that scope both
+  when building the model prompt and when applying its response; filtering only
+  the prompt can still overwrite an excluded record when item names repeat or
+  the model returns an over-complete mapping.
+- A test for a view that merges multiple local data sources must redirect every
+  source, including read-only companion exports. Redirecting only the writable
+  store can leak live owner data into failures and make the suite host-dependent.
+
 - A dashboard reload is not a data refresh. Load an existing generated artifact
   automatically when the page opens instead of presenting reread and regenerate
   as sibling actions. One manual update control should route through the same

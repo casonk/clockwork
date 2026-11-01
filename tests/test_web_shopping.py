@@ -338,6 +338,7 @@ def test_ai_categorize_shopping_skips_already_typed(sample_shopping_data, monkey
     response = json.dumps(
         {
             "types": {
+                "T-Shirt": "Electronics",
                 "Jeans": "Bottoms",
                 "Jacket": "Outerwear",
                 "Toilet Paper": "Bath",
@@ -350,6 +351,17 @@ def test_ai_categorize_shopping_skips_already_typed(sample_shopping_data, monkey
     monkeypatch.setattr(web_app, "_ollama_generate", lambda *a, **kw: response)
     count, _ = web_app._ai_categorize_shopping(sample_shopping_data)
     assert count == 6
+    assert sample_shopping_data["categories"][0]["items"][0]["type"] == "Tops"
+
+
+def test_ai_categorize_shopping_can_replace_existing_types(sample_shopping_data, monkeypatch):
+    sample_shopping_data["categories"][0]["items"][0]["type"] = "commuting"
+    monkeypatch.setattr(web_app, "_ollama_generate", lambda *a, **kw: _CATEGORIZE_RESPONSE)
+
+    count, _ = web_app._ai_categorize_shopping(sample_shopping_data, replace_existing=True)
+
+    assert count == 7
+    assert sample_shopping_data["categories"][0]["items"][0]["type"] == "Tops"
 
 
 def test_ai_categorize_shopping_returns_zero_when_all_typed(sample_shopping_data, monkeypatch):
@@ -706,6 +718,28 @@ def test_ai_categorize_shopping_route_applies_types(client, shopping_file, monke
     assert b"Assigned" in resp.data or b"types" in resp.data
 
 
+def test_ai_categorize_shopping_route_can_replace_existing_types(
+    client, shopping_file, monkeypatch
+):
+    data = json.loads(shopping_file.read_text())
+    data["categories"][0]["items"][0]["type"] = "commuting"
+    shopping_file.write_text(json.dumps(data))
+    monkeypatch.setattr(web_app, "_ollama_available", lambda: True)
+    monkeypatch.setattr(web_app, "_ollama_generate", lambda *a, **kw: _CATEGORIZE_RESPONSE)
+
+    resp = client.post(
+        "/shopping/ai-categorize",
+        data={"scope": "all"},
+        headers={"Origin": "http://localhost"},
+        follow_redirects=True,
+    )
+
+    saved = json.loads(shopping_file.read_text())
+    tshirt = next(i for i in saved["categories"][0]["items"] if i["name"] == "T-Shirt")
+    assert tshirt["type"] == "Tops"
+    assert b"Reassigned types for 7 items" in resp.data
+
+
 def test_ai_categorize_shopping_route_ollama_down(client, monkeypatch):
     monkeypatch.setattr(web_app, "_ollama_available", lambda: False)
     resp = client.post(
@@ -813,6 +847,17 @@ def test_get_shopping_shows_type_badge_after_categorize(client, shopping_file, m
     resp = client.get("/shopping")
     assert b"Tops" in resp.data
     assert b"type-Tops" in resp.data
+
+
+def test_get_shopping_offers_missing_and_all_categorization_scopes(client, monkeypatch):
+    monkeypatch.setattr(web_app, "_ollama_available", lambda: True)
+    resp = client.get("/shopping")
+
+    assert b'name="scope" value="missing"' in resp.data
+    assert b"Categorize missing" in resp.data
+    assert b'name="scope" value="all"' in resp.data
+    assert b"Recategorize all" in resp.data
+    assert b"Existing type labels may be replaced" in resp.data
 
 
 def test_get_shopping_shows_owned_count(client):
