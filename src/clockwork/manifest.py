@@ -177,6 +177,11 @@ def _parse_job(value: Any) -> JobSpec:
         start_limit_interval_sec=value.get("start_limit_interval_sec"),
         start_condition=_as_command_tuple(value.get("start_condition")) or (),
         time_limit=_as_optional_str(value.get("time_limit"), field="time_limit"),
+        exec_start_then=_as_command_tuple(value.get("exec_start_then")),
+        documentation=_as_str_tuple(value.get("documentation")),
+        syslog_identifier=_as_optional_str(
+            value.get("syslog_identifier"), field="syslog_identifier"
+        ),
         environment=_as_str_dict(value.get("environment")),
         environment_files=_as_str_tuple(value.get("environment_files")),
         user=value.get("user"),

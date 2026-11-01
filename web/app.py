@@ -462,6 +462,9 @@ def ensure_cron_sections(examples_dir: Path) -> list[str]:
             cmd_parts = [f"mkdir -p {log_dir}"]
             if working_dir and working_dir not in ("$HOME", ""):
                 cmd_parts.append(f"cd {working_dir}")
+            then = _command_list(job.get("exec_start_then"))
+            if then:  # a sequence: stop at the first failure, log them together
+                exec_start = "( " + " && ".join([exec_start, *then]) + " )"
             cmd_parts.append(f"{exec_start} >> {log_path} 2>&1")
             cmd = " && ".join(cmd_parts)
 
@@ -494,6 +497,13 @@ def _coerce_list(values) -> list[str]:
     if not values:
         return []
     return [_coerce(item) for item in values]
+
+
+def _command_list(value) -> list[str]:
+    """``exec_start_then`` is one command or a list of them."""
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    return _coerce_list(value)
 
 
 def _coerce_mapping(values) -> dict[str, str]:
@@ -545,6 +555,7 @@ def scan_repos() -> dict[str, dict]:
                     "scope": _coerce(job.get("scope")) or "user",
                     "service_type": _coerce(job.get("service_type")) or "oneshot",
                     "exec_start": _coerce(job.get("exec_start")),
+                    "exec_start_then": _command_list(job.get("exec_start_then")),
                     "working_directory": _coerce(job.get("working_directory")),
                     "environment": environment,
                     "environment_files": environment_files,
