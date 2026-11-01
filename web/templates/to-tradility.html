@@ -962,6 +962,7 @@
     detailOrders = null;
     tradeStep = null;
     tradeQuote = null;
+    heldData = null;
     const overlay = document.getElementById('detail-overlay');
     overlay.hidden = false;
     document.body.classList.add('detail-open');
@@ -1195,6 +1196,7 @@
     }
     await loadTradeStatus();
     // so the account list can show what each account can spend, and a buy can be checked before previewing
+    if (tradeStatus && tradeStatus.available) loadHeld();
     if (tradeStatus && tradeStatus.enabled && !accountsData) await loadAccounts();
     renderOrders();
     drawDetailChart();
@@ -1244,6 +1246,26 @@
       const box = document.getElementById('order-error');
       if (box) box.textContent = err.message;
     }
+  }
+
+  // Where this ticker is held today, per account (needs the trader service).
+  let heldData = null;
+  function heldBox() {
+    return heldData ? holdingsTable(detailTicker, heldData.accounts, heldData.statements) : '';
+  }
+
+  async function loadHeld() {
+    const ticker = detailTicker;
+    try {
+      const res = await fetch(`/api/tradility-trade/holdings/${encodeURIComponent(ticker)}`);
+      const data = await res.json();
+      if (detailTicker !== ticker || !res.ok || !data.ok) return;
+      heldData = data;
+    } catch (err) {
+      return;
+    }
+    const box = document.getElementById('held-box');
+    if (box) box.innerHTML = heldBox();
   }
 
   function sourceLabel(source) {
@@ -1315,7 +1337,7 @@
         <dl>
           ${row('Total value', a.total_value == null ? null : money(a.total_value))}
           ${row('Cash', a.cash == null ? null : money(a.cash))}
-          ${row('Cash available to trade', a.cash_available_to_trade == null ? null : money(a.cash_available_to_trade))}
+          ${row('Available for new stock orders', a.spendable == null ? null : money(a.spendable))}
           ${row('Buying power', a.buying_power == null ? null : money(a.buying_power))}
           ${row('Available funds', a.available_funds == null ? null : money(a.available_funds))}
           ${row('Day-trading buying power', a.day_trading_buying_power == null ? null : money(a.day_trading_buying_power))}
@@ -1463,9 +1485,9 @@
       const qty = Number(form.elements.quantity.value);
       const px = form.elements.kind.value === 'limit' ? Number(form.elements.price.value) : (tradeQuote ? tradeQuote.mark : 0);
       const cost = qty * px;
-      const spendable = acct.cash_available_to_trade != null ? acct.cash_available_to_trade : acct.buying_power;
+      const spendable = acct.spendable != null ? acct.spendable : acct.buying_power;
       if (cost > 0 && spendable != null && cost > spendable) {
-        note.textContent += ` · This order costs about ${money(cost)}, more than the ${money(spendable)} available to trade here, so Schwab is likely to reject it. Pick another account or a smaller quantity.`;
+        note.textContent += ` · This order costs about ${money(cost)}, more than the ${money(spendable)} this account can spend on new stock orders, so Schwab is likely to reject it. Pick another account or a smaller quantity.`;
         note.classList.add('trade-warn');
       }
     }
@@ -1488,8 +1510,8 @@
           <option value="">Account…</option>
           ${(tradeStatus.schwab_accounts || []).map(a => {
             const info = ((accountsData && accountsData.accounts) || []).find(x => x.broker === 'schwab' && x.id === a);
-            const spend = info ? (info.cash_available_to_trade != null ? info.cash_available_to_trade : info.buying_power) : null;
-            return `<option value="${esc(a)}">…${esc(a)}${spend == null ? '' : ' · ' + money(spend) + ' to trade'}</option>`;
+            const spend = info ? (info.spendable != null ? info.spendable : info.buying_power) : null;
+            return `<option value="${esc(a)}">…${esc(a)}${spend == null ? '' : ' · ' + money(spend) + ' available'}</option>`;
           }).join('')}
         </select>`}
         <select name="side" aria-label="Side"><option>buy</option><option>sell</option></select>
@@ -1522,6 +1544,21 @@
 
   // How the order changes the position: dollars, shares and the share of the account and of everything
   // you own, before and after, plus what is left to trade with.
+  // Where a symbol is held now, account by account. In a preview the chosen account also shows
+  // what it will hold after the order.
+  function holdingsTable(symbol, rows, statements) {
+    const list = (rows || []).filter(r => r.quantity || r.chosen);
+    const stmt = statements || [];
+    if (!list.length && !stmt.length) return `<div class="orders-sync">You hold no ${esc(symbol)} in any connected account.</div>`;
+    const shares = n => esc(String(+Number(n).toFixed(6)));
+    const body = list.map(r => `<tr${r.chosen ? ' class="order-open"' : ''}><td>${esc(r.label)}${r.chosen ? ' (this order)' : ''}</td>
+      <td class="num">${shares(r.quantity)}${r.chosen ? ' → ' + shares(r.quantity_after) : ''}</td>
+      <td class="num">${money(r.value)}${r.chosen ? ' → ' + money(r.value_after) : ''}</td>
+      <td class="num">${pctText(r.percent)}${r.chosen ? ' → ' + pctText(r.percent_after) : ''}</td></tr>`).join('')
+      + stmt.map(s2 => `<tr><td>${esc(s2.name)} <span class="account-flag">statement ${esc(s2.as_of)}</span></td><td class="num">${shares(s2.quantity)}</td><td class="num">${money(s2.market_value)}</td><td class="num">—</td></tr>`).join('');
+    return `<table class="orders-table impact-table"><thead><tr><th>Where you hold ${esc(symbol)}</th><th class="num">Shares</th><th class="num">Value</th><th class="num">Share of account</th></tr></thead><tbody>${body}</tbody></table>`;
+  }
+
   function impactTable(im) {
     if (!im) return '<div class="orders-sync">Position impact is not available right now.</div>';
     const a = im.account, o = im.overall;
@@ -1535,7 +1572,8 @@
       ${im.everything ? row(`Plus ${im.everything.institutions.map(i => i.name + ' (statement ' + i.as_of + ')').join(', ')}`, im.everything.quantity, im.everything.value, im.everything.percent, im.everything.total) : ''}
       </tbody></table>
       <div class="orders-sync">“Live” accounts are read from Schwab and Binance.US now. ${im.everything ? 'The last row adds accounts known only from statements, whose values may be months old.' : 'Accounts that are only known from statements are not included.'}</div>
-      <div class="orders-sync">${a.cash_after == null ? '' : `Cash available to trade after: ${money(a.cash_after)}`}${a.buying_power_after == null ? '' : ` · buying power after: ${money(a.buying_power_after)}`}</div>`;
+      <div class="orders-sync">${a.cash_after == null ? '' : `Cash after: ${money(a.cash_after)}${a.cash_after < 0 ? ' (the shortfall is margin)' : ''}`}${a.buying_power_after == null ? '' : ` · available for new stock orders after: ${money(a.buying_power_after)}`}</div>
+      ${holdingsTable(im.symbol, im.holdings, null)}`;
   }
 
   function confirmPanel() {
@@ -1739,6 +1777,7 @@
       </div>
       ${rows ? `<table class="orders-table"><thead><tr><th>Date</th><th>Side</th><th>Type</th><th class="num">Qty</th><th class="num">Price</th><th>Status</th><th>Note</th><th>Source</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
              : '<p class="company-description">No orders recorded for this ticker.</p>'}
+      <div id="held-box">${heldBox()}</div>
       ${tradeSection()}
       <div class="orders-sync">${syncNote()}</div>
       <form class="order-form" id="order-form" autocomplete="off">
