@@ -1,0 +1,26 @@
+
+[[jobs]]
+name = "session-control-prune"
+description = "Deduplicate and prune local AI assistant sessions"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h/git/util-repos/session-control"
+exec_start = "/bin/sh -c '%h/git/util-repos/session-control/.venv/bin/session-control deduplicate --min-age 50d --max-age 100d && %h/git/util-repos/session-control/.venv/bin/session-control prune --older-than 100d'"
+environment_files = ["-%h/git/util-repos/session-control/config/session-control.env.local"]
+standard_output = "journal"
+standard_error = "journal"
+timer_description = "Run session-control daily session cleanup"
+
+[jobs.environment]
+SESSION_CONTROL_ENV_FILE = "%h/git/util-repos/session-control/config/session-control.env.local"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "*-*-* 03:35:00"
+persistent = true
+randomized_delay_sec = "900"
+
+[jobs.cron]
+expression = "35 3 * * *"
+command = "mkdir -p $HOME/.local/share/session-control-prune/runs && cd $HOME/git/util-repos/session-control && /bin/sh -c '$HOME/git/util-repos/session-control/.venv/bin/session-control deduplicate --min-age 50d --max-age 100d && $HOME/git/util-repos/session-control/.venv/bin/session-control prune --older-than 100d' >> $HOME/.local/share/session-control-prune/runs/cron.log 2>&1"
+comments = ["Auto-generated from systemd timer: *-*-* 03:35:00"]

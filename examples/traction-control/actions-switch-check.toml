@@ -21,5 +21,5 @@ randomized_delay_sec = "300"
 
 [jobs.cron]
 expression = "30 8 * * *"
-command = "mkdir -p $HOME/.local/share/actions-switch && cd $HOME/git/util-repos/traction-control && /usr/bin/python3 %h/git/util-repos/traction-control/scripts/actions_switch.py check --notify >> $HOME/.local/share/actions-switch/cron.log 2>&1"
+command = "mkdir -p $HOME/.local/share/actions-switch && cd $HOME/git/util-repos/traction-control && /usr/bin/python3 $HOME/git/util-repos/traction-control/scripts/actions_switch.py check --notify >> $HOME/.local/share/actions-switch/cron.log 2>&1"
 comments = ["Auto-generated from systemd timer: daily at 08:30"]
