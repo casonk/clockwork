@@ -378,3 +378,12 @@ def test_the_accounts_route_forwards_and_the_panel_shows_value_cash_buying_power
         "function showAccountFunds",
     ):
         assert needle in html, needle
+
+
+def test_a_crypto_ticker_explains_why_binance_trading_is_off():
+    from pathlib import Path
+
+    html = (
+        Path(__file__).resolve().parents[1] / "web" / "templates" / "to-tradility.html"
+    ).read_text(encoding="utf-8")
+    assert "Binance.US trading is not enabled" in html and "includes('binance')" in html
