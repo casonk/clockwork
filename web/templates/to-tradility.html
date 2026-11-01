@@ -939,6 +939,7 @@
     detailRecord = null;
     detailOrders = null;
     tradeStep = null;
+    tradeQuote = null;
     const overlay = document.getElementById('detail-overlay');
     overlay.hidden = false;
     document.body.classList.add('detail-open');
@@ -1240,7 +1241,7 @@
   // ── Placing orders (preview, then a typed confirmation) ─────────────────────
   function canTrade() {
     return !!(tradeStatus && tradeStatus.available && tradeStatus.enabled
-              && (tradeStatus.tickers || []).includes(detailTicker));
+              && ((tradeStatus.tickers || []).includes('*') || (tradeStatus.tickers || []).includes(detailTicker)));
   }
 
   function money(v) {
@@ -1255,12 +1256,17 @@
     return `<div class="trade-box" id="trade-box">
       <h4>Place an order · ${limits}</h4>
       <form class="order-form" id="trade-form" autocomplete="off">
+        ${isCrypto() ? '' : `<select name="account" aria-label="Schwab account" required>
+          <option value="">Account…</option>
+          ${(tradeStatus.schwab_accounts || []).map(a => `<option value="${esc(a)}">…${esc(a)}</option>`).join('')}
+        </select>`}
         <select name="side" aria-label="Side"><option>buy</option><option>sell</option></select>
         <select name="kind" aria-label="Order type"><option>limit</option><option>market</option></select>
         <input name="quantity" type="number" step="any" min="0" placeholder="Qty" aria-label="Quantity" required>
         <input name="price" type="number" step="any" min="0" placeholder="Limit price" aria-label="Limit price">
         <button type="submit" class="primary">Preview</button>
       </form>
+      <div class="orders-sync" id="trade-default"></div>
       <div id="trade-confirm">${tradeStep ? confirmPanel() : ''}</div>
       <div class="order-error" id="trade-error" role="alert"></div>
     </div>`;
@@ -1276,6 +1282,40 @@
       <button type="button" class="primary" id="trade-go">Send order</button>
       <button type="button" id="trade-discard">Discard</button>
     </div>`;
+  }
+
+  function isCrypto() {
+    return /-USD$/.test(detailTicker || '');
+  }
+
+  // The default order: a good-till-cancelled limit at the policy's offset from the live mark
+  // (below it for a buy, above it for a sell). Editable; it refills when the side changes.
+  let tradeQuote = null;
+  async function loadQuote() {
+    const ticker = detailTicker;
+    try {
+      const res = await fetch(`/api/tradility-trade/quote/${encodeURIComponent(ticker)}`);
+      const data = await res.json();
+      if (detailTicker !== ticker || !res.ok || !data.ok) throw new Error(data.error || 'no quote');
+      tradeQuote = data;
+    } catch (err) {
+      tradeQuote = null;
+      const note = document.getElementById('trade-default');
+      if (note) note.textContent = `No live mark for ${ticker}: ${err.message}`;
+      return;
+    }
+    fillDefaults();
+  }
+
+  function fillDefaults() {
+    const form = document.getElementById('trade-form');
+    if (!form || !tradeQuote) return;
+    const d = (tradeStatus && tradeStatus.defaults) || {};
+    const side = form.elements.side.value;
+    const pct = side === 'buy' ? d.buy_offset_pct : d.sell_offset_pct;
+    if (form.elements.kind.value === 'limit') form.elements.price.value = side === 'buy' ? tradeQuote.buy_price : tradeQuote.sell_price;
+    document.getElementById('trade-default').textContent =
+      `Mark ${fmtPrice(tradeQuote.mark)} · default: good-till-cancelled limit ${Math.abs(pct)}% ${pct < 0 ? 'below' : 'above'} the mark`;
   }
 
   function tradeFail(message) {
@@ -1298,11 +1338,11 @@
     tradeFail('');
     const f = Object.fromEntries(new FormData(form).entries());
     try {
-      const pv = await tradeCall('preview', {ticker: detailTicker, side: f.side, kind: f.kind, quantity: f.quantity, price: f.kind === 'limit' ? f.price : null});
+      const pv = await tradeCall('preview', {ticker: detailTicker, account: f.account || '', side: f.side, kind: f.kind, quantity: f.quantity, price: f.kind === 'limit' ? f.price : null});
       const o = pv.order;
       tradeStep = {
         kind: 'place', previewId: pv.preview_id, phrase: pv.phrase, warnings: pv.warnings,
-        summary: `${esc(o.side)} ${esc(String(o.quantity))} ${esc(o.ticker)} ${o.kind === 'limit' ? 'at ' + fmtPrice(o.price) : 'at market'} on ${esc(pv.broker)}, about ${fmtPrice(pv.notional)} (last price ${fmtPrice(pv.last_price)})`,
+        summary: `${esc(o.side)} ${esc(String(o.quantity))} ${esc(o.ticker)} ${o.kind === 'limit' ? 'at ' + fmtPrice(o.price) + ' (good till cancelled)' : 'at market'} on ${esc(pv.broker)}${o.account ? ' account …' + esc(o.account) : ''}, about ${fmtPrice(pv.notional)} (last price ${fmtPrice(pv.last_price)})`,
       };
     } catch (err) {
       tradeStep = null;
@@ -1318,7 +1358,7 @@
     if (!order) return;
     const brokerId = id.replace(/^[a-z]+-/, '');
     tradeStep = {
-      kind: 'cancel', broker: order.source, orderId: brokerId, phrase: `CANCEL ${brokerId}`, warnings: [],
+      kind: 'cancel', broker: order.source, orderId: brokerId, account: order.account || '', phrase: `CANCEL ${brokerId}`, warnings: [],
       symbol: order.source === 'binance' ? detailTicker.replace(/-USD$/, '') + 'USD' : '',
       summary: `Cancel the open ${esc(order.side)} ${esc(String(order.quantity))} ${esc(detailTicker)} order at ${esc(sourceLabel(order.source))}`,
     };
@@ -1331,7 +1371,7 @@
     tradeStep = null;   // a preview is single use; start over after any outcome
     try {
       if (st.kind === 'place') await tradeCall('confirm', {preview_id: st.previewId, phrase});
-      else await tradeCall('cancel', {broker: st.broker, order_id: st.orderId, symbol: st.symbol, phrase});
+      else await tradeCall('cancel', {broker: st.broker, order_id: st.orderId, symbol: st.symbol, account: st.account, phrase});
     } catch (err) {
       renderOrders();
       tradeFail(err.message);
@@ -1392,7 +1432,16 @@
       submitOrder(() => sendOrder('POST', orderPath(), Object.fromEntries(f.entries())));
     });
     const tradeForm = box.querySelector('#trade-form');
-    if (tradeForm) tradeForm.addEventListener('submit', event => { event.preventDefault(); startPreview(tradeForm); });
+    if (tradeForm) {
+      tradeForm.addEventListener('submit', event => { event.preventDefault(); startPreview(tradeForm); });
+      tradeForm.elements.side.addEventListener('change', fillDefaults);
+      tradeForm.elements.kind.addEventListener('change', () => {
+        tradeForm.elements.price.disabled = tradeForm.elements.kind.value === 'market';
+        fillDefaults();
+      });
+      if (tradeQuote && tradeQuote.ticker === detailTicker) fillDefaults();
+      else if (!tradeQuote) loadQuote();
+    }
     const go = box.querySelector('#trade-go');
     if (go) go.addEventListener('click', sendStep);
     const discard = box.querySelector('#trade-discard');
