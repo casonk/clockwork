@@ -122,3 +122,19 @@ def test_the_page_shows_targets_on_cards_the_detail_view_and_the_order_preview()
         "/api/tradility-targets",
     ):
         assert needle in HTML, needle
+
+
+def test_each_open_order_shows_where_it_would_leave_the_holding_against_its_target():
+    for needle in (
+        "function orderEffect",
+        "function effectText",
+        "function openOrdersEffect",
+        "If this fills",
+        "If all ${open.length} open order",
+        "below target ${pctPlain(e.target)}",
+        "above target ${pctPlain(e.target)}",
+        "order-effect",
+    ):
+        assert needle in HTML, needle
+    # history rows are not projected, only open orders
+    assert "o.status === 'open' ? effectText(orderEffect(o)) : ''" in HTML
