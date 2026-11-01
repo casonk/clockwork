@@ -1,5 +1,11 @@
 """Per-ticker position and orders for the Tradility detail view.
 
+Orders the brokers report (Schwab, Binance.US) are read from Tradility's read-only export
+(``CLOCKWORK_TRADILITY_ORDERS_EXPORT``, default the sibling tradility checkout's
+``exports/tradility-orders.json``) and shown beside the hand-entered ones, marked by source and
+never editable here. They do not feed the fallback average entry, which would be wrong over the
+export's limited look-back.
+
 The average entry price comes from the finance pipeline's holdings export (total cost basis over
 total quantity, summed across accounts that report one); a ticker with no cost basis there falls
 back to the average price of its recorded filled buys. Order history and open orders have no
@@ -43,6 +49,34 @@ def default_file() -> Path:
 def holdings_file() -> Path:
     """The holdings export; app.py configures the path once and registers a getter for it."""
     return Path(current_app.config["TRADILITY_HOLDINGS_FILE_FN"]())
+
+
+def export_file() -> Path:
+    base = Path(__file__).resolve().parent.parent
+    return Path(
+        os.environ.get(
+            "CLOCKWORK_TRADILITY_ORDERS_EXPORT",
+            base.parent / "tradility" / "exports" / "tradility-orders.json",
+        )
+    )
+
+
+def load_export(path: Path | None = None) -> dict[str, Any]:
+    """Tradility's broker-order export, or an empty one when it is missing or unreadable."""
+    try:
+        raw = json.loads((path or export_file()).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def synced_for(ticker: str, export: dict[str, Any]) -> list[dict[str, Any]]:
+    """The export's orders for *ticker*; crypto is `BTC-USD` here and may be `BTC` there."""
+    found: list[dict[str, Any]] = []
+    for key, rows in (export.get("orders") or {}).items():
+        if _holding_matches(ticker, key) and isinstance(rows, list):
+            found.extend(r for r in rows if isinstance(r, dict) and r.get("source"))
+    return found
 
 
 def load(path: Path | None = None) -> dict[str, list[dict[str, Any]]]:
@@ -177,9 +211,13 @@ def entry_from_orders(orders: list[dict[str, Any]]) -> float | None:
 
 
 def summary(
-    ticker: str, orders: dict[str, list[dict[str, Any]]], holdings: list[Any]
+    ticker: str,
+    orders: dict[str, list[dict[str, Any]]],
+    holdings: list[Any],
+    export: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     mine = orders.get(ticker, [])
+    synced = synced_for(ticker, export or {})
     position = position_from_holdings(ticker, holdings) or {
         "quantity": None,
         "avg_entry": None,
@@ -189,13 +227,20 @@ def summary(
         fallback = entry_from_orders(mine)
         if fallback is not None:
             position = {**position, "avg_entry": fallback, "source": "orders"}
+    shown = [{**o, "source": "manual"} for o in mine] + synced
+    sources = (export or {}).get("sources") or {}
     return {
         "ok": True,
         "ticker": ticker,
         "position": position,
         "orders": sorted(
-            sorted(mine, key=lambda o: o["date"], reverse=True), key=lambda o: o["status"] != "open"
+            sorted(shown, key=lambda o: str(o.get("date", "")), reverse=True),
+            key=lambda o: o["status"] != "open",
         ),  # open orders first, then history newest first
+        "synced": {
+            "generated_at": (export or {}).get("generated_at"),
+            "sources": {name: bool(info.get("ok")) for name, info in sources.items()},
+        },
     }
 
 
@@ -219,7 +264,7 @@ def _ticker(value: str) -> str:
 def get_orders(ticker: str):
     ticker = _ticker(ticker)
     with _LOCK:
-        return jsonify(summary(ticker, load(), _holdings_list()))
+        return jsonify(summary(ticker, load(), _holdings_list(), load_export()))
 
 
 @bp.post("/api/tradility-orders/<path:ticker>")
@@ -236,7 +281,7 @@ def add_order(ticker: str):
             return jsonify({"ok": False, "error": "too many orders for this ticker"}), 400
         mine.append({"id": secrets.token_hex(6), **order})
         save(orders)
-        return jsonify(summary(ticker, orders, _holdings_list())), 201
+        return jsonify(summary(ticker, orders, _holdings_list(), load_export())), 201
 
 
 @bp.put("/api/tradility-orders/<ticker>/<order_id>")
@@ -252,7 +297,7 @@ def update_order(ticker: str, order_id: str):
             if existing.get("id") == order_id:
                 orders[ticker][index] = {"id": order_id, **order}
                 save(orders)
-                return jsonify(summary(ticker, orders, _holdings_list()))
+                return jsonify(summary(ticker, orders, _holdings_list(), load_export()))
     return jsonify({"ok": False, "error": "order not found"}), 404
 
 
@@ -270,4 +315,4 @@ def delete_order(ticker: str, order_id: str):
         else:
             orders.pop(ticker)
         save(orders)
-        return jsonify(summary(ticker, orders, _holdings_list()))
+        return jsonify(summary(ticker, orders, _holdings_list(), load_export()))
