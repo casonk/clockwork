@@ -631,6 +631,12 @@
                 <span class="detail-label">Exec</span>
                 <span class="detail-val">{{ job.exec_start }}</span>
               </div>
+              {% for command in job.exec_start_then %}
+              <div class="detail-row">
+                <span class="detail-label">Then</span>
+                <span class="detail-val">{{ command }}</span>
+              </div>
+              {% endfor %}
               {% endif %}
               {% if job.provider_env_key %}
               <div class="detail-row">

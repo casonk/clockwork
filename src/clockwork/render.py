@@ -111,6 +111,8 @@ def _quote_systemd_environment(key: str, value: str) -> str:
 
 def render_service_unit(job: JobSpec) -> str:
     lines = ["[Unit]", f"Description={job.description}"]
+    for item in job.documentation:
+        lines.append(f"Documentation={item}")
     if job.after:
         lines.append(f"After={' '.join(job.after)}")
     if job.wants:
@@ -132,6 +134,8 @@ def render_service_unit(job: JobSpec) -> str:
     for command in job.start_condition:
         lines.append(f"ExecCondition={command}")
     lines.append(f"ExecStart={job.exec_start}")
+    for command in job.exec_start_then:
+        lines.append(f"ExecStart={command}")
     if job.time_limit:
         key = "TimeoutStartSec" if job.service_type == "oneshot" else "RuntimeMaxSec"
         lines.append(f"{key}={job.time_limit}")
@@ -143,6 +147,8 @@ def render_service_unit(job: JobSpec) -> str:
         lines.append(f"StandardOutput={job.standard_output}")
     if job.standard_error:
         lines.append(f"StandardError={job.standard_error}")
+    if job.syslog_identifier:
+        lines.append(f"SyslogIdentifier={job.syslog_identifier}")
 
     if job.service_install_wanted_by:
         lines.extend(["", "[Install]"])
@@ -158,7 +164,10 @@ def render_timer_unit(job: JobSpec) -> str:
     description = job.timer_description or f"Run {job.description} on schedule"
     unit_name = job.timer.unit or job.service_unit_name()
 
-    lines = ["[Unit]", f"Description={description}", "", "[Timer]"]
+    lines = ["[Unit]", f"Description={description}"]
+    for item in job.documentation:
+        lines.append(f"Documentation={item}")
+    lines.extend(["", "[Timer]"])
     if job.timer.kind == "calendar":
         lines.append(f"OnCalendar={job.timer.on_calendar}")
     else:
@@ -318,6 +327,11 @@ def _validate_launchd_job(job: JobSpec) -> None:
         raise ValueError(
             f"job {job.name!r} uses start_condition/time_limit, which launchd-user cannot "
             "map -- clear them for this target with [jobs.launchd]"
+        )
+    if job.exec_start_then:
+        raise ValueError(
+            f"job {job.name!r} uses exec_start_then, which launchd-user cannot run -- "
+            "set exec_start in [jobs.launchd] to one command"
         )
     if job.service_install_wanted_by and job.service_install_wanted_by != ("default.target",):
         raise ValueError(
@@ -564,6 +578,11 @@ def _validate_windows_job(job: JobSpec) -> None:
         raise ValueError(
             f"job {job.name!r} uses start_condition/time_limit, which windows-user cannot "
             "map -- clear them for this target with [jobs.windows]"
+        )
+    if job.exec_start_then:
+        raise ValueError(
+            f"job {job.name!r} uses exec_start_then, which windows-user cannot run -- "
+            "set exec_start in [jobs.windows] to one command"
         )
     if job.service_install_wanted_by and job.service_install_wanted_by != ("default.target",):
         raise ValueError(

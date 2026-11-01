@@ -112,6 +112,15 @@ class JobSpec:
     # Wall-clock bound on one run: ``TimeoutStartSec=`` for a oneshot service,
     # which is "starting" until it exits, and ``RuntimeMaxSec=`` otherwise.
     time_limit: str | None = None
+    # Further ``ExecStart=`` lines, run in order after ``exec_start`` (systemd
+    # allows several only for a oneshot service). A target that cannot run a
+    # sequence refuses the job unless its override replaces ``exec_start``.
+    exec_start_then: tuple[str, ...] = ()
+    # ``Documentation=`` on the service and the timer, and ``SyslogIdentifier=``
+    # on the service. They describe the unit rather than change what it runs, so
+    # only the systemd rendering carries them.
+    documentation: tuple[str, ...] = ()
+    syslog_identifier: str | None = None
     environment: dict[str, str] = field(default_factory=dict)
     environment_files: tuple[str, ...] = ()
     user: str | None = None
@@ -165,6 +174,7 @@ class JobSpec:
         }
         if overrides.exec_start is not None:
             changes["exec_start"] = overrides.exec_start
+            changes["exec_start_then"] = ()  # the override is the whole command
         if overrides.working_directory is not None:
             changes["working_directory"] = overrides.working_directory
         if overrides.after is not None:
@@ -206,6 +216,17 @@ class JobSpec:
             )
         if any(not command.strip() for command in self.start_condition):
             raise ValueError(f"job {self.name!r} has an empty start_condition")
+        if any(not command.strip() for command in self.exec_start_then):
+            raise ValueError(f"job {self.name!r} has an empty exec_start_then command")
+        if self.exec_start_then and self.service_type != "oneshot":
+            raise ValueError(
+                f"job {self.name!r} uses exec_start_then, which systemd allows only for a "
+                "oneshot service"
+            )
+        if any(not item.strip() for item in self.documentation):
+            raise ValueError(f"job {self.name!r} has an empty documentation entry")
+        if self.syslog_identifier is not None and not self.syslog_identifier.strip():
+            raise ValueError(f"job {self.name!r} has an empty syslog_identifier")
         if self.time_limit is not None and not self.time_limit.strip():
             raise ValueError(f"job {self.name!r} has an empty time_limit")
         if self.timer is not None:

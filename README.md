@@ -632,6 +632,15 @@ Supported manifest sections:
   launchd and Task Scheduler have no equivalent for either field, so those
   targets refuse them until `[jobs.launchd]` or `[jobs.windows]` clears them
   (`start_condition = []`, `time_limit = ""`).
+- `exec_start_then`: optional command, or list of commands, rendered as further
+  `ExecStart=` lines that run in order after `exec_start` (systemd allows this
+  only for a `oneshot` service; each must succeed for the next to run). launchd
+  and Task Scheduler cannot run a sequence, so they refuse the job until their
+  override sets a single `exec_start`, which replaces the whole command.
+- `documentation` and `syslog_identifier`: optional unit metadata, rendered as
+  `Documentation=` (service and timer) and `SyslogIdentifier=` (service). They
+  describe the unit rather than change what it runs, so only the systemd
+  rendering carries them.
 - `environment_files`: optional systemd `EnvironmentFile=` paths; use `-...`
   when the file is local-only and may not exist on every machine
 - `poll_interval`: optional UI hint for long-running daemons with an internal poll loop
