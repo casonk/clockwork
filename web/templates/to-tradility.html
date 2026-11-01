@@ -229,6 +229,25 @@
     .detail-ticker { font: 800 24px var(--mono); letter-spacing: 0.6px; }
     .detail-name { color: var(--muted-fg); font-size: 12px; }
     .detail-price { font-size: 22px; font-weight: 750; white-space: nowrap; }
+    .orders-summary { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-bottom: 10px; font-size: 12px; }
+    .orders-summary span { color: var(--muted-fg); }
+    .orders-summary strong { color: var(--text); margin-left: 4px; }
+    .orders-table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 10px; }
+    .orders-table th { text-align: left; color: var(--muted-fg); font-weight: 700; padding: 3px 6px; }
+    .orders-table td { padding: 3px 6px; border-top: 1px solid var(--border); }
+    .orders-table .num { text-align: right; font-family: var(--mono); }
+    .order-open td:first-child { box-shadow: inset 3px 0 var(--accent); }
+    .order-actions button, .order-form button {
+      border: 1px solid var(--border); background: var(--surface2); color: var(--text);
+      border-radius: 6px; padding: 2px 7px; cursor: pointer; font-size: 11px; margin-right: 3px;
+    }
+    .order-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .order-form select, .order-form input {
+      background: var(--bg); color: var(--text); border: 1px solid var(--border);
+      border-radius: 6px; padding: 3px 6px; font-size: 11px; max-width: 120px;
+    }
+    .order-form input[name=note] { max-width: 200px; }
+    .order-error { color: var(--red); font-size: 11px; min-height: 14px; margin-top: 4px; }
     .detail-step {
       border: 1px solid var(--border); background: var(--surface2); color: var(--text);
       border-radius: 8px; width: 34px; height: 34px; cursor: pointer; font-size: 18px;
@@ -276,6 +295,7 @@
     .range-marker { position: absolute; top: -4px; width: 3px; height: 15px; background: var(--accent); border-radius: 2px; transform: translateX(-50%); }
     .range-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted-fg); }
     .detail-stack { display: grid; gap: 12px; }
+    #detail-orders-card { order: 2; }  /* the chart comes first, then the position and orders */
     .detail-loading { padding: 70px 20px; text-align: center; color: var(--muted-fg); }
     @media (max-width: 720px) {
       .detail-overlay { padding: 0; place-items: stretch; }
@@ -524,6 +544,7 @@
   })();
   let detailTrigger   = null;
   let detailTicker    = null;
+  let detailOrders    = null;   // {position, orders} for the open card, from /api/tradility-orders
   let shownOrder      = [];   // tickers with details, in the order the grid shows them
 
   // ── Data load ────────────────────────────────────────────────────────────────
@@ -823,6 +844,7 @@
     detailTicker = ticker;
     paintDetailSteps();
     detailRecord = null;
+    detailOrders = null;
     const overlay = document.getElementById('detail-overlay');
     overlay.hidden = false;
     document.body.classList.add('detail-open');
@@ -841,6 +863,7 @@
       if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
       detailRecord = data.ticker;
       renderTickerDetail(data);
+      loadOrders(ticker);
     } catch (err) {
       if (detailTicker !== ticker) return;
       document.getElementById('detail-content').innerHTML =
@@ -852,6 +875,7 @@
     document.getElementById('detail-overlay').hidden = true;
     document.body.classList.remove('detail-open');
     detailRecord = null;
+    detailOrders = null;
     detailTicker = null;
     if (detailTrigger) detailTrigger.focus();
     detailTrigger = null;
@@ -953,6 +977,10 @@
               ${yahooUrl(t.ticker) ? `<a class="company-link" href="${esc(yahooUrl(t.ticker))}" target="_blank" rel="noopener noreferrer">Yahoo Finance ↗</a>` : ''}
             </div>
           </section>
+          <section class="detail-card" id="detail-orders-card">
+            <div class="detail-card-title">Position and orders</div>
+            <div id="detail-orders"><div class="detail-loading">Loading position…</div></div>
+          </section>
           <section class="detail-card">
             <div class="detail-card-title">Historical close</div>
             <div class="detail-range-buttons">
@@ -1033,6 +1061,131 @@
     return points.filter(point => point.date >= start);
   }
 
+  // ── Position and orders ──────────────────────────────────────────────────────
+  async function loadOrders(ticker) {
+    try {
+      const res = await fetch(`/api/tradility-orders/${encodeURIComponent(ticker)}`);
+      const data = await res.json();
+      if (detailTicker !== ticker) return;
+      if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      detailOrders = data;
+    } catch (err) {
+      if (detailTicker !== ticker) return;
+      detailOrders = null;
+      const box = document.getElementById('detail-orders');
+      if (box) box.innerHTML = `<div class="error-card">Could not load orders: ${esc(err.message)}</div>`;
+      return;
+    }
+    renderOrders();
+    drawDetailChart();
+  }
+
+  async function sendOrder(method, path, body) {
+    const res = await fetch(path, {
+      method,
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  }
+
+  function orderPath(id) {
+    return `/api/tradility-orders/${encodeURIComponent(detailTicker)}${id ? '/' + encodeURIComponent(id) : ''}`;
+  }
+
+  async function changeOrder(id, change) {
+    const order = detailOrders.orders.find(o => o.id === id);
+    if (!order) return;
+    const next = {side: order.side, kind: order.kind, quantity: order.quantity, price: order.price,
+                  status: order.status, date: order.date, note: order.note, ...change};
+    await submitOrder(() => sendOrder('PUT', orderPath(id), next));
+  }
+
+  async function submitOrder(action) {
+    const ticker = detailTicker;
+    try {
+      const data = await action();
+      if (detailTicker !== ticker) return;
+      detailOrders = data;
+      renderOrders();
+      drawDetailChart();
+    } catch (err) {
+      const box = document.getElementById('order-error');
+      if (box) box.textContent = err.message;
+    }
+  }
+
+  function renderOrders() {
+    const box = document.getElementById('detail-orders');
+    if (!box || !detailOrders) return;
+    const pos = detailOrders.position || {};
+    const last = detailRecord && detailRecord.last_price;
+    const entry = pos.avg_entry;
+    const pl = entry && last != null ? (last - entry) / entry * 100 : null;
+    const source = pos.source === 'holdings' ? 'from holdings' : pos.source === 'orders' ? 'from filled buys' : '';
+    const rows = detailOrders.orders.map(o => `
+      <tr class="order-${esc(o.status)}">
+        <td>${esc(o.date)}</td>
+        <td>${esc(o.side)}</td>
+        <td>${esc(o.kind.replace('_', ' '))}</td>
+        <td class="num">${esc(String(o.quantity))}</td>
+        <td class="num">${o.price == null ? '—' : fmtPrice(o.price)}</td>
+        <td>${esc(o.status)}</td>
+        <td>${esc(o.note || '')}</td>
+        <td class="order-actions">
+          ${o.status === 'open' && o.price != null ? `<button type="button" data-order-act="fill" data-id="${esc(o.id)}">Filled</button>` : ''}
+          ${o.status === 'open' ? `<button type="button" data-order-act="cancel" data-id="${esc(o.id)}">Cancel</button>` : ''}
+          <button type="button" data-order-act="delete" data-id="${esc(o.id)}" aria-label="Delete order">×</button>
+        </td>
+      </tr>`).join('');
+    box.innerHTML = `
+      <div class="orders-summary">
+        <span>Quantity<strong>${pos.quantity == null ? '—' : esc(String(pos.quantity))}</strong></span>
+        <span>Average entry<strong>${entry ? fmtPrice(entry) : '—'}</strong>${source ? ` <span>${source}</span>` : ''}</span>
+        <span>Vs last price<strong class="${pl == null ? '' : returnClass(pl)}">${pl == null ? '—' : formatReturn(pl)}</strong></span>
+      </div>
+      ${rows ? `<table class="orders-table"><thead><tr><th>Date</th><th>Side</th><th>Type</th><th class="num">Qty</th><th class="num">Price</th><th>Status</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+             : '<p class="company-description">No orders recorded for this ticker.</p>'}
+      <form class="order-form" id="order-form" autocomplete="off">
+        <select name="side" aria-label="Side"><option>buy</option><option>sell</option></select>
+        <select name="kind" aria-label="Order type"><option>limit</option><option>market</option><option>stop</option><option value="stop_limit">stop limit</option></select>
+        <input name="quantity" type="number" step="any" min="0" placeholder="Qty" aria-label="Quantity" required>
+        <input name="price" type="number" step="any" min="0" placeholder="Price" aria-label="Price">
+        <select name="status" aria-label="Status"><option>open</option><option>filled</option><option>cancelled</option></select>
+        <input name="date" type="date" aria-label="Date" value="${new Date().toISOString().slice(0, 10)}">
+        <input name="note" type="text" maxlength="120" placeholder="Note" aria-label="Note">
+        <button type="submit">Add order</button>
+      </form>
+      <div class="order-error" id="order-error" role="alert"></div>`;
+    box.querySelector('#order-form').addEventListener('submit', event => {
+      event.preventDefault();
+      const f = new FormData(event.target);
+      submitOrder(() => sendOrder('POST', orderPath(), Object.fromEntries(f.entries())));
+    });
+    box.querySelectorAll('[data-order-act]').forEach(button => button.addEventListener('click', () => {
+      const id = button.dataset.id, act = button.dataset.orderAct;
+      if (act === 'delete') submitOrder(() => sendOrder('DELETE', orderPath(id)));
+      else if (act === 'cancel') changeOrder(id, {status: 'cancelled'});
+      else changeOrder(id, {status: 'filled', date: new Date().toISOString().slice(0, 10)});
+    }));
+  }
+
+  // Price levels drawn across the chart: your average entry, and each open order's price.
+  function chartLevels() {
+    if (!detailOrders) return [];
+    const levels = [];
+    const entry = detailOrders.position && detailOrders.position.avg_entry;
+    if (entry) levels.push({price: entry, label: `Avg entry ${fmtPrice(entry)}`, kind: 'entry'});
+    for (const o of detailOrders.orders) {
+      if (o.status === 'open' && o.price != null) {
+        levels.push({price: o.price, label: `${o.side} ${o.kind.replace('_', ' ')} ${fmtPrice(o.price)}`, kind: 'order'});
+      }
+    }
+    return levels;
+  }
+
   function drawDetailChart() {
     const canvas = document.getElementById('detail-chart');
     if (!canvas || !detailRecord) return;
@@ -1059,6 +1212,8 @@
     let min = Math.min(...prices), max = Math.max(...prices);
     const pricePad = Math.max((max - min) * 0.08, max * 0.005, 0.01);
     min -= pricePad; max += pricePad;
+    const levels = chartLevels();
+    for (const level of levels) { min = Math.min(min, level.price - pricePad); max = Math.max(max, level.price + pricePad); }
     const t0 = points[0].date.getTime(), t1 = points[points.length - 1].date.getTime();
     const x = point => pad.left + (point.date.getTime() - t0) / Math.max(1, t1 - t0) * plotW;
     const y = point => pad.top + (max - point.close) / Math.max(0.000001, max - min) * plotH;
@@ -1089,6 +1244,19 @@
     points.forEach((point, index) => index ? ctx.lineTo(x(point), y(point)) : ctx.moveTo(x(point), y(point)));
     ctx.strokeStyle = line; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
 
+    const accent = styles.getPropertyValue('--accent').trim() || '#58a6ff';
+    const levelY = price => pad.top + (max - price) / Math.max(0.000001, max - min) * plotH;
+    ctx.font = '10px ui-monospace, monospace';
+    for (const level of levels) {
+      const yy = levelY(level.price);
+      ctx.save();
+      ctx.strokeStyle = accent; ctx.fillStyle = accent; ctx.lineWidth = level.kind === 'entry' ? 1.6 : 1;
+      ctx.setLineDash(level.kind === 'entry' ? [] : [5, 4]);
+      ctx.beginPath(); ctx.moveTo(pad.left, yy); ctx.lineTo(width - pad.right, yy); ctx.stroke();
+      ctx.setLineDash([]); ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+      ctx.fillText(level.label, width - pad.right - 2, yy - 2);
+      ctx.restore();
+    }
     ctx.fillStyle = muted; ctx.textBaseline = 'bottom';
     ctx.textAlign = 'left'; ctx.fillText(formatChartDate(points[0].date), pad.left, height - 3);
     ctx.textAlign = 'right'; ctx.fillText(formatChartDate(points[points.length - 1].date), width - pad.right, height - 3);

@@ -51,6 +51,7 @@ try:
         release_sources,
         site_chrome,
         themes_admin,
+        tradility_orders,
         watch_log,
     )
     from web import personal_library as personal_media
@@ -75,6 +76,7 @@ except ModuleNotFoundError:
     import release_sources
     import site_chrome
     import themes_admin
+    import tradility_orders
     import watch_log
     from library_pages import library_pages
     from personal_library import personal_library
@@ -281,6 +283,8 @@ app = Flask(
 app.secret_key = os.environ.get("CLOCKWORK_WEB_SECRET") or secrets.token_hex(32)
 app.register_blueprint(library_pages)
 app.register_blueprint(personal_library)
+app.register_blueprint(tradility_orders.bp)
+app.config["TRADILITY_HOLDINGS_FILE_FN"] = lambda: HOLDINGS_AGGREGATE_FILE
 
 
 def _csrf_token() -> str:

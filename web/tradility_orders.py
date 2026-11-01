@@ -1,0 +1,273 @@
+"""Per-ticker position and orders for the Tradility detail view.
+
+The average entry price comes from the finance pipeline's holdings export (total cost basis over
+total quantity, summed across accounts that report one); a ticker with no cost basis there falls
+back to the average price of its recorded filled buys. Order history and open orders have no
+export to read, so they are recorded here by hand in ``config/tradility-orders.json`` (personal
+financial data: gitignored, ``CLOCKWORK_TRADILITY_ORDERS_FILE`` moves it).
+"""
+
+from __future__ import annotations
+
+import datetime
+import json
+import math
+import os
+import re
+import secrets
+import tempfile
+import threading
+from pathlib import Path
+from typing import Any
+
+from flask import Blueprint, abort, current_app, jsonify, request
+
+SIDES = ("buy", "sell")
+KINDS = ("market", "limit", "stop", "stop_limit")
+STATUSES = ("open", "filled", "cancelled")
+TICKER = re.compile(r"[A-Z0-9][A-Z0-9.^=-]{0,19}")
+MAX_ORDERS_PER_TICKER = 500
+MAX_NOTE = 120
+_LOCK = threading.Lock()
+
+bp = Blueprint("tradility_orders", __name__)
+
+
+def default_file() -> Path:
+    base = Path(__file__).resolve().parent.parent
+    return Path(
+        os.environ.get("CLOCKWORK_TRADILITY_ORDERS_FILE", base / "config" / "tradility-orders.json")
+    )
+
+
+def holdings_file() -> Path:
+    """The holdings export; app.py configures the path once and registers a getter for it."""
+    return Path(current_app.config["TRADILITY_HOLDINGS_FILE_FN"]())
+
+
+def load(path: Path | None = None) -> dict[str, list[dict[str, Any]]]:
+    path = path or default_file()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    orders = raw.get("orders") if isinstance(raw, dict) else None
+    return orders if isinstance(orders, dict) else {}
+
+
+def save(orders: dict[str, list[dict[str, Any]]], path: Path | None = None) -> None:
+    path = path or default_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tradility-orders-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump({"version": 1, "orders": orders}, handle, indent=2, sort_keys=True)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+
+
+def _number(value: Any, what: str, *, positive: bool = True) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{what} must be a number") from exc
+    if not math.isfinite(number) or (positive and number <= 0):
+        raise ValueError(f"{what} must be a positive number")
+    return number
+
+
+def clean_order(raw: Any) -> dict[str, Any]:
+    """A validated order from request data; ValueError names the first problem."""
+    if not isinstance(raw, dict):
+        raise ValueError("an order is an object")
+    side, kind, status = raw.get("side"), raw.get("kind", "limit"), raw.get("status", "open")
+    if side not in SIDES:
+        raise ValueError("side must be buy or sell")
+    if kind not in KINDS:
+        raise ValueError("kind must be market, limit, stop or stop_limit")
+    if status not in STATUSES:
+        raise ValueError("status must be open, filled or cancelled")
+    order: dict[str, Any] = {
+        "side": side,
+        "kind": kind,
+        "status": status,
+        "quantity": _number(raw.get("quantity"), "quantity"),
+    }
+    price = raw.get("price")
+    if price in (None, ""):
+        if kind != "market" or status == "filled":
+            raise ValueError("price is required (only an open or cancelled market order has none)")
+        order["price"] = None
+    else:
+        order["price"] = _number(price, "price")
+    date = str(raw.get("date") or datetime.date.today().isoformat())
+    try:
+        datetime.date.fromisoformat(date)
+    except ValueError as exc:
+        raise ValueError("date must be YYYY-MM-DD") from exc
+    order["date"] = date
+    note = str(raw.get("note") or "").strip()
+    if len(note) > MAX_NOTE or any(ord(c) < 32 for c in note):
+        raise ValueError(f"note must be plain text of at most {MAX_NOTE} characters")
+    order["note"] = note
+    return order
+
+
+def _holding_matches(ticker: str, holding_ticker: str) -> bool:
+    """Crypto is `BTC` in the holdings and `BTC-USD` in the analysis."""
+    held = str(holding_ticker).strip().upper()
+    return held == ticker or f"{held}-USD" == ticker or held == ticker.removesuffix("-USD")
+
+
+def position_from_holdings(ticker: str, holdings: list[Any]) -> dict[str, Any] | None:
+    """Quantity and average entry for *ticker*, or None when it is not held."""
+    quantity = cost = 0.0
+    held = priced = False
+    for holding in holdings:
+        if not isinstance(holding, dict) or not _holding_matches(ticker, holding.get("ticker", "")):
+            continue
+        try:
+            qty = float(holding.get("total_quantity"))
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(qty) or qty <= 0:
+            continue
+        held = True
+        quantity += qty
+        try:
+            basis = float(holding.get("total_cost_basis"))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(basis) and basis > 0:
+            priced = True
+            cost += basis
+    if not held:
+        return None
+    # A partial cost basis would understate the average, so use it only when every lot has one.
+    complete = priced and all(
+        _basis_known(h) for h in holdings if _holding_matches(ticker, h.get("ticker", ""))
+    )
+    return {
+        "quantity": quantity,
+        "avg_entry": cost / quantity if complete and quantity else None,
+        "source": "holdings",
+    }
+
+
+def _basis_known(holding: dict[str, Any]) -> bool:
+    try:
+        return (
+            math.isfinite(float(holding.get("total_cost_basis")))
+            and float(holding.get("total_cost_basis")) > 0
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def entry_from_orders(orders: list[dict[str, Any]]) -> float | None:
+    """The average price of the recorded filled buys (quantity weighted)."""
+    buys = [o for o in orders if o.get("side") == "buy" and o.get("status") == "filled"]
+    quantity = sum(o["quantity"] for o in buys)
+    if not quantity:
+        return None
+    return sum(o["quantity"] * o["price"] for o in buys) / quantity
+
+
+def summary(
+    ticker: str, orders: dict[str, list[dict[str, Any]]], holdings: list[Any]
+) -> dict[str, Any]:
+    mine = orders.get(ticker, [])
+    position = position_from_holdings(ticker, holdings) or {
+        "quantity": None,
+        "avg_entry": None,
+        "source": None,
+    }
+    if position["avg_entry"] is None:
+        fallback = entry_from_orders(mine)
+        if fallback is not None:
+            position = {**position, "avg_entry": fallback, "source": "orders"}
+    return {
+        "ok": True,
+        "ticker": ticker,
+        "position": position,
+        "orders": sorted(
+            sorted(mine, key=lambda o: o["date"], reverse=True), key=lambda o: o["status"] != "open"
+        ),  # open orders first, then history newest first
+    }
+
+
+def _holdings_list() -> list[Any]:
+    try:
+        payload = json.loads(holdings_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    held = payload.get("holdings") if isinstance(payload, dict) else None
+    return held if isinstance(held, list) else []
+
+
+def _ticker(value: str) -> str:
+    ticker = value.strip().upper()
+    if not TICKER.fullmatch(ticker):
+        abort(404)
+    return ticker
+
+
+@bp.get("/api/tradility-orders/<path:ticker>")
+def get_orders(ticker: str):
+    ticker = _ticker(ticker)
+    with _LOCK:
+        return jsonify(summary(ticker, load(), _holdings_list()))
+
+
+@bp.post("/api/tradility-orders/<path:ticker>")
+def add_order(ticker: str):
+    ticker = _ticker(ticker)
+    try:
+        order = clean_order(request.get_json(silent=True))
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    with _LOCK:
+        orders = load()
+        mine = orders.setdefault(ticker, [])
+        if len(mine) >= MAX_ORDERS_PER_TICKER:
+            return jsonify({"ok": False, "error": "too many orders for this ticker"}), 400
+        mine.append({"id": secrets.token_hex(6), **order})
+        save(orders)
+        return jsonify(summary(ticker, orders, _holdings_list())), 201
+
+
+@bp.put("/api/tradility-orders/<ticker>/<order_id>")
+def update_order(ticker: str, order_id: str):
+    ticker = _ticker(ticker)
+    try:
+        order = clean_order(request.get_json(silent=True))
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    with _LOCK:
+        orders = load()
+        for index, existing in enumerate(orders.get(ticker, [])):
+            if existing.get("id") == order_id:
+                orders[ticker][index] = {"id": order_id, **order}
+                save(orders)
+                return jsonify(summary(ticker, orders, _holdings_list()))
+    return jsonify({"ok": False, "error": "order not found"}), 404
+
+
+@bp.delete("/api/tradility-orders/<ticker>/<order_id>")
+def delete_order(ticker: str, order_id: str):
+    ticker = _ticker(ticker)
+    with _LOCK:
+        orders = load()
+        mine = orders.get(ticker, [])
+        kept = [o for o in mine if o.get("id") != order_id]
+        if len(kept) == len(mine):
+            return jsonify({"ok": False, "error": "order not found"}), 404
+        if kept:
+            orders[ticker] = kept
+        else:
+            orders.pop(ticker)
+        save(orders)
+        return jsonify(summary(ticker, orders, _holdings_list()))
