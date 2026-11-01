@@ -441,6 +441,18 @@ def fidelity_ticket():
     return jsonify(payload), code
 
 
+@bp.post("/api/tradility-trade/fidelity-<step>")
+def fidelity_browser_step(step: str):
+    """Stage an order on Fidelity's website or submit the staged one (the service enforces the policy)."""
+    if step not in ("stage", "submit"):
+        abort(404)
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"ok": False, "error": "send a JSON object"}), 400
+    code, payload = call_trader("POST", f"/fidelity/{step}", body)
+    return jsonify(payload), code
+
+
 @bp.get("/api/tradility-trade/quote/<path:ticker>")
 def trade_quote(ticker: str):
     """The current mark and the policy's default limit prices (from the trader service)."""

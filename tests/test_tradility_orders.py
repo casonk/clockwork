@@ -694,3 +694,41 @@ def test_the_fidelity_ticket_route_forwards_and_the_form_only_prepares_never_sen
     assert html.index("if (fid) return startFidelityTicket(form, fid);") < html.index(
         "tradeCall('preview'"
     )
+
+
+def test_the_fidelity_browser_steps_are_forwarded_and_the_page_gates_submitting_on_the_policy(
+    api, monkeypatch
+):
+    from pathlib import Path
+
+    c, _ = api
+    seen = []
+    monkeypatch.setattr(
+        t, "call_trader", lambda m, p, b=None: seen.append((m, p)) or (200, {"ok": True})
+    )
+    assert c.post("/api/tradility-trade/fidelity-stage", json={"ticker": "VWO"}).status_code == 200
+    assert (
+        c.post("/api/tradility-trade/fidelity-submit", json={"preview_id": "x"}).status_code == 200
+    )
+    assert seen == [("POST", "/fidelity/stage"), ("POST", "/fidelity/submit")]
+    assert c.post("/api/tradility-trade/fidelity-nope", json={}).status_code == 404
+    assert (
+        c.post(
+            "/api/tradility-trade/fidelity-stage", data="x", content_type="text/plain"
+        ).status_code
+        == 400
+    )
+    html = (
+        Path(__file__).resolve().parents[1] / "web" / "templates" / "to-tradility.html"
+    ).read_text(encoding="utf-8")
+    for needle in (
+        "Stage on Fidelity",
+        "function stageOnFidelity",
+        "Staged on Fidelity and checked.",
+        "Place order at Fidelity",
+        "Submitting from here is off",
+        "fidelity-submit",
+        "tradeStatus.fidelity_automation",
+    ):
+        assert needle in html, needle
+    assert html.index("tradeCall('fidelity-stage'") < html.index("tradeCall('fidelity-submit'")
