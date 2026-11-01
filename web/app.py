@@ -5507,7 +5507,9 @@ def api_tradility_analysis():
         if not isinstance(ticker, dict):
             continue
         history = ticker.pop("price_history", [])
+        profile = ticker.pop("company_profile", {})
         ticker["detail_available"] = bool(history)
+        ticker["profile_available"] = bool(isinstance(profile, dict) and profile.get("available"))
     generated_at = str(data.get("generated_at", "")).strip()
     age_seconds = None
     if generated_at:
@@ -5540,7 +5542,7 @@ def api_tradility_analysis():
 
 @app.get("/api/tradility-analysis/<path:ticker>")
 def api_tradility_ticker_detail(ticker: str):
-    """Return chart and rating detail for one ticker without bloating the list response."""
+    """Return chart, rating, and profile detail without bloating the list response."""
     if not TRADILITY_ANALYSIS_FILE.exists():
         return jsonify({"ok": False, "error": "Tradility analysis file not found"}), 404
     try:

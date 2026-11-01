@@ -268,6 +268,11 @@ should change how future sessions work in this repo.
   producer artifact, strip them from card/list responses, and expose an exact
   item-detail endpoint so the browser pays the history cost only after a user
   opens that item.
+- Treat verbose qualitative profiles like dense history: retain the sourced
+  record and freshness in the producer artifact, strip them from collection
+  responses, and render them only from the exact-item detail endpoint. Label a
+  missing official mission/vision as unavailable instead of deriving one from
+  marketing or business-description prose.
 - Treat ISO date-only market values as calendar labels, not local instants.
   Format them in UTC in browser charts; otherwise negative-offset time zones
   display the prior trading date.

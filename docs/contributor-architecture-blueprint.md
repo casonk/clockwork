@@ -62,10 +62,11 @@ workload logic.
 - Clockwork may present read-only downstream artifacts without taking ownership
   of their generation. Tradility's collection endpoint returns compact card
   summaries; its exact-ticker detail endpoint reads chart history, performance,
-  ratings, and provenance from the same generated artifact on demand.
+  ratings, sourced qualitative profiles, and provenance from the same generated
+  artifact on demand.
 - Dense per-item series must not be copied into every collection response.
-  Keep the producer artifact authoritative and load detail only after explicit
-  user interaction.
+  The same applies to verbose business descriptions. Keep the producer artifact
+  authoritative and load detail only after explicit user interaction.
 
 ## GPU Workload Handoff
 
