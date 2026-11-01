@@ -262,7 +262,8 @@
     .company-fact { min-width: 0; }
     .company-fact span { display: block; color: var(--muted-fg); font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; }
     .company-fact strong { display: block; font-size: 11px; margin-top: 2px; overflow-wrap: anywhere; }
-    .company-link { display: inline-block; color: var(--accent); font-size: 11px; margin-top: 12px; text-decoration: none; }
+    .company-links { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 12px; }
+    .company-link { display: inline-block; color: var(--accent); font-size: 11px; text-decoration: none; }
     .company-link:hover { text-decoration: underline; }
     .component-list { display: grid; gap: 6px; margin-top: 12px; }
     .component-row, .detail-meta-row { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; }
@@ -897,6 +898,11 @@
     return Number.isNaN(parsed.getTime()) ? '—' : parsed.toLocaleDateString();
   }
 
+  // The symbol's Yahoo Finance quote page; empty when there is no symbol.
+  function yahooUrl(ticker) {
+    return ticker ? `https://finance.yahoo.com/quote/${encodeURIComponent(ticker)}/` : '';
+  }
+
   function renderTickerDetail(data) {
     const t = data.ticker;
     const returns = t.returns || {};
@@ -933,10 +939,13 @@
                 <div class="company-fact"><span>Official mission / vision</span><strong>${vision}</strong></div>
                 <div class="company-fact"><span>Profile source</span><strong>${esc(profile.source || 'unknown')} · ${formatProfileTime(profile.retrieved_at)}</strong></div>
               </div>
-              ${website ? `<a class="company-link" href="${esc(website)}" target="_blank" rel="noopener noreferrer">Visit company website ↗</a>` : ''}
             ` : `
               <p class="company-description">No qualitative profile is available for this symbol yet. Run a refresh to populate newly supported equities and funds.</p>
             `}
+            <div class="company-links">
+              ${website ? `<a class="company-link" href="${esc(website)}" target="_blank" rel="noopener noreferrer">Company website ↗</a>` : ''}
+              ${yahooUrl(t.ticker) ? `<a class="company-link" href="${esc(yahooUrl(t.ticker))}" target="_blank" rel="noopener noreferrer">Yahoo Finance ↗</a>` : ''}
+            </div>
           </section>
           <section class="detail-card">
             <div class="detail-card-title">Historical close</div>

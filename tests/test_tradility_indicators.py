@@ -72,3 +72,13 @@ def test_the_detail_dialog_steps_through_the_cards_in_grid_order():
         "if (detailTicker !== ticker) return;",
     ):
         assert needle in TEMPLATE, needle
+
+
+def test_the_detail_view_links_to_the_company_site_and_to_yahoo_finance():
+    assert "https://finance.yahoo.com/quote/${encodeURIComponent(ticker)}/" in TEMPLATE
+    assert "Yahoo Finance ↗" in TEMPLATE and "Company website ↗" in TEMPLATE
+    start = TEMPLATE.index('<div class="company-links">')
+    assert (
+        "No qualitative profile" in TEMPLATE[:start]
+    )  # the links sit outside the profile-only block
+    assert 'rel="noopener noreferrer"' in TEMPLATE[start : start + 700]
