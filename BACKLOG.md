@@ -23,6 +23,11 @@ Mark items `[x]` when complete and move them to Done.
 
 ## Done
 
+- [x] [manual:2026-11-01] **Unify Tradility's manual refresh flow** — replace
+  Reload and Run refresh with one Update market data action that follows the
+  systemd job, shows elapsed progress, detects the new artifact through a
+  lightweight version endpoint, and reloads the view automatically.
+
 - [x] [manual:2026-11-01] **Show qualitative Tradility profiles** — add sourced
   company/fund names, descriptions, classifications, headquarters, websites,
   exchange, employees, entity type, and freshness to exact-ticker details
