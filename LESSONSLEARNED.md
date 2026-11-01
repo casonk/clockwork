@@ -28,6 +28,9 @@ should change how future sessions work in this repo.
   `tests`, include the repository root in pytest's declared `pythonpath`; an
   editable install covers only packages under `src`, and console-entry-point
   path behavior can change across pytest releases and hosted runner images.
+- A declared backport dependency does not provide the standard-library module
+  name automatically. Every module that uses `tomllib` must fall back to
+  `tomli` while Python 3.10 remains in the supported and tested matrix.
 
 - A dashboard reload is not a data refresh. Load an existing generated artifact
   automatically when the page opens instead of presenting reread and regenerate
