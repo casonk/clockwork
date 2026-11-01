@@ -1194,6 +1194,8 @@
       return;
     }
     await loadTradeStatus();
+    // so the account list can show what each account can spend, and a buy can be checked before previewing
+    if (tradeStatus && tradeStatus.enabled && !accountsData) await loadAccounts();
     renderOrders();
     drawDetailChart();
   }
@@ -1295,7 +1297,10 @@
     const sources = (accountsData && accountsData.sources) || {};
     const failed = Object.entries(sources).filter(([, v]) => !v.ok).map(([k, v]) => `${sourceLabel(k)}: ${esc(v.error || 'unavailable')}`);
     const total = accounts.reduce((sum, a) => sum + (a.total_value || 0), 0);
-    document.getElementById('accounts-total').textContent = accounts.length ? `· ${money(total)} across ${accounts.length}` : '';
+    const statements = (accountsData && accountsData.statements) || [];
+    const statementTotal = statements.reduce((sum, i) => sum + (i.total || 0), 0);
+    document.getElementById('accounts-total').textContent = accounts.length
+      ? `· ${money(total)} live across ${accounts.length}${statements.length ? ` + ${money(statementTotal)} from statements` : ''}` : '';
     body.innerHTML = `<div class="accounts-grid">${accounts.map(a => `
       <div class="account-card">
         <h4><span>${esc(a.label)}</span>
@@ -1321,6 +1326,11 @@
           ${a.broker === 'binance' ? row('Key can trade', a.can_trade ? 'yes' : 'no') + row('Key can withdraw', a.can_withdraw ? 'YES' : 'no') : ''}
         </dl>
         ${a.broker === 'binance' && a.can_withdraw ? '<div class="account-warning">This API key can withdraw funds. Use a key with withdrawals disabled.</div>' : ''}
+      </div>`).join('')}
+      ${statements.map(i => `<div class="account-card">
+        <h4><span>${esc(i.name)}</span><span class="account-flag">from statements</span></h4>
+        <dl>${row('Total value', money(i.total))}${row('As of', esc(i.as_of))}</dl>
+        <div class="orders-sync">Not read live. This is the last statement the finance pipeline has, so the value may be out of date.</div>
       </div>`).join('')}
       ${failed.length ? `<div class="account-warning">Not available: ${failed.join(' · ')}</div>` : ''}
     </div>
@@ -1447,6 +1457,18 @@
     note.textContent = acct
       ? `${acct.label}: buying power ${money(acct.buying_power)} · cash ${money(acct.cash)} · ${acct.margin_eligible ? 'margin account' : 'cash account'}`
       : '';
+    // Catch an unaffordable buy before the preview: the order's cost against what the account can spend.
+    note.classList.remove('trade-warn');
+    if (acct && form.elements.side.value === 'buy') {
+      const qty = Number(form.elements.quantity.value);
+      const px = form.elements.kind.value === 'limit' ? Number(form.elements.price.value) : (tradeQuote ? tradeQuote.mark : 0);
+      const cost = qty * px;
+      const spendable = acct.cash_available_to_trade != null ? acct.cash_available_to_trade : acct.buying_power;
+      if (cost > 0 && spendable != null && cost > spendable) {
+        note.textContent += ` · This order costs about ${money(cost)}, more than the ${money(spendable)} available to trade here, so Schwab is likely to reject it. Pick another account or a smaller quantity.`;
+        note.classList.add('trade-warn');
+      }
+    }
   }
 
   function money(v) {
@@ -1464,7 +1486,11 @@
       <form class="order-form" id="trade-form" autocomplete="off">
         ${isCrypto() ? '' : `<select name="account" aria-label="Schwab account" required>
           <option value="">Account…</option>
-          ${(tradeStatus.schwab_accounts || []).map(a => `<option value="${esc(a)}">…${esc(a)}</option>`).join('')}
+          ${(tradeStatus.schwab_accounts || []).map(a => {
+            const info = ((accountsData && accountsData.accounts) || []).find(x => x.broker === 'schwab' && x.id === a);
+            const spend = info ? (info.cash_available_to_trade != null ? info.cash_available_to_trade : info.buying_power) : null;
+            return `<option value="${esc(a)}">…${esc(a)}${spend == null ? '' : ' · ' + money(spend) + ' to trade'}</option>`;
+          }).join('')}
         </select>`}
         <select name="side" aria-label="Side"><option>buy</option><option>sell</option></select>
         <select name="kind" aria-label="Order type"><option>limit</option><option>market</option></select>
@@ -1505,8 +1531,10 @@
       <td class="num">${pctText(p.before)} → ${pctText(p.after)}</td><td class="num">${money(total)}</td></tr>`;
     return `<table class="orders-table impact-table"><thead><tr><th>${esc(im.symbol)} position</th><th class="num">Shares</th><th class="num">Value</th><th class="num">Share of total</th><th class="num">Total</th></tr></thead><tbody>
       ${row(a.label || 'This account', a.quantity, a.value, a.percent, a.total)}
-      ${row('All accounts', o.quantity, o.value, o.percent, o.total)}
+      ${row('All live accounts (Schwab + Binance.US)', o.quantity, o.value, o.percent, o.total)}
+      ${im.everything ? row(`Plus ${im.everything.institutions.map(i => i.name + ' (statement ' + i.as_of + ')').join(', ')}`, im.everything.quantity, im.everything.value, im.everything.percent, im.everything.total) : ''}
       </tbody></table>
+      <div class="orders-sync">“Live” accounts are read from Schwab and Binance.US now. ${im.everything ? 'The last row adds accounts known only from statements, whose values may be months old.' : 'Accounts that are only known from statements are not included.'}</div>
       <div class="orders-sync">${a.cash_after == null ? '' : `Cash available to trade after: ${money(a.cash_after)}`}${a.buying_power_after == null ? '' : ` · buying power after: ${money(a.buying_power_after)}`}</div>`;
   }
 
@@ -1742,6 +1770,8 @@
         if (!accountsData) await loadAccounts();
         showAccountFunds();
       });
+      ['quantity', 'price'].forEach(name => tradeForm.elements[name].addEventListener('input', showAccountFunds));
+      ['side', 'kind'].forEach(name => tradeForm.elements[name].addEventListener('change', showAccountFunds));
       if (isCrypto()) (accountsData ? Promise.resolve() : loadAccounts()).then(showAccountFunds);
       tradeForm.elements.kind.addEventListener('change', () => {
         tradeForm.elements.price.disabled = tradeForm.elements.kind.value === 'market';
