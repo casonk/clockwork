@@ -82,3 +82,12 @@ def test_the_detail_view_links_to_the_company_site_and_to_yahoo_finance():
         "No qualitative profile" in TEMPLATE[:start]
     )  # the links sit outside the profile-only block
     assert 'rel="noopener noreferrer"' in TEMPLATE[start : start + 700]
+
+
+def test_the_chart_range_is_shared_by_every_card_and_remembered():
+    assert (
+        "detailRange = '5y';\n    const overlay" not in TEMPLATE
+    )  # opening a card no longer resets it
+    assert "const RANGE_KEY = 'tradility-detail-range';" in TEMPLATE
+    assert "localStorage.setItem(RANGE_KEY, range)" in TEMPLATE
+    assert "if (!RANGES.includes(range)) return;" in TEMPLATE
