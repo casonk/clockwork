@@ -455,9 +455,28 @@ def test_the_form_offers_the_trading_hours_and_duration_prefilled_from_the_polic
     for needle in (
         'name="session" aria-label="Trading hours"',
         'name="tif" aria-label="Duration"',
-        "Extended hours",
         "time_in_force || 'gtc'",
-        "extended hours)",
         "...(f.session ? {session: f.session, tif: f.tif} : {})",
+    ):
+        assert needle in html, needle
+
+
+def test_the_form_offers_every_schwab_duration_and_session_and_keeps_to_valid_combinations():
+    from pathlib import Path
+
+    html = (
+        Path(__file__).resolve().parents[1] / "web" / "templates" / "to-tradility.html"
+    ).read_text(encoding="utf-8")
+    for needle in (
+        "['fok', 'Fill or kill']",
+        "['ioc', 'Immediate or cancel']",
+        "['end_of_week', 'End of week']",
+        "['end_of_month', 'End of month']",
+        "['next_end_of_month', 'Next end of month']",
+        "['am', 'Pre-market only']",
+        "['pm', 'After-hours only']",
+        "['extended', 'Extended",
+        "function syncOrderChoices",
+        "TIF_LABEL[o.tif]",
     ):
         assert needle in html, needle
