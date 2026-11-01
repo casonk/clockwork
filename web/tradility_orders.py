@@ -390,6 +390,14 @@ def withdraw_step(step: str):
     return jsonify(payload), code
 
 
+@bp.get("/api/tradility-trade/holdings/<path:ticker>")
+def trade_holdings(ticker: str):
+    """Where a ticker is held now, account by account (from the trader service)."""
+    ticker = _ticker(ticker)
+    code, payload = call_trader("GET", f"/holdings/{ticker}")
+    return jsonify(payload), code
+
+
 @bp.get("/api/tradility-trade/quote/<path:ticker>")
 def trade_quote(ticker: str):
     """The current mark and the policy's default limit prices (from the trader service)."""
