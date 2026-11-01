@@ -1346,6 +1346,7 @@
     if (!tradeStatus || !tradeStatus.available) return '';
     if (!tradeStatus.enabled) return '<div class="orders-sync">Order placement is turned off in the trading policy.</div>';
     if (!canTrade()) return `<div class="orders-sync">${esc(detailTicker)} is not on the trading allowlist.</div>`;
+    if (isCrypto() && !(tradeStatus.brokers || []).includes('binance')) return '<div class="orders-sync">Binance.US trading is not enabled. It needs a separate trade-enabled API key (withdrawals off) and <code>binance = true</code> in the trading policy; see the Tradility README.</div>';
     const limits = `up to ${money(tradeStatus.per_order_usd)} per order, ${money(tradeStatus.daily_usd)} a day (${money(tradeStatus.spent_today)} used)`;
     return `<div class="trade-box" id="trade-box">
       <h4>Place an order · ${limits}</h4>
