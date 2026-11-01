@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Tradility ticker details now include an on-demand company/fund overview with
+  canonical name, sourced description, sector/industry or fund classification,
+  headquarters, website, exchange, employees, entity type, and profile
+  freshness. Missing official mission/vision text is labeled as unavailable,
+  never generated from the description; verbose profiles stay out of the card
+  collection response.
 - The Themes page registers a placeholder Home card for a page that is not built yet. The card is stored in the gitignored `config/placeholders.json`, shown on Home as planned, and listed under Names and icons. It stays out of the services menu and the published `nav.json`. Registering it adds a To Code item for the repository group and repository you name.
 - Clockwork no longer has its own top-bar icon: it is the first entry of the Services menu (⏰ Clockwork, the jobs page), and the published `nav.json` drops the top-level item. A name or icon you set for the old top-bar item (`nav:clockwork`) no longer applies; rename the Services entry (`/`) instead.
 - The top bar has a font rotator and a size rotator, each like the theme rotator: the button steps to the next choice, and the menu beside it lists that choice only.
