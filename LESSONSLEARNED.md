@@ -14,10 +14,13 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
-- A dashboard reload is not a data refresh. For generated market-data
-  artifacts, expose the generation age and a stale threshold, label rereading
-  separately from regeneration, and route manual regeneration through the same
-  reviewed systemd workload that owns automatic refreshes.
+- A dashboard reload is not a data refresh. Load an existing generated artifact
+  automatically when the page opens instead of presenting reread and regenerate
+  as sibling actions. One manual update control should route through the same
+  reviewed systemd workload that owns automatic refreshes, show elapsed state,
+  poll a cheap artifact-version/status endpoint, and replace the view only after
+  a new atomic artifact appears. Bound startup and completion waits and preserve
+  the last good view when an update fails.
 
 - A placeholder Home card is portal content, not a theme. Store it in the gitignored
   `config/placeholders.json` (`CLOCKWORK_PLACEHOLDERS_FILE`) and register it from the Themes page,

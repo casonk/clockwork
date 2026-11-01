@@ -5486,6 +5486,22 @@ def api_simple_delete_item(list_key):
     return jsonify({"ok": True, "data": data})
 
 
+def _tradility_artifact_version() -> str | None:
+    """Return a cheap, browser-safe version token for the generated artifact."""
+    try:
+        stat = TRADILITY_ANALYSIS_FILE.stat()
+    except OSError:
+        return None
+    return f"{stat.st_mtime_ns}:{stat.st_size}"
+
+
+def _tradility_refresh_active() -> bool:
+    _active_rc, active_output = _systemctl("is-active", TRADILITY_REFRESH_UNIT, scope="user")
+    # A running Type=oneshot unit is "activating", for which systemctl
+    # intentionally exits 3 even though the workload is still in progress.
+    return active_output.strip() in {"active", "activating"}
+
+
 @app.get("/api/tradility-analysis")
 def api_tradility_analysis():
     """Return the latest tradility technical analysis JSON.
@@ -5527,7 +5543,6 @@ def api_tradility_analysis():
             )
         except ValueError:
             pass
-    _active_rc, active_output = _systemctl("is-active", TRADILITY_REFRESH_UNIT, scope="user")
     data["freshness"] = {
         "age_seconds": age_seconds,
         "stale": age_seconds is None or age_seconds > TRADILITY_STALE_HOURS * 3600,
@@ -5535,10 +5550,9 @@ def api_tradility_analysis():
     }
     data["refresh"] = {
         "unit": TRADILITY_REFRESH_UNIT,
-        # A running Type=oneshot unit is "activating", for which systemctl
-        # intentionally exits 3 even though the workload is still in progress.
-        "active": active_output.strip() in {"active", "activating"},
+        "active": _tradility_refresh_active(),
     }
+    data["artifact_version"] = _tradility_artifact_version()
     data["csrf_token"] = _csrf_token()
     data["ok"] = True
     return jsonify(data)
@@ -5585,6 +5599,21 @@ def api_tradility_refresh():
     if rc != 0:
         return jsonify({"ok": False, "error": "Could not start Tradility refresh"}), 503
     return jsonify({"ok": True, "unit": TRADILITY_REFRESH_UNIT}), 202
+
+
+@app.get("/api/tradility-refresh/status")
+def api_tradility_refresh_status():
+    """Return lightweight refresh state without rereading the full analysis JSON."""
+    return jsonify(
+        {
+            "ok": True,
+            "artifact_version": _tradility_artifact_version(),
+            "refresh": {
+                "unit": TRADILITY_REFRESH_UNIT,
+                "active": _tradility_refresh_active(),
+            },
+        }
+    )
 
 
 def _watch_scan_dirs() -> list[Path]:

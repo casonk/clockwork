@@ -100,7 +100,13 @@ def test_tradility_api_reports_stale_data_and_refreshes_via_systemd(
     assert payload["freshness"]["stale"] is True
     assert payload["freshness"]["age_seconds"] > 0
     assert payload["refresh"]["active"] is False
+    assert payload["artifact_version"]
     assert payload["csrf_token"]
+
+    waiting = client.get("/api/tradility-refresh/status")
+    assert waiting.status_code == 200
+    assert waiting.get_json()["artifact_version"] == payload["artifact_version"]
+    assert waiting.get_json()["refresh"]["active"] is False
 
     started = client.post(
         "/api/tradility-refresh",
@@ -112,17 +118,38 @@ def test_tradility_api_reports_stale_data_and_refreshes_via_systemd(
     assert (("start", "--no-block", "tradility-refresh.service"), "user") in calls
 
     service_state[0] = "activating"
-    running = client.get("/api/tradility-analysis").get_json()
+    running = client.get("/api/tradility-refresh/status").get_json()
     assert running["refresh"]["active"] is True
 
 
-def test_tradility_page_distinguishes_reload_from_refresh(client):
+def test_tradility_refresh_status_does_not_parse_the_large_artifact(
+    client, list_files, monkeypatch
+):
+    list_files["TRADILITY_ANALYSIS_FILE"].write_text("{not valid json")
+    monkeypatch.setattr(web_app, "_systemctl", lambda *_args, **_kwargs: (3, "inactive"))
+
+    status = client.get("/api/tradility-refresh/status")
+
+    assert status.status_code == 200
+    assert status.get_json()["artifact_version"]
+    assert client.get("/api/tradility-analysis").status_code == 500
+
+
+def test_tradility_page_uses_one_update_action_and_follows_completion(client):
     html = client.get("/to-tradility").get_data(as_text=True)
 
-    assert "> Reload" in html
-    assert "> Run refresh" in html
+    assert "Update market data" in html
+    assert 'id="reload-btn"' not in html
+    assert "Run refresh" not in html
     assert "Trend 50/200" in html
     assert "async function runRefresh()" in html
+    assert "function watchRefresh" in html
+    assert "async function monitorRefresh" in html
+    assert "'/api/tradility-refresh/status'" in html
+    assert "status.artifact_version !== baselineVersion" in html
+    assert "loadData({followActiveRefresh: false})" in html
+    assert "REFRESH_TIMEOUT_MS = 15 * 60 * 1000" in html
+    assert "Update finished, but no new market-data artifact was written" in html
     assert "Historical close" in html
     assert "Technical market rating" in html
     assert "async function openTickerDetail" in html

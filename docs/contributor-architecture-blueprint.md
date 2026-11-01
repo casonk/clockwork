@@ -67,6 +67,10 @@ workload logic.
 - Dense per-item series must not be copied into every collection response.
   The same applies to verbose business descriptions. Keep the producer artifact
   authoritative and load detail only after explicit user interaction.
+- Manual regeneration is one observable lifecycle, not a reload plus a start
+  button. Start or attach to the systemd job, poll a lightweight file-version
+  status endpoint, and reload the collection only after the producer atomically
+  publishes a new artifact; retain the last good view on failure or timeout.
 
 ## GPU Workload Handoff
 
