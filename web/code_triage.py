@@ -25,7 +25,10 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11
+    import tomli as tomllib
 
 UNKNOWN = "unknown"
 DEFAULT_URL = "http://localhost:11434/v1/systemone"

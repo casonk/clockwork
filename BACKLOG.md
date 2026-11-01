@@ -21,6 +21,10 @@ Mark items `[x]` when complete and move them to Done.
 
 ## In Progress
 
+- [ ] [manual:2026-11-01] **Let shopping AI recategorize existing items** —
+  preserve the safe missing-only action and add an explicit confirmed scope
+  that can reconsider every item and replace an existing type label.
+
 ## Done
 
 - [x] [manual:2026-11-01] **Unify Tradility's manual refresh flow** — replace

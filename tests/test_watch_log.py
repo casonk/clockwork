@@ -11,7 +11,7 @@ import json
 import pytest
 
 from tests.test_library_pages import _csrf, client, library, web_app
-from web import watch_log
+from web import library_pages, streaming, watch_log
 
 EP = "/shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E01_1080p.mkv"
 NOW = datetime.datetime(2026, 10, 31, 12, 0, 0)
@@ -132,7 +132,19 @@ def test_the_report_rejects_unknown_files_and_bad_numbers(client, library, tmp_p
     assert not (tmp_path / "w.jsonl").exists()
 
 
-def test_the_play_page_wires_the_report(client, library):
+def test_the_play_page_wires_the_report(client, library, monkeypatch):
+    monkeypatch.setattr(
+        library_pages.streaming,
+        "probe_media",
+        lambda _path: streaming.MediaInfo(
+            duration=1500,
+            container=".mkv",
+            video_codec="h264",
+            pixel_format="yuv420p",
+            audio_codec="aac",
+            height=1080,
+        ),
+    )
     html = client.get("/library/play" + EP).get_data(as_text=True)
     import re
 

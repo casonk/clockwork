@@ -72,6 +72,7 @@ def test_an_open_market_order_needs_no_price():
 @pytest.fixture
 def api(client, tmp_path, monkeypatch):  # noqa: F811
     monkeypatch.setenv("CLOCKWORK_TRADILITY_ORDERS_FILE", str(tmp_path / "orders.json"))
+    monkeypatch.setenv("CLOCKWORK_TRADILITY_ORDERS_EXPORT", str(tmp_path / "broker-orders.json"))
     held = tmp_path / "holdings.json"
     held.write_text(json.dumps({"holdings": HOLDINGS}))
     monkeypatch.setattr(web_app, "HOLDINGS_AGGREGATE_FILE", held)

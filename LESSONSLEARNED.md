@@ -14,6 +14,24 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
+- An AI batch action that normally fills missing values must make replacement
+  of user-authored values an explicit, confirmed scope. Enforce that scope both
+  when building the model prompt and when applying its response; filtering only
+  the prompt can still overwrite an excluded record when item names repeat or
+  the model returns an over-complete mapping.
+- A test for a view that merges multiple local data sources must redirect every
+  source, including read-only companion exports. Redirecting only the writable
+  store can leak live owner data into failures and make the suite host-dependent.
+  Stub external probe commands in route tests when binary availability is not
+  the behavior under test.
+- When tests import repo-root modules such as `web` or sibling modules under
+  `tests`, include the repository root in pytest's declared `pythonpath`; an
+  editable install covers only packages under `src`, and console-entry-point
+  path behavior can change across pytest releases and hosted runner images.
+- A declared backport dependency does not provide the standard-library module
+  name automatically. Every module that uses `tomllib` must fall back to
+  `tomli` while Python 3.10 remains in the supported and tested matrix.
+
 - A dashboard reload is not a data refresh. Load an existing generated artifact
   automatically when the page opens instead of presenting reread and regenerate
   as sibling actions. One manual update control should route through the same

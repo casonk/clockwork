@@ -444,11 +444,15 @@
         ⟳ Sync
       </button>
     </form>
-    <form method="post" action="/shopping/ai-categorize">
+    <form method="post" action="/shopping/ai-categorize" style="display:flex;gap:6px;flex-wrap:wrap;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button type="submit" class="sync-btn"
-              {% if not ollama_available %}disabled title="Ollama not running"{% else %}title="Use AI to assign a type label to every item"{% endif %}>
-        ✦ Categorize
+      <button type="submit" name="scope" value="missing" class="sync-btn"
+              {% if not ollama_available %}disabled title="Ollama not running"{% else %}title="Use AI to categorize only items without a type"{% endif %}>
+        ✦ Categorize missing
+      </button>
+      <button type="submit" name="scope" value="all" class="sync-btn"
+              {% if not ollama_available %}disabled title="Ollama not running"{% else %}title="Use AI to reconsider every item and replace existing types" onclick="return confirm('Recategorize every shopping item? Existing type labels may be replaced.')"{% endif %}>
+        ↻ Recategorize all
       </button>
     </form>
     <form method="post" action="/shopping/ai-rules">

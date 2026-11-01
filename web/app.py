@@ -2496,17 +2496,19 @@ Return ONLY a JSON object — no markdown, no explanation:
     return added, _OLLAMA_MODEL, rejected_proposals
 
 
-def _ai_categorize_shopping(data: dict) -> tuple[int, str]:
-    """Ask the LLM to assign a consumer type to every uncategorized shopping item.
+def _ai_categorize_shopping(data: dict, *, replace_existing: bool = False) -> tuple[int, str]:
+    """Ask the LLM to assign consumer types to selected shopping items.
 
-    Updates *data* in-place, adding/updating a ``type`` field on each item.
+    By default, existing type labels are preserved.  With ``replace_existing``,
+    every item is sent to the model and an existing label may be replaced.
+    Updates *data* in-place, adding/updating a ``type`` field on selected items.
     Returns (items_updated, model_used).
     """
     all_items: list[dict] = [
         {"name": item["name"], "category": cat["name"]}
         for cat in data["categories"]
         for item in cat["items"]
-        if not item.get("type")
+        if replace_existing or not item.get("type")
     ]
     if not all_items:
         return 0, _OLLAMA_MODEL
@@ -2533,6 +2535,8 @@ Return ONLY a JSON object — no markdown, no explanation:
     updated = 0
     for cat in data["categories"]:
         for item in cat["items"]:
+            if item.get("type") and not replace_existing:
+                continue
             t = type_map.get(item["name"].lower())
             if t:
                 item["type"] = t
@@ -3392,17 +3396,24 @@ def shopping_ai_categorize():
     if not _ollama_available():
         flash("Ollama is not reachable — start crew-chief before using AI features.", "error")
         return redirect(url_for("shopping"))
+    replace_existing = request.form.get("scope", "missing") == "all"
     data = load_shopping()
     try:
-        count, model = _ai_categorize_shopping(data)
+        count, model = _ai_categorize_shopping(data, replace_existing=replace_existing)
     except Exception as exc:
         flash(f"AI categorize failed: {exc}", "error")
         return redirect(url_for("shopping"))
     if count == 0:
-        flash("All items already have types — nothing to categorize.", "success")
+        message = (
+            "No shopping items were returned for recategorization."
+            if replace_existing
+            else "All items already have types — nothing to categorize."
+        )
+        flash(message, "success")
     else:
         save_shopping(data)
-        flash(f"Assigned types to {count} item{'s' if count != 1 else ''} via {model}.", "success")
+        action = "Reassigned types for" if replace_existing else "Assigned types to"
+        flash(f"{action} {count} item{'s' if count != 1 else ''} via {model}.", "success")
     return redirect(url_for("shopping"))
 
 
