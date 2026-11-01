@@ -229,6 +229,12 @@
     .detail-ticker { font: 800 24px var(--mono); letter-spacing: 0.6px; }
     .detail-name { color: var(--muted-fg); font-size: 12px; }
     .detail-price { font-size: 22px; font-weight: 750; white-space: nowrap; }
+    .detail-step {
+      border: 1px solid var(--border); background: var(--surface2); color: var(--text);
+      border-radius: 8px; width: 34px; height: 34px; cursor: pointer; font-size: 18px;
+    }
+    .detail-step:disabled { opacity: 0.35; cursor: default; }
+    .detail-pos { align-self: center; color: var(--muted-fg); font-size: 11px; white-space: nowrap; }
     .detail-close {
       border: 1px solid var(--border); background: var(--surface2); color: var(--text);
       border-radius: 8px; width: 34px; height: 34px; cursor: pointer; font-size: 18px;
@@ -358,6 +364,9 @@
         <div class="detail-name" id="detail-dialog-name"></div>
       </div>
       <div class="detail-price" id="detail-dialog-price"></div>
+      <span class="detail-pos" id="detail-pos"></span>
+      <button class="detail-step" id="detail-prev" type="button" onclick="stepTickerDetail(-1)" aria-label="Previous ticker" title="Previous (←)">‹</button>
+      <button class="detail-step" id="detail-next" type="button" onclick="stepTickerDetail(1)" aria-label="Next ticker" title="Next (→)">›</button>
       <button class="detail-close" type="button" onclick="closeTickerDetail()" aria-label="Close details">×</button>
     </div>
     <div id="detail-content"><div class="detail-loading">Loading company and market details…</div></div>
@@ -506,6 +515,8 @@
   let detailRecord    = null;
   let detailRange     = '5y';
   let detailTrigger   = null;
+  let detailTicker    = null;
+  let shownOrder      = [];   // tickers with details, in the order the grid shows them
 
   // ── Data load ────────────────────────────────────────────────────────────────
   async function loadData() {
@@ -674,6 +685,9 @@
       return bt !== at ? bt - at : a.ticker.localeCompare(b.ticker);
     });
 
+    shownOrder = tickers.filter(t => t.detail_available).map(t => t.ticker);
+    if (detailTicker) paintDetailSteps();
+
     // Stats: bucket by approximate signal for count display
     let buyN = 0, sellN = 0, neutralN = 0, noDataN = 0;
     for (const t of tickers) {
@@ -780,8 +794,26 @@
   }
 
   // ── Historical-performance detail ───────────────────────────────────────────
-  async function openTickerDetail(ticker, trigger) {
+  function paintDetailSteps() {
+    const at = shownOrder.indexOf(detailTicker);
+    document.getElementById('detail-prev').disabled = at <= 0;
+    document.getElementById('detail-next').disabled = at < 0 || at >= shownOrder.length - 1;
+    document.getElementById('detail-pos').textContent = at < 0 ? '' : `${at + 1} / ${shownOrder.length}`;
+  }
+
+  // Open the previous (-1) or next (+1) card in the order the grid is showing.
+  function stepTickerDetail(delta) {
+    const at = shownOrder.indexOf(detailTicker);
+    const next = shownOrder[at + delta];
+    if (at < 0 || !next) return;
+    const card = [...document.querySelectorAll('.ticker-card')].find(c => c.dataset.ticker === next);
+    openTickerDetail(next, card || detailTrigger, delta < 0 ? 'detail-prev' : 'detail-next');
+  }
+
+  async function openTickerDetail(ticker, trigger, keepFocus) {
     detailTrigger = trigger || null;
+    detailTicker = ticker;
+    paintDetailSteps();
     detailRecord = null;
     detailRange = '5y';
     const overlay = document.getElementById('detail-overlay');
@@ -792,15 +824,18 @@
     document.getElementById('detail-dialog-price').textContent = '';
     document.getElementById('detail-content').innerHTML =
       '<div class="detail-loading">Loading company and market details…</div>';
-    overlay.querySelector('.detail-close').focus();
+    const keep = keepFocus && document.getElementById(keepFocus);
+    (keep && !keep.disabled ? keep : overlay.querySelector('.detail-close')).focus();
 
     try {
       const res = await fetch(`/api/tradility-analysis/${encodeURIComponent(ticker)}`);
       const data = await res.json();
+      if (detailTicker !== ticker) return;   // stepped on to another card while this one loaded
       if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
       detailRecord = data.ticker;
       renderTickerDetail(data);
     } catch (err) {
+      if (detailTicker !== ticker) return;
       document.getElementById('detail-content').innerHTML =
         `<div class="error-card">Could not load ${esc(ticker)} details: ${esc(err.message)}</div>`;
     }
@@ -810,6 +845,7 @@
     document.getElementById('detail-overlay').hidden = true;
     document.body.classList.remove('detail-open');
     detailRecord = null;
+    detailTicker = null;
     if (detailTrigger) detailTrigger.focus();
     detailTrigger = null;
   }
@@ -1069,8 +1105,12 @@
     if (event.target.id === 'detail-overlay') closeTickerDetail();
   });
   document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && !document.getElementById('detail-overlay').hidden) {
+    if (document.getElementById('detail-overlay').hidden) return;
+    if (event.key === 'Escape') {
       closeTickerDetail();
+    } else if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !event.altKey
+               && !event.ctrlKey && !event.metaKey && !/^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName)) {
+      stepTickerDetail(event.key === 'ArrowLeft' ? -1 : 1);
     }
   });
 
