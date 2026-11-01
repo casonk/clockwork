@@ -59,3 +59,16 @@ def test_the_indicator_buttons_toggle_and_keep_at_least_one():
     assert "toggleIndicator('rsi')" in TEMPLATE and "setIndicator(" not in TEMPLATE
     assert 'aria-pressed="true"' in TEMPLATE
     assert "if (activeIndicators.size === 1) return;" in TEMPLATE
+
+
+def test_the_detail_dialog_steps_through_the_cards_in_grid_order():
+    for needle in (
+        'id="detail-prev"',
+        'id="detail-next"',
+        "stepTickerDetail(-1)",
+        "stepTickerDetail(1)",
+        "shownOrder = tickers.filter(t => t.detail_available)",
+        "ArrowLeft",
+        "if (detailTicker !== ticker) return;",
+    ):
+        assert needle in TEMPLATE, needle
