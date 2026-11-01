@@ -238,13 +238,10 @@ def test_no_example_cron_command_contains_an_unescaped_percent():
     """In a crontab line `%` means newline, so systemd's `%h` must not leak into cron."""
     import re
 
-    import tomllib
-
     examples = Path(__file__).resolve().parent.parent / "examples"
     offenders = []
     for path in sorted(examples.glob("**/*.toml")):
-        for job in tomllib.loads(path.read_text(encoding="utf-8")).get("jobs", []):
-            command = (job.get("cron") or {}).get("command", "")
-            if re.search(r"(?<!\\)%", command):
-                offenders.append(f"{path.relative_to(examples)}:{job['name']}")
+        for job in load_manifest(path).jobs:
+            if job.cron is not None and re.search(r"(?<!\\)%", job.cron.command):
+                offenders.append(f"{path.relative_to(examples)}:{job.name}")
     assert offenders == []
