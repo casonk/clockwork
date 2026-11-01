@@ -253,6 +253,7 @@
     .template-chips button.buy { border-color: color-mix(in srgb, var(--green) 60%, var(--border)); }
     .template-chips button.sell { border-color: color-mix(in srgb, var(--red) 60%, var(--border)); }
     .template-chips button.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+    .order-effect { font-size: 11px; white-space: nowrap; }
     .card-target { font-size: 10px; margin-top: 3px; color: var(--muted-fg); }
     .card-target.under { color: var(--accent); }
     .card-target.over { color: var(--red); }
@@ -1321,6 +1322,7 @@
     }
     const box = document.getElementById('held-box');
     if (box) box.innerHTML = heldBox();
+    if (detailOrders && !tradeStep) renderOrders();   // the 'if this fills' column uses what is held
   }
 
   function targetCardHtml(ticker, assetClass) {
@@ -1377,6 +1379,59 @@
   function bindTargetForm() {
     const form = document.getElementById('target-form');
     if (form) form.addEventListener('submit', event => { event.preventDefault(); saveTarget(form); });
+  }
+
+  // What an open order does to this holding's share of the portfolio, against its To Invest target.
+  // The base is the same one To Invest uses (the holdings export's total), so the numbers agree
+  // with the cards. `after` is the share if just this order fills; `delta` is the target minus
+  // that, so a positive delta is still short of the target.
+  function currentShare() {
+    const r = targetFor(detailTicker);
+    if (r && r.current != null) return r.current;
+    const total = targetsData && targetsData.portfolio_value;
+    if (!total || !heldData) return r ? 0 : null;
+    const held = (heldData.accounts || []).reduce((a, x) => a + (x.value || 0), 0)
+      + (heldData.statements || []).reduce((a, x) => a + (x.market_value || 0), 0);
+    return held / total * 100;
+  }
+
+  function orderPrice(o) {
+    return o.price != null ? o.price : (detailRecord ? detailRecord.last_price : null);
+  }
+
+  function orderEffect(o, base) {
+    const total = targetsData && targetsData.portfolio_value;
+    const price = orderPrice(o);
+    const now = base == null ? currentShare() : base;
+    if (!total || price == null || now == null) return null;
+    const move = (o.side === 'buy' ? 1 : -1) * o.quantity * price / total * 100;
+    const r = targetFor(detailTicker);
+    const after = Math.max(0, now + move);
+    return {after, move, target: r && r.target != null ? r.target : null, delta: r && r.target != null ? r.target - after : null};
+  }
+
+  function effectText(e) {
+    if (!e) return '—';
+    const gap = e.delta == null ? ''
+      : Math.abs(e.delta) <= 0.05 ? ' · on target'
+      : e.delta > 0 ? ` · ${pctPlain(e.delta)} below target ${pctPlain(e.target)}`
+      : ` · ${pctPlain(-e.delta)} above target ${pctPlain(e.target)}`;
+    return `→ ${pctPlain(e.after)}${gap}`;
+  }
+
+  function openOrdersEffect() {
+    const open = detailOrders.orders.filter(o => o.status === 'open');
+    if (!open.length) return '';
+    let share = currentShare();
+    if (share == null || !(targetsData && targetsData.portfolio_value)) return '';
+    for (const o of open) {
+      const e = orderEffect(o, share);
+      if (e) share = e.after;
+    }
+    const r = targetFor(detailTicker);
+    const gap = r && r.target != null ? r.target - share : null;
+    const text = gap == null ? `${pctPlain(share)} of the portfolio` : `${pctPlain(share)} of the portfolio, ${Math.abs(gap) <= 0.05 ? 'on' : (gap > 0 ? pctPlain(gap) + ' below' : pctPlain(-gap) + ' above')} the ${pctPlain(r.target)} target`;
+    return `<div class="orders-sync">If all ${open.length} open order${open.length === 1 ? '' : 's'} fill${open.length === 1 ? 's' : ''}: ${text}.</div>`;
   }
 
   function sourceLabel(source) {
@@ -1886,6 +1941,7 @@
         <td class="num">${esc(String(o.quantity))}</td>
         <td class="num">${o.price == null ? '—' : fmtPrice(o.price)}</td>
         <td>${esc(o.status)}</td>
+        <td class="order-effect">${o.status === 'open' ? effectText(orderEffect(o)) : ''}</td>
         <td>${esc(o.note || '')}</td>
         <td>${esc(sourceLabel(o.source))}</td>
         <td class="order-actions">
@@ -1900,7 +1956,7 @@
         <span>Average entry<strong>${entry ? fmtPrice(entry) : '—'}</strong>${source ? ` <span>${source}</span>` : ''}</span>
         <span>Vs last price<strong class="${pl == null ? '' : returnClass(pl)}">${pl == null ? '—' : formatReturn(pl)}</strong></span>
       </div>
-      ${rows ? `<table class="orders-table"><thead><tr><th>Date</th><th>Side</th><th>Type</th><th class="num">Qty</th><th class="num">Price</th><th>Status</th><th>Note</th><th>Source</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+      ${rows ? `<table class="orders-table"><thead><tr><th>Date</th><th>Side</th><th>Type</th><th class="num">Qty</th><th class="num">Price</th><th>Status</th><th>If this fills</th><th>Note</th><th>Source</th><th></th></tr></thead><tbody>${rows}</tbody></table>${openOrdersEffect()}`
              : '<p class="company-description">No orders recorded for this ticker.</p>'}
       <div id="held-box">${heldBox()}</div>
       ${tradeSection()}
