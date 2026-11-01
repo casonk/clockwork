@@ -1,0 +1,23 @@
+
+[[jobs]]
+name = "weekly-blog-agentic"
+description = "Write and publish a weekly Codex-authored blog post for casonk.github.io"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h/git/doc-repos/casonk.github.io"
+exec_start = "/usr/bin/env bash %h/git/doc-repos/casonk.github.io/scripts/weekly_blog_agentic.sh"
+after = ["network-online.target"]
+wants = ["network-online.target"]
+environment_files = ["-%h/.config/casonk.github.io/weekly-blog-agentic.env"]
+standard_output = "journal"
+standard_error = "journal"
+timer_description = "Write and publish the weekly casonk.github.io blog post"
+
+[jobs.environment]
+PATH = "%h/bin:%h/.local/npm-global/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "Sun *-*-* 12:00:00 America/New_York"
+persistent = true
+accuracy_sec = "1m"

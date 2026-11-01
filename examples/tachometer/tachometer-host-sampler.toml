@@ -1,0 +1,17 @@
+
+[[jobs]]
+name = "tachometer-host-sampler"
+description = "Sample host temperatures, fans and load for the thermal history"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h/git/util-repos/tachometer"
+exec_start = "/usr/bin/env bash %h/git/util-repos/tachometer/scripts/sample_host.sh"
+standard_output = "journal"
+standard_error = "journal"
+timer_description = "Sample host temperatures every five minutes"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "*:0/5"
+persistent = false
+accuracy_sec = "30"

@@ -583,8 +583,12 @@ def test_actual_traction_manifests_compose_ui_and_renderer_labels(monkeypatch):
         "ci-repair-agentic",
         "ci-repair-agentic-discovery",
         "ci-repair-agentic-repair",
+        "github-ci-email-monitor",
+        "job-guard-notify",
         "portfolio-audit-daily",
+        "portfolio-purge",
         "refs-audit-agentic",
+        "repository-description-sync-weekly",
         "tachometer-disk-pressure-agentic",
         "template-consolidation-agentic",
     }
