@@ -49,6 +49,7 @@
       letter-spacing: 0.7px; color: var(--muted-fg); white-space: nowrap;
     }
     .indicator-group { display: flex; gap: 4px; }
+    .ind-row { display: flex; justify-content: space-between; gap: 8px; }
     .ind-btn {
       padding: 5px 14px; border-radius: 99px; border: 1px solid var(--border);
       background: var(--surface2); color: var(--muted-fg);
@@ -298,11 +299,11 @@
 </header>
 
 <div class="controls">
-  <span class="controls-label">Indicator</span>
-  <div class="indicator-group">
-    <button class="ind-btn active" data-ind="rsi"  onclick="setIndicator('rsi')">RSI 14</button>
-    <button class="ind-btn"        data-ind="vwap" onclick="setIndicator('vwap')">VWAP 20</button>
-    <button class="ind-btn"        data-ind="trend" onclick="setIndicator('trend')">Trend 50/200</button>
+  <span class="controls-label" title="Select one or more. Several are combined into one joint buy probability.">Indicators</span>
+  <div class="indicator-group" role="group" aria-label="Indicators (select several to combine them)">
+    <button class="ind-btn active" data-ind="rsi"   aria-pressed="true"  onclick="toggleIndicator('rsi')">RSI 14</button>
+    <button class="ind-btn"        data-ind="vwap"  aria-pressed="false" onclick="toggleIndicator('vwap')">VWAP 20</button>
+    <button class="ind-btn"        data-ind="trend" aria-pressed="false" onclick="toggleIndicator('trend')">Trend 50/200</button>
   </div>
 
   <span class="controls-label" style="margin-left:6px">Class</span>
@@ -393,23 +394,45 @@
     ];
   }
 
-  // t=1 → buy/green, t=0 → sell/red  (inverse of raw colormap for RSI/VWAP)
-  function colormapT(ticker) {
+  // Each indicator reads as a probability that the ticker is a buy: t=1 buy/green, t=0 sell/red
+  // (inverse of the raw colormap for RSI/VWAP). null means the indicator has no value.
+  function signalT(ticker, ind) {
     if (ticker.fetch_status === 'error') return null;
-    if (activeIndicator === 'rsi') {
+    if (ind === 'rsi') {
       if (ticker.rsi_14 == null) return null;
       return 1 - ticker.rsi_14 / 100;          // RSI 0→t=1 (green), RSI 100→t=0 (red)
-    } else if (activeIndicator === 'vwap') {
+    } else if (ind === 'vwap') {
       const p = ticker.last_price, v = ticker.vwap_20;
       if (p == null || v == null || v === 0) return null;
       const d = (p - v) / v;                   // % above/below VWAP
       return Math.max(0, Math.min(1, 0.5 - d / 0.6));  // ±30% mapped to [0,1]
-    } else {
-      if (ticker.long_term_trend === 'bullish') return 0.85;
-      if (ticker.long_term_trend === 'bearish') return 0.15;
-      if (ticker.long_term_trend === 'mixed') return 0.5;
-      return null;
     }
+    if (ticker.long_term_trend === 'bullish') return 0.85;
+    if (ticker.long_term_trend === 'bearish') return 0.15;
+    if (ticker.long_term_trend === 'mixed') return 0.5;
+    return null;
+  }
+
+  // Joint buy probability of the selected indicators, treated as independent evidence with an
+  // even prior: P = Πp / (Πp + Π(1-p)). A neutral 0.5 changes nothing; agreeing indicators
+  // reinforce each other and opposing ones cancel. Each p is held off 0 and 1 so one extreme
+  // reading cannot settle the answer alone. Indicators with no value are left out; the card says
+  // how many of the selected indicators contributed.
+  const P_FLOOR = 0.02;
+  function jointT(ticker, inds) {
+    let buy = 1, sell = 1, used = 0;
+    for (const ind of inds) {
+      const p = signalT(ticker, ind);
+      if (p === null) continue;
+      const q = Math.max(P_FLOOR, Math.min(1 - P_FLOOR, p));
+      buy *= q; sell *= 1 - q; used++;
+    }
+    return used ? { t: buy / (buy + sell), used } : null;
+  }
+
+  function colormapT(ticker) {
+    const joint = jointT(ticker, [...activeIndicators]);
+    return joint ? joint.t : null;
   }
 
   // Compute all inline color values for one card
@@ -446,13 +469,19 @@
     ctx.fill();
 
     // Labels and ticks
-    if (activeIndicator === 'rsi') {
+    if (activeIndicators.size > 1) {
+      document.getElementById('legend-ticks').innerHTML =
+        '<span>100%</span><span>75%</span><span>50%</span><span>25%</span><span>0%</span>';
+      document.getElementById('legend-lbl-buy').textContent  = 'Joint buy probability high';
+      document.getElementById('legend-lbl-mid').textContent  = 'Even';
+      document.getElementById('legend-lbl-sell').textContent = 'Joint buy probability low';
+    } else if (activeIndicator() === 'rsi') {
       document.getElementById('legend-ticks').innerHTML =
         '<span>0</span><span>30</span><span>50</span><span>70</span><span>100</span>';
       document.getElementById('legend-lbl-buy').textContent  = 'Oversold (buy)';
       document.getElementById('legend-lbl-mid').textContent  = 'Neutral';
       document.getElementById('legend-lbl-sell').textContent = 'Overbought (sell)';
-    } else if (activeIndicator === 'vwap') {
+    } else if (activeIndicator() === 'vwap') {
       document.getElementById('legend-ticks').innerHTML =
         '<span>−30%</span><span>−15%</span><span>0%</span><span>+15%</span><span>+30%</span>';
       document.getElementById('legend-lbl-buy').textContent  = 'Below VWAP (buy)';
@@ -469,7 +498,8 @@
 
   // ── State ───────────────────────────────────────────────────────────────────
   let allTickers    = [];
-  let activeIndicator = 'rsi';
+  let activeIndicators = new Set(['rsi']);
+  const activeIndicator = () => [...activeIndicators][0];
   let activeClasses   = new Set(['all']);
   let allClasses      = [];
   let csrfToken       = '';
@@ -534,10 +564,18 @@
   }
 
   // ── Indicator switch ─────────────────────────────────────────────────────────
-  function setIndicator(ind) {
-    activeIndicator = ind;
-    document.querySelectorAll('.ind-btn').forEach(b =>
-      b.classList.toggle('active', b.dataset.ind === ind));
+  function toggleIndicator(ind) {
+    if (activeIndicators.has(ind)) {
+      if (activeIndicators.size === 1) return;   // keep at least one selected
+      activeIndicators.delete(ind);
+    } else {
+      activeIndicators.add(ind);
+    }
+    document.querySelectorAll('.ind-btn').forEach(b => {
+      const on = activeIndicators.has(b.dataset.ind);
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', String(on));
+    });
     paintLegend();
     renderGrid();
   }
@@ -577,6 +615,40 @@
     renderGrid();
   }
 
+  // The label, value and detail line one indicator shows on a card. `note` is its own read when
+  // several indicators are combined.
+  function indicatorBlock(t, ind, pal, many) {
+    const col = pal ? `color:${pal.fg}` : '';
+    const own = signalT(t, ind);
+    const note = many && own !== null ? `${Math.round(own * 100)}% buy` : '';
+    if (ind === 'rsi') {
+      const value = t.rsi_14 != null ? t.rsi_14.toFixed(1) : '—';
+      let extra = '';
+      if (t.rsi_14 != null && !many) {
+        const pct  = Math.min(100, Math.max(0, t.rsi_14));
+        const fill = pal ? `background:${pal.fill}` : '';
+        extra = `<div class="rsi-bar-wrap"><div class="rsi-bar-fill" style="width:${pct}%;${fill}"></div></div>`;
+      }
+      return { label: 'RSI 14', value, extra, note };
+    }
+    if (ind === 'vwap') {
+      let extra = '';
+      if (t.last_price != null && t.vwap_20 != null && t.vwap_20 !== 0) {
+        const delta = (t.last_price - t.vwap_20) / t.vwap_20 * 100;
+        extra = `<div class="vwap-delta" style="${col}">${delta >= 0 ? '+' : ''}${delta.toFixed(2)}% vs VWAP</div>`;
+      }
+      return { label: 'VWAP 20', value: t.vwap_20 != null ? fmtPrice(t.vwap_20) : '—', extra, note };
+    }
+    let extra = '';
+    if (t.sma_50 != null && t.sma_200 != null && t.sma_200 !== 0) {
+      const spread = (t.sma_50 - t.sma_200) / t.sma_200 * 100;
+      extra = `<div class="vwap-delta" style="${col}">${spread >= 0 ? '+' : ''}${spread.toFixed(2)}% 50/200 spread</div>`;
+    }
+    const value = t.sma_50 != null && t.sma_200 != null
+      ? `${fmtPrice(t.sma_50)} / ${fmtPrice(t.sma_200)}` : '—';
+    return { label: 'SMA 50 / 200', value, extra, note };
+  }
+
   // ── Render ───────────────────────────────────────────────────────────────────
   function renderGrid() {
     const query = document.getElementById('search-input').value.trim().toUpperCase();
@@ -613,8 +685,9 @@
     const [buyR, buyG, buyB]    = rdylgn(0.85);
     const [sellR, sellG, sellB] = rdylgn(0.10);
     const [midR, midG, midB]    = rdylgn(0.50);
-    const positiveLabel = activeIndicator === 'trend' ? 'bullish' : 'buy';
-    const negativeLabel = activeIndicator === 'trend' ? 'bearish' : 'sell';
+    const onlyTrend = activeIndicators.size === 1 && activeIndicator() === 'trend';
+    const positiveLabel = onlyTrend ? 'bullish' : 'buy';
+    const negativeLabel = onlyTrend ? 'bearish' : 'sell';
     document.getElementById('stats-bar').innerHTML = `
       <div class="stat"><strong>${tickers.length}</strong> shown</div>
       <div class="stat"><strong style="color:rgb(${buyR},${buyG},${buyB})">${buyN}</strong> ${positiveLabel}</div>
@@ -651,44 +724,27 @@
 
       const price = t.last_price != null ? fmtPrice(t.last_price) : '—';
 
-      let indLabel = '', indValue = '', extraHtml = '';
-      if (activeIndicator === 'rsi') {
-        indLabel = 'RSI 14';
-        indValue = t.rsi_14 != null ? t.rsi_14.toFixed(1) : '—';
-        if (t.rsi_14 != null) {
-          const pct  = Math.min(100, Math.max(0, t.rsi_14));
-          const fill = pal ? `background:${pal.fill}` : '';
-          extraHtml = `<div class="rsi-bar-wrap">
-            <div class="rsi-bar-fill" style="width:${pct}%;${fill}"></div>
-          </div>`;
-        }
-      } else if (activeIndicator === 'vwap') {
-        indLabel = 'VWAP 20';
-        indValue = t.vwap_20 != null ? fmtPrice(t.vwap_20) : '—';
-        if (t.last_price != null && t.vwap_20 != null && t.vwap_20 !== 0) {
-          const delta = (t.last_price - t.vwap_20) / t.vwap_20 * 100;
-          const sign  = delta >= 0 ? '+' : '';
-          const col   = pal ? `color:${pal.fg}` : '';
-          extraHtml = `<div class="vwap-delta" style="${col}">${sign}${delta.toFixed(2)}% vs VWAP</div>`;
-        }
-      } else {
-        indLabel = 'SMA 50 / 200';
-        indValue = t.sma_50 != null && t.sma_200 != null
-          ? `${fmtPrice(t.sma_50)} / ${fmtPrice(t.sma_200)}` : '—';
-        if (t.sma_50 != null && t.sma_200 != null && t.sma_200 !== 0) {
-          const spread = (t.sma_50 - t.sma_200) / t.sma_200 * 100;
-          const sign = spread >= 0 ? '+' : '';
-          const col = pal ? `color:${pal.fg}` : '';
-          extraHtml = `<div class="vwap-delta" style="${col}">${sign}${spread.toFixed(2)}% 50/200 spread</div>`;
-        }
-      }
+      const joint = jointT(t, [...activeIndicators]);
+      const many = activeIndicators.size > 1;
+      const blocks = [...activeIndicators].map(ind => indicatorBlock(t, ind, pal, many));
+      const indLabel = many ? 'Joint buy probability' : blocks[0].label;
+      const indValue = many
+        ? (joint ? `${Math.round(joint.t * 100)}%` : '—')
+        : blocks[0].value;
+      const extraHtml = many
+        ? blocks.map(x => `<div class="vwap-delta ind-row"><span>${x.label}</span><span>${x.value}${x.note ? ' · ' + x.note : ''}</span></div>`).join('')
+          + (joint && joint.used < activeIndicators.size
+            ? `<div class="vwap-delta">${joint.used} of ${activeIndicators.size} signals available</div>` : '')
+        : blocks[0].extra;
 
       // Badge label
       let badge = '—';
       if (t._t !== null) {
-        if (activeIndicator === 'rsi') {
+        if (many) {
+          badge = t._t > 0.6 ? 'Buy' : t._t < 0.4 ? 'Sell' : 'Neutral';
+        } else if (activeIndicator() === 'rsi') {
           badge = t._t > 0.7 ? 'Oversold' : t._t < 0.3 ? 'Overbought' : 'Neutral';
-        } else if (activeIndicator === 'vwap') {
+        } else if (activeIndicator() === 'vwap') {
           badge = t._t > 0.55 ? 'Below' : t._t < 0.45 ? 'Above' : 'At VWAP';
         } else {
           badge = t.long_term_trend === 'bullish' ? 'Bullish'
