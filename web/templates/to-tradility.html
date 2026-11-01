@@ -1465,12 +1465,10 @@
         <input name="quantity" type="number" step="any" min="0" placeholder="Qty" aria-label="Quantity" required>
         <input name="price" type="number" step="any" min="0" placeholder="Limit price" aria-label="Limit price">
         ${isCrypto() ? '' : `<select name="tif" aria-label="Duration">
-          <option value="gtc" ${((tradeStatus.defaults || {}).time_in_force || 'gtc') === 'gtc' ? 'selected' : ''}>GTC</option>
-          <option value="day" ${((tradeStatus.defaults || {}).time_in_force) === 'day' ? 'selected' : ''}>Day</option>
+          ${TIF_CHOICES.map(([v, label]) => `<option value="${v}" ${((tradeStatus.defaults || {}).time_in_force || 'gtc') === v ? 'selected' : ''}>${label}</option>`).join('')}
         </select>
         <select name="session" aria-label="Trading hours">
-          <option value="normal" ${((tradeStatus.defaults || {}).session || 'normal') === 'normal' ? 'selected' : ''}>Regular hours</option>
-          <option value="extended" ${((tradeStatus.defaults || {}).session) === 'extended' ? 'selected' : ''}>Extended hours</option>
+          ${SESSION_CHOICES.map(([v, label]) => `<option value="${v}" ${((tradeStatus.defaults || {}).session || 'normal') === v ? 'selected' : ''}>${label}</option>`).join('')}
         </select>`}
         <button type="submit" class="primary">Preview</button>
       </form>
@@ -1491,6 +1489,34 @@
       <button type="button" class="primary" id="trade-go">Send order</button>
       <button type="button" id="trade-discard">Discard</button>
     </div>`;
+  }
+
+  // Schwab's durations and sessions. Day, GTC and the extended session are the familiar
+  // DAY, DAY EXT, GTC and GTC EXT; the rest are checked here and again by the service.
+  const TIF_CHOICES = [['day', 'Day'], ['gtc', 'GTC'], ['fok', 'Fill or kill'], ['ioc', 'Immediate or cancel'],
+                       ['end_of_week', 'End of week'], ['end_of_month', 'End of month'], ['next_end_of_month', 'Next end of month']];
+  const SESSION_CHOICES = [['normal', 'Regular hours'], ['extended', 'Extended (pre + regular + after)'],
+                           ['am', 'Pre-market only'], ['pm', 'After-hours only']];
+  const TIF_LABEL = Object.fromEntries(TIF_CHOICES);
+  const HOURS_LABEL = {normal: '', extended: ', extended hours', am: ', pre-market only', pm: ', after-hours only'};
+
+  // Keep the choices to ones Schwab accepts: a market order is a regular-hours day / FOK / IOC order,
+  // and extended, pre-market and after-hours orders are limit orders that are day or GTC.
+  function syncOrderChoices(form) {
+    const kind = form.elements.kind.value, tif = form.elements.tif, session = form.elements.session;
+    if (!tif || !session) return;
+    if (kind === 'market') {
+      session.value = 'normal';
+      if (!['day', 'fok', 'ioc'].includes(tif.value)) tif.value = 'day';
+    } else if (session.value !== 'normal' && !['day', 'gtc'].includes(tif.value)) {
+      tif.value = 'gtc';
+    }
+    for (const option of tif.options) {
+      const restricted = (kind === 'market' && !['day', 'fok', 'ioc'].includes(option.value))
+        || (session.value !== 'normal' && !['day', 'gtc'].includes(option.value));
+      option.disabled = restricted;
+    }
+    for (const option of session.options) option.disabled = kind === 'market' && option.value !== 'normal';
   }
 
   function isCrypto() {
@@ -1551,7 +1577,7 @@
       const o = pv.order;
       tradeStep = {
         kind: 'place', previewId: pv.preview_id, phrase: pv.phrase, warnings: pv.warnings,
-        summary: `${esc(o.side)} ${esc(String(o.quantity))} ${esc(o.ticker)} ${o.kind === 'limit' ? 'at ' + fmtPrice(o.price) + (o.tif === 'day' ? ' (day' : ' (good till cancelled') + (o.session === 'extended' ? ', extended hours)' : ')') : 'at market'} on ${esc(pv.broker)}${o.account ? ' account …' + esc(o.account) : ''}, about ${fmtPrice(pv.notional)} (last price ${fmtPrice(pv.last_price)})`,
+        summary: `${esc(o.side)} ${esc(String(o.quantity))} ${esc(o.ticker)} ${o.kind === 'limit' ? 'at ' + fmtPrice(o.price) + ' (' + (TIF_LABEL[o.tif] || o.tif) + (HOURS_LABEL[o.session] || '') + ')' : 'at market'} on ${esc(pv.broker)}${o.account ? ' account …' + esc(o.account) : ''}, about ${fmtPrice(pv.notional)} (last price ${fmtPrice(pv.last_price)})`,
       };
     } catch (err) {
       tradeStep = null;
@@ -1644,6 +1670,11 @@
     if (tradeForm) {
       tradeForm.addEventListener('submit', event => { event.preventDefault(); startPreview(tradeForm); });
       tradeForm.elements.side.addEventListener('change', fillDefaults);
+      if (tradeForm.elements.session) {
+        tradeForm.elements.session.addEventListener('change', () => syncOrderChoices(tradeForm));
+        tradeForm.elements.tif.addEventListener('change', () => syncOrderChoices(tradeForm));
+        syncOrderChoices(tradeForm);
+      }
       if (tradeForm.elements.account) tradeForm.elements.account.addEventListener('change', async () => {
         if (!accountsData) await loadAccounts();
         showAccountFunds();
@@ -1651,8 +1682,7 @@
       if (isCrypto()) (accountsData ? Promise.resolve() : loadAccounts()).then(showAccountFunds);
       tradeForm.elements.kind.addEventListener('change', () => {
         tradeForm.elements.price.disabled = tradeForm.elements.kind.value === 'market';
-        // extended hours take limit orders only; a market order trades in regular hours
-        if (tradeForm.elements.session && tradeForm.elements.kind.value === 'market') tradeForm.elements.session.value = 'normal';
+        syncOrderChoices(tradeForm);
         fillDefaults();
       });
       if (tradeQuote && tradeQuote.ticker === detailTicker) fillDefaults();
