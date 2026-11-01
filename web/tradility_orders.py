@@ -158,49 +158,69 @@ def _holding_matches(ticker: str, holding_ticker: str) -> bool:
     return held == ticker or f"{held}-USD" == ticker or held == ticker.removesuffix("-USD")
 
 
-def position_from_holdings(ticker: str, holdings: list[Any]) -> dict[str, Any] | None:
-    """Quantity and average entry for *ticker*, or None when it is not held."""
-    quantity = cost = 0.0
-    held = priced = False
+def _lots(ticker: str, holdings: list[Any]) -> list[dict[str, Any]]:
+    """Each account's lot of *ticker* in the holdings export: institution, quantity, cost basis or None.
+
+    A holding row with no per-account detail counts as one lot of its totals."""
+    lots = []
     for holding in holdings:
         if not isinstance(holding, dict) or not _holding_matches(ticker, holding.get("ticker", "")):
             continue
-        try:
-            qty = float(holding.get("total_quantity"))
-        except (TypeError, ValueError):
-            continue
-        if not math.isfinite(qty) or qty <= 0:
-            continue
-        held = True
-        quantity += qty
-        try:
-            basis = float(holding.get("total_cost_basis"))
-        except (TypeError, ValueError):
-            continue
-        if math.isfinite(basis) and basis > 0:
-            priced = True
-            cost += basis
-    if not held:
+        accounts = holding.get("accounts") or [
+            {
+                "institution": "",
+                "quantity": holding.get("total_quantity"),
+                "cost_basis": holding.get("total_cost_basis"),
+            }
+        ]
+        for acct in accounts:
+            try:
+                qty = float(acct.get("quantity"))
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(qty) or qty <= 0:
+                continue
+            try:
+                basis = float(acct.get("cost_basis"))
+            except (TypeError, ValueError):
+                basis = None
+            if basis is not None and (not math.isfinite(basis) or basis <= 0):
+                basis = None
+            lots.append({"inst": str(acct.get("institution", "")), "qty": qty, "cost": basis})
+    return lots
+
+
+def position_from_holdings(
+    ticker: str, holdings: list[Any], live: list[dict[str, Any]] | None = None
+) -> dict[str, Any] | None:
+    """Quantity and average entry for *ticker* across every account, or None when it is not held.
+
+    The average is the cost of the lots whose cost is known divided by the shares in those lots.
+    Dividing by every share would understate it whenever some account reports no cost basis (the
+    statement for one account often has none), so the position says how many shares the average
+    covers. *live* is the trader service's per-account rows: when it answers, Schwab's current
+    quantity and its own average price replace the export's Schwab lots (which are statements)."""
+    lots = _lots(ticker, holdings)
+    if live is not None:
+        lots = [lot for lot in lots if lot["inst"] != "cs"]
+        for row in live:
+            qty = row.get("quantity") or 0
+            if row.get("broker") != "schwab" or qty <= 0:
+                continue
+            average = row.get("average_price")
+            lots.append({"inst": "cs", "qty": qty, "cost": average * qty if average else None})
+    if not lots:
         return None
-    # A partial cost basis would understate the average, so use it only when every lot has one.
-    complete = priced and all(
-        _basis_known(h) for h in holdings if _holding_matches(ticker, h.get("ticker", ""))
-    )
+    quantity = sum(lot["qty"] for lot in lots)
+    known = [lot for lot in lots if lot["cost"]]
+    covered = sum(lot["qty"] for lot in known)
     return {
         "quantity": quantity,
-        "avg_entry": cost / quantity if complete and quantity else None,
-        "source": "holdings",
+        "avg_entry": sum(lot["cost"] for lot in known) / covered if covered else None,
+        "covered_quantity": covered,
+        "partial": 0 < covered < quantity - 1e-9,
+        "source": "live+holdings" if live is not None else "holdings",
     }
-
-
-def _basis_known(holding: dict[str, Any]) -> bool:
-    try:
-        return (
-            math.isfinite(float(holding.get("total_cost_basis")))
-            and float(holding.get("total_cost_basis")) > 0
-        )
-    except (TypeError, ValueError):
-        return False
 
 
 def entry_from_orders(orders: list[dict[str, Any]]) -> float | None:
@@ -217,10 +237,11 @@ def summary(
     orders: dict[str, list[dict[str, Any]]],
     holdings: list[Any],
     export: dict[str, Any] | None = None,
+    live: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     mine = orders.get(ticker, [])
     synced = synced_for(ticker, export or {})
-    position = position_from_holdings(ticker, holdings) or {
+    position = position_from_holdings(ticker, holdings, live) or {
         "quantity": None,
         "avg_entry": None,
         "source": None,
@@ -246,6 +267,13 @@ def summary(
     }
 
 
+def _live_rows(ticker: str) -> list[dict[str, Any]] | None:
+    """Per-account holdings of *ticker* from the trader service, or None when it is not running."""
+    code, payload = call_trader("GET", f"/holdings/{ticker}")
+    rows = payload.get("accounts") if code == 200 and payload.get("ok") else None
+    return rows if isinstance(rows, list) else None
+
+
 def _holdings_list() -> list[Any]:
     try:
         payload = json.loads(holdings_file().read_text(encoding="utf-8"))
@@ -266,7 +294,7 @@ def _ticker(value: str) -> str:
 def get_orders(ticker: str):
     ticker = _ticker(ticker)
     with _LOCK:
-        return jsonify(summary(ticker, load(), _holdings_list(), load_export()))
+        return jsonify(summary(ticker, load(), _holdings_list(), load_export(), _live_rows(ticker)))
 
 
 @bp.post("/api/tradility-orders/<path:ticker>")
@@ -283,7 +311,10 @@ def add_order(ticker: str):
             return jsonify({"ok": False, "error": "too many orders for this ticker"}), 400
         mine.append({"id": secrets.token_hex(6), **order})
         save(orders)
-        return jsonify(summary(ticker, orders, _holdings_list(), load_export())), 201
+        return (
+            jsonify(summary(ticker, orders, _holdings_list(), load_export(), _live_rows(ticker))),
+            201,
+        )
 
 
 @bp.put("/api/tradility-orders/<ticker>/<order_id>")
@@ -299,7 +330,9 @@ def update_order(ticker: str, order_id: str):
             if existing.get("id") == order_id:
                 orders[ticker][index] = {"id": order_id, **order}
                 save(orders)
-                return jsonify(summary(ticker, orders, _holdings_list(), load_export()))
+                return jsonify(
+                    summary(ticker, orders, _holdings_list(), load_export(), _live_rows(ticker))
+                )
     return jsonify({"ok": False, "error": "order not found"}), 404
 
 
@@ -317,7 +350,7 @@ def delete_order(ticker: str, order_id: str):
         else:
             orders.pop(ticker)
         save(orders)
-        return jsonify(summary(ticker, orders, _holdings_list(), load_export()))
+        return jsonify(summary(ticker, orders, _holdings_list(), load_export(), _live_rows(ticker)))
 
 
 # -- placing orders -----------------------------------------------------------------------------
