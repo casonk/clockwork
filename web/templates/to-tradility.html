@@ -229,6 +229,12 @@
     .detail-ticker { font: 800 24px var(--mono); letter-spacing: 0.6px; }
     .detail-name { color: var(--muted-fg); font-size: 12px; }
     .detail-price { font-size: 22px; font-weight: 750; white-space: nowrap; }
+    .trade-box { border: 1px solid var(--border); border-radius: 9px; padding: 10px; margin-top: 10px; }
+    .trade-box h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted-fg); }
+    .trade-box .trade-warn { color: var(--red); font-size: 11px; }
+    .trade-box input[type=text] { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; font-size: 12px; width: 150px; }
+    .trade-box button { border: 1px solid var(--border); background: var(--surface2); color: var(--text); border-radius: 6px; padding: 3px 9px; cursor: pointer; font-size: 11px; margin-right: 4px; }
+    .trade-box button.primary { border-color: var(--accent); color: var(--accent); }
     .orders-sync { color: var(--muted-fg); font-size: 11px; margin: 4px 0 8px; }
     .orders-summary { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-bottom: 10px; font-size: 12px; }
     .orders-summary span { color: var(--muted-fg); }
@@ -545,6 +551,8 @@
   })();
   let detailTrigger   = null;
   let detailTicker    = null;
+  let tradeStatus     = null;   // {available, enabled, tickers, per_order_usd, ...} from the trader service
+  let tradeStep       = null;   // the preview or cancel awaiting its typed confirmation
   let detailOrders    = null;   // {position, orders} for the open card, from /api/tradility-orders
   let shownOrder      = [];   // tickers with details, in the order the grid shows them
 
@@ -846,6 +854,7 @@
     paintDetailSteps();
     detailRecord = null;
     detailOrders = null;
+    tradeStep = null;
     const overlay = document.getElementById('detail-overlay');
     overlay.hidden = false;
     document.body.classList.add('detail-open');
@@ -1077,8 +1086,18 @@
       if (box) box.innerHTML = `<div class="error-card">Could not load orders: ${esc(err.message)}</div>`;
       return;
     }
+    await loadTradeStatus();
     renderOrders();
     drawDetailChart();
+  }
+
+  async function loadTradeStatus() {
+    try {
+      const res = await fetch('/api/tradility-trade/status');
+      tradeStatus = await res.json();
+    } catch (err) {
+      tradeStatus = {available: false, enabled: false};
+    }
   }
 
   async function sendOrder(method, path, body) {
@@ -1134,6 +1153,110 @@
       + (failed.length ? ` · not available: ${failed.join(', ')}` : '');
   }
 
+  // ── Placing orders (preview, then a typed confirmation) ─────────────────────
+  function canTrade() {
+    return !!(tradeStatus && tradeStatus.available && tradeStatus.enabled
+              && (tradeStatus.tickers || []).includes(detailTicker));
+  }
+
+  function money(v) {
+    return '$' + Number(v || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  }
+
+  function tradeSection() {
+    if (!tradeStatus || !tradeStatus.available) return '';
+    if (!tradeStatus.enabled) return '<div class="orders-sync">Order placement is turned off in the trading policy.</div>';
+    if (!canTrade()) return `<div class="orders-sync">${esc(detailTicker)} is not on the trading allowlist.</div>`;
+    const limits = `up to ${money(tradeStatus.per_order_usd)} per order, ${money(tradeStatus.daily_usd)} a day (${money(tradeStatus.spent_today)} used)`;
+    return `<div class="trade-box" id="trade-box">
+      <h4>Place an order · ${limits}</h4>
+      <form class="order-form" id="trade-form" autocomplete="off">
+        <select name="side" aria-label="Side"><option>buy</option><option>sell</option></select>
+        <select name="kind" aria-label="Order type"><option>limit</option><option>market</option></select>
+        <input name="quantity" type="number" step="any" min="0" placeholder="Qty" aria-label="Quantity" required>
+        <input name="price" type="number" step="any" min="0" placeholder="Limit price" aria-label="Limit price">
+        <button type="submit" class="primary">Preview</button>
+      </form>
+      <div id="trade-confirm">${tradeStep ? confirmPanel() : ''}</div>
+      <div class="order-error" id="trade-error" role="alert"></div>
+    </div>`;
+  }
+
+  function confirmPanel() {
+    const st = tradeStep;
+    return `<div>
+      <p>${st.summary}</p>
+      ${(st.warnings || []).map(w => `<div class="trade-warn">${esc(w)}</div>`).join('')}
+      <p>Type <strong>${esc(st.phrase)}</strong> to confirm. ${st.kind === 'cancel' ? 'This cancels a real order.' : 'This sends a real order.'}</p>
+      <input type="text" id="trade-phrase" autocomplete="off" aria-label="Confirmation phrase">
+      <button type="button" class="primary" id="trade-go">Send order</button>
+      <button type="button" id="trade-discard">Discard</button>
+    </div>`;
+  }
+
+  function tradeFail(message) {
+    const box = document.getElementById('trade-error');
+    if (box) box.textContent = message;
+  }
+
+  async function tradeCall(action, body) {
+    const res = await fetch(`/api/tradility-trade/${action}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  }
+
+  async function startPreview(form) {
+    tradeFail('');
+    const f = Object.fromEntries(new FormData(form).entries());
+    try {
+      const pv = await tradeCall('preview', {ticker: detailTicker, side: f.side, kind: f.kind, quantity: f.quantity, price: f.kind === 'limit' ? f.price : null});
+      const o = pv.order;
+      tradeStep = {
+        kind: 'place', previewId: pv.preview_id, phrase: pv.phrase, warnings: pv.warnings,
+        summary: `${esc(o.side)} ${esc(String(o.quantity))} ${esc(o.ticker)} ${o.kind === 'limit' ? 'at ' + fmtPrice(o.price) : 'at market'} on ${esc(pv.broker)}, about ${fmtPrice(pv.notional)} (last price ${fmtPrice(pv.last_price)})`,
+      };
+    } catch (err) {
+      tradeStep = null;
+      renderOrders();
+      tradeFail(err.message);
+      return;
+    }
+    renderOrders();
+  }
+
+  function startBrokerCancel(id) {
+    const order = detailOrders.orders.find(o => o.id === id);
+    if (!order) return;
+    const brokerId = id.replace(/^[a-z]+-/, '');
+    tradeStep = {
+      kind: 'cancel', broker: order.source, orderId: brokerId, phrase: `CANCEL ${brokerId}`, warnings: [],
+      symbol: order.source === 'binance' ? detailTicker.replace(/-USD$/, '') + 'USD' : '',
+      summary: `Cancel the open ${esc(order.side)} ${esc(String(order.quantity))} ${esc(detailTicker)} order at ${esc(sourceLabel(order.source))}`,
+    };
+    renderOrders();
+  }
+
+  async function sendStep() {
+    const st = tradeStep;
+    const phrase = document.getElementById('trade-phrase').value;
+    tradeStep = null;   // a preview is single use; start over after any outcome
+    try {
+      if (st.kind === 'place') await tradeCall('confirm', {preview_id: st.previewId, phrase});
+      else await tradeCall('cancel', {broker: st.broker, order_id: st.orderId, symbol: st.symbol, phrase});
+    } catch (err) {
+      renderOrders();
+      tradeFail(err.message);
+      return;
+    }
+    await loadOrders(detailTicker);   // the broker's export refreshes on its own schedule
+    tradeFail('Sent. Broker orders appear here after the next sync.');
+  }
+
   function renderOrders() {
     const box = document.getElementById('detail-orders');
     if (!box || !detailOrders) return;
@@ -1154,7 +1277,7 @@
         <td>${esc(sourceLabel(o.source))}</td>
         <td class="order-actions">
           ${o.source && o.source !== 'manual' ? '' : o.status === 'open' && o.price != null ? `<button type="button" data-order-act="fill" data-id="${esc(o.id)}">Filled</button>` : ''}
-          ${o.source && o.source !== 'manual' ? '' : o.status === 'open' ? `<button type="button" data-order-act="cancel" data-id="${esc(o.id)}">Cancel</button>` : ''}
+          ${o.source && o.source !== 'manual' ? (o.status === 'open' && canTrade() ? `<button type="button" data-order-act="broker-cancel" data-id="${esc(o.id)}">Cancel at broker</button>` : '') : o.status === 'open' ? `<button type="button" data-order-act="cancel" data-id="${esc(o.id)}">Cancel</button>` : ''}
           ${o.source && o.source !== 'manual' ? '' : `<button type="button" data-order-act="delete" data-id="${esc(o.id)}" aria-label="Delete order">×</button>`}
         </td>
       </tr>`).join('');
@@ -1166,6 +1289,7 @@
       </div>
       ${rows ? `<table class="orders-table"><thead><tr><th>Date</th><th>Side</th><th>Type</th><th class="num">Qty</th><th class="num">Price</th><th>Status</th><th>Note</th><th>Source</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
              : '<p class="company-description">No orders recorded for this ticker.</p>'}
+      ${tradeSection()}
       <div class="orders-sync">${syncNote()}</div>
       <form class="order-form" id="order-form" autocomplete="off">
         <select name="side" aria-label="Side"><option>buy</option><option>sell</option></select>
@@ -1183,9 +1307,16 @@
       const f = new FormData(event.target);
       submitOrder(() => sendOrder('POST', orderPath(), Object.fromEntries(f.entries())));
     });
+    const tradeForm = box.querySelector('#trade-form');
+    if (tradeForm) tradeForm.addEventListener('submit', event => { event.preventDefault(); startPreview(tradeForm); });
+    const go = box.querySelector('#trade-go');
+    if (go) go.addEventListener('click', sendStep);
+    const discard = box.querySelector('#trade-discard');
+    if (discard) discard.addEventListener('click', () => { tradeStep = null; renderOrders(); });
     box.querySelectorAll('[data-order-act]').forEach(button => button.addEventListener('click', () => {
       const id = button.dataset.id, act = button.dataset.orderAct;
       if (act === 'delete') submitOrder(() => sendOrder('DELETE', orderPath(id)));
+      else if (act === 'broker-cancel') startBrokerCancel(id);
       else if (act === 'cancel') changeOrder(id, {status: 'cancelled'});
       else changeOrder(id, {status: 'filled', date: new Date().toISOString().slice(0, 10)});
     }));
