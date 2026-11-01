@@ -253,6 +253,13 @@
     .template-chips button.buy { border-color: color-mix(in srgb, var(--green) 60%, var(--border)); }
     .template-chips button.sell { border-color: color-mix(in srgb, var(--red) 60%, var(--border)); }
     .template-chips button.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+    .card-target { font-size: 10px; margin-top: 3px; color: var(--muted-fg); }
+    .card-target.under { color: var(--accent); }
+    .card-target.over { color: var(--red); }
+    .target-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+    .target-form input, .target-form select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; font-size: 11px; max-width: 130px; }
+    .target-form button { border: 1px solid var(--border); background: var(--surface2); color: var(--text); border-radius: 6px; padding: 3px 9px; cursor: pointer; font-size: 11px; }
+    #detail-target-card { order: 3; }
     .orders-sync { color: var(--muted-fg); font-size: 11px; margin: 4px 0 8px; }
     .orders-summary { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-bottom: 10px; font-size: 12px; }
     .orders-summary span { color: var(--muted-fg); }
@@ -369,6 +376,7 @@
     <option value="value-desc">Sort: value ↓ (sell first)</option>
     <option value="ticker">Sort: ticker A–Z</option>
     <option value="price-desc">Sort: price ↓</option>
+    <option value="target-gap">Sort: furthest below target</option>
   </select>
 
   <button class="refresh-btn" id="refresh-btn" onclick="runRefresh()">
@@ -571,6 +579,7 @@
   })();
   let detailTrigger   = null;
   let detailTicker    = null;
+  let targetsData     = null;   // To Invest targets and current allocations, by ticker
   let tradeStatus     = null;   // {available, enabled, tickers, per_order_usd, ...} from the trader service
   let tradeStep       = null;   // the preview or cancel awaiting its typed confirmation
   let detailOrders    = null;   // {position, orders} for the open card, from /api/tradility-orders
@@ -618,6 +627,40 @@
   }
 
   // ── Data load ────────────────────────────────────────────────────────────────
+  // ── To Invest targets ────────────────────────────────────────────────────────
+  async function loadTargets() {
+    try {
+      const res = await fetch('/api/tradility-targets', {cache: 'no-store'});
+      const data = await res.json();
+      if (res.ok && data.ok) targetsData = data;
+    } catch (err) {
+      /* targets are an extra; the cards work without them */
+    }
+  }
+
+  function targetFor(ticker) {
+    return (targetsData && targetsData.targets && targetsData.targets[ticker]) || null;
+  }
+
+  // How far below its To Invest target a holding is, in percentage points (negative: above it).
+  function targetGap(ticker) {
+    const r = targetFor(ticker);
+    return r && r.target != null ? r.target - (r.current || 0) : null;
+  }
+
+  function pctPlain(v) {
+    return v == null ? '—' : Number(v).toFixed(2) + '%';
+  }
+
+  function targetChip(ticker) {
+    const r = targetFor(ticker);
+    if (!r || r.target == null) return '';
+    const gap = targetGap(ticker);
+    const kind = gap > 0.05 ? 'under' : gap < -0.05 ? 'over' : 'on';
+    const now = r.current == null ? 'not held' : `now ${pctPlain(r.current)}`;
+    return `<div class="card-target ${kind}" title="To Invest: ${esc(r.category)}">Target ${pctPlain(r.target)} · ${now}</div>`;
+  }
+
   async function loadData({followActiveRefresh = true} = {}) {
     let data = null;
     try {
@@ -625,6 +668,7 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       data = await res.json();
       if (!data.ok) throw new Error(data.error || 'Unknown error');
+      await loadTargets();
       applyAnalysisData(data);
       if (followActiveRefresh && data.refresh && data.refresh.active) {
         void watchRefresh(artifactVersion, true);
@@ -823,6 +867,11 @@
     tickers.sort((a, b) => {
       if (sort === 'ticker')      return a.ticker.localeCompare(b.ticker);
       if (sort === 'price-desc')  return (b.last_price ?? 0) - (a.last_price ?? 0);
+      if (sort === 'target-gap') {
+        const ga = targetGap(a.ticker), gb = targetGap(b.ticker);   // largest shortfall first; no target last
+        if (ga === null || gb === null) return (ga === null) - (gb === null) || a.ticker.localeCompare(b.ticker);
+        return gb - ga || a.ticker.localeCompare(b.ticker);
+      }
       if (sort === 'value-desc')  return (a._t ?? -1) - (b._t ?? -1); // low t (sell) first
       // value-asc: high t (buy/green) first; nulls last
       const at = a._t ?? -1, bt = b._t ?? -1;
@@ -922,6 +971,7 @@
         <div class="card-ticker" style="${tickFg}">${esc(t.ticker)}</div>
         <div class="card-asset">${esc(t.asset_class || '')}${t.name ? ' · ' + esc(t.name) : ''}</div>
         <div class="card-price">${price}</div>
+        ${targetChip(t.ticker)}
         <div class="card-indicator">
           <span class="card-ind-label">${indLabel}</span>
           <span class="card-ind-value" style="${indValFg}">${indValue}</span>
@@ -982,6 +1032,7 @@
       detailRecord = data.ticker;
       renderTickerDetail(data);
       loadOrders(ticker);
+      bindTargetForm();
     } catch (err) {
       if (detailTicker !== ticker) return;
       document.getElementById('detail-content').innerHTML =
@@ -1094,6 +1145,10 @@
               ${website ? `<a class="company-link" href="${esc(website)}" target="_blank" rel="noopener noreferrer">Company website ↗</a>` : ''}
               ${yahooUrl(t.ticker) ? `<a class="company-link" href="${esc(yahooUrl(t.ticker))}" target="_blank" rel="noopener noreferrer">Yahoo Finance ↗</a>` : ''}
             </div>
+          </section>
+          <section class="detail-card" id="detail-target-card">
+            <div class="detail-card-title">To Invest target</div>
+            <div id="detail-target">${targetCardHtml(t.ticker, t.asset_class)}</div>
           </section>
           <section class="detail-card" id="detail-orders-card">
             <div class="detail-card-title">Position and orders</div>
@@ -1266,6 +1321,62 @@
     }
     const box = document.getElementById('held-box');
     if (box) box.innerHTML = heldBox();
+  }
+
+  function targetCardHtml(ticker, assetClass) {
+    const r = targetFor(ticker);
+    const cats = (targetsData && targetsData.categories) || [];
+    if (!targetsData) return '<div class="orders-sync">To Invest is not available right now.</div>';
+    if (!r) {
+      const guess = /crypto/i.test(assetClass || '') ? 'Crypto' : /etf|fund/i.test(assetClass || '') ? 'ETFs' : 'Stocks';
+      return `<p class="company-description">${esc(ticker)} is not in your To Invest list.</p>
+        <form class="target-form" id="target-form" data-add="1" autocomplete="off">
+          <select name="category" aria-label="Category">${cats.map(c => `<option ${c === guess ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+          <input name="target_pct" type="number" step="any" min="0" max="100" placeholder="Target % (optional)" aria-label="Target percent">
+          <button type="submit">Add to To Invest</button>
+        </form><div class="order-error" id="target-error" role="alert"></div>`;
+    }
+    const gap = targetGap(ticker), room = gap != null && targetsData.portfolio_value ? gap / 100 * targetsData.portfolio_value : null;
+    const basket = r.mode === 'basket' && r.basket_pct != null && r.target_input != null
+      ? ` <span class="orders-sync">(${esc(String(r.target_input))}% of the ${esc(r.category)} basket, which is ${esc(String(r.basket_pct))}% of the portfolio)</span>` : '';
+    return `<div class="orders-summary">
+        <span>Category<strong>${esc(r.category)}</strong></span>
+        <span>Target<strong>${pctPlain(r.target)}</strong>${basket}</span>
+        <span>Now<strong>${r.current == null ? 'not held' : pctPlain(r.current)}</strong></span>
+        <span>${gap == null ? '' : gap > 0.05 ? 'Below target by' : gap < -0.05 ? 'Above target by' : 'At target'}<strong class="${gap > 0.05 ? 'ret-pos' : gap < -0.05 ? 'ret-neg' : ''}">${gap == null || Math.abs(gap) <= 0.05 ? '' : pctPlain(Math.abs(gap))}${room == null || Math.abs(gap) <= 0.05 ? '' : ' ≈ ' + money(Math.abs(room))}</strong></span>
+      </div>
+      <form class="target-form" id="target-form" autocomplete="off">
+        <input name="target_pct" type="number" step="any" min="0" max="100" value="${r.target_input == null ? '' : esc(String(r.target_input))}" aria-label="Target percent" placeholder="Target %">
+        <span class="orders-sync">${r.mode === 'basket' ? 'of the ' + esc(r.category) + ' basket' : 'of the portfolio'}</span>
+        <button type="submit">Save target</button> <a class="company-link" href="/to-invest">Open To Invest ↗</a>
+      </form><div class="order-error" id="target-error" role="alert"></div>`;
+  }
+
+  async function saveTarget(form) {
+    const f = Object.fromEntries(new FormData(form).entries());
+    try {
+      const res = await fetch(`/api/tradility-targets/${encodeURIComponent(detailTicker)}`, {
+        method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
+        body: JSON.stringify({target_pct: f.target_pct || '', category: f.category || ''}),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    } catch (err) {
+      document.getElementById('target-error').textContent = err.message;
+      return;
+    }
+    await loadTargets();
+    const box = document.getElementById('detail-target');
+    if (box) {
+      box.innerHTML = targetCardHtml(detailTicker, detailRecord && detailRecord.asset_class);
+      bindTargetForm();
+    }
+    renderGrid();
+  }
+
+  function bindTargetForm() {
+    const form = document.getElementById('target-form');
+    if (form) form.addEventListener('submit', event => { event.preventDefault(); saveTarget(form); });
   }
 
   function sourceLabel(source) {
@@ -1559,6 +1670,19 @@
     return `<table class="orders-table impact-table"><thead><tr><th>Where you hold ${esc(symbol)}</th><th class="num">Shares</th><th class="num">Value</th><th class="num">Share of account</th></tr></thead><tbody>${body}</tbody></table>`;
   }
 
+  // Against the To Invest target: where this order leaves the holding as a share of everything.
+  function targetPreviewLine(im) {
+    const r = targetFor(detailTicker);
+    if (!r || r.target == null) return '';
+    const basis = im.everything || im.overall;
+    const after = basis && basis.percent ? basis.percent.after : null;
+    const before = basis && basis.percent ? basis.percent.before : null;
+    if (after == null) return '';
+    const gap = r.target - after;
+    const verdict = gap > 0.05 ? `still ${pctPlain(gap)} below` : gap < -0.05 ? `${pctPlain(-gap)} above` : 'on';
+    return `<div class="orders-sync"><strong>To Invest target ${pctPlain(r.target)}</strong> (${esc(r.category)}): this order moves the holding from ${pctPlain(before)} to ${pctPlain(after)} of everything, ${verdict} the target.</div>`;
+  }
+
   function impactTable(im) {
     if (!im) return '<div class="orders-sync">Position impact is not available right now.</div>';
     const a = im.account, o = im.overall;
@@ -1573,6 +1697,7 @@
       </tbody></table>
       <div class="orders-sync">“Live” accounts are read from Schwab and Binance.US now. ${im.everything ? 'The last row adds accounts known only from statements, whose values may be months old.' : 'Accounts that are only known from statements are not included.'}</div>
       <div class="orders-sync">${a.cash_after == null ? '' : `Cash after: ${money(a.cash_after)}${a.cash_after < 0 ? ' (the shortfall is margin)' : ''}`}${a.buying_power_after == null ? '' : ` · available for new stock orders after: ${money(a.buying_power_after)}`}</div>
+      ${targetPreviewLine(im)}
       ${holdingsTable(im.symbol, im.holdings, null)}`;
   }
 

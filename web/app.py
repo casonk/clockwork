@@ -5255,6 +5255,110 @@ def update_invest_targets():
     return redirect(url_for("to_invest"))
 
 
+def _invest_target_rows(data: dict) -> tuple[dict[str, dict], dict]:
+    """Each To Invest ticker with its target and current allocation, keyed by ticker.
+
+    ``target`` is the share of the whole portfolio (a basket category's input percentage times
+    its basket target); ``current`` is the allocation the holdings sync last stored. Crypto is
+    also keyed as ``BTC-USD`` because that is how Tradility names it."""
+    summary, categories = _invest_allocation_summary(data)
+    rows: dict[str, dict] = {}
+    for category in data["categories"]:
+        info = categories.get(category["name"], {})
+        for item in category["items"]:
+            ticker = str(item.get("ticker", "")).upper()
+            if not ticker:
+                continue
+            targets = info.get("item_targets", {}).get(item["ticker"])
+            current = None
+            with contextlib.suppress(TypeError, ValueError):
+                current = float(item["allocation_pct"]) if "allocation_pct" in item else None
+            row = {
+                "ticker": ticker,
+                "category": category["name"],
+                "name": item.get("name", ""),
+                "holding": bool(item.get("holding")),
+                "mode": info.get("mode", "global"),
+                "basket_pct": info.get("basket_target"),
+                "target_input": targets["input"] if targets else None,
+                "target": targets["global"] if targets else None,
+                "current": current,
+            }
+            if row["target"] is not None and current is not None:
+                row["gap"] = row["target"] - current  # positive: below target, room to buy
+            rows.setdefault(ticker, row)
+            if category["name"] == "Crypto":
+                rows.setdefault(f"{ticker}-USD", row)
+    return rows, summary
+
+
+@app.get("/api/tradility-targets")
+def api_tradility_targets():
+    """To Invest targets and current allocations, for the Tradility cards and order preview."""
+    data = load_simple_list("invest")
+    rows, summary = _invest_target_rows(data)
+    total = None
+    with contextlib.suppress(Exception):
+        payload = _load_invest_holdings_payload()
+        total = sum(
+            float(h.get("total_ending_value") or 0)
+            for h in payload["holdings"]
+            if isinstance(h, dict)
+        )
+    return jsonify(
+        {
+            "ok": True,
+            "targets": rows,
+            "categories": [c["name"] for c in data["categories"]],
+            "portfolio_value": total,
+            "target_total": summary["target"],
+        }
+    )
+
+
+@app.post("/api/tradility-targets/<path:ticker>")
+def api_tradility_set_target(ticker: str):
+    """Set (or clear) a ticker's To Invest target, adding the ticker to a category if needed."""
+    cfg = _simple_list_config("invest")
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"ok": False, "error": "send a JSON object"}), 400
+    symbol = ticker.strip().upper()
+    if not re.fullmatch(r"[A-Z0-9][A-Z0-9.^=-]{0,19}", symbol):
+        abort(404)
+    base = symbol.removesuffix("-USD")
+    try:
+        target = _clean_invest_target(payload.get("target_pct", ""))
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    data = load_simple_list("invest")
+    found = None
+    for category in data["categories"]:
+        found = _find_simple_item(category, symbol, cfg) or _find_simple_item(category, base, cfg)
+        if found:
+            break
+    if found is None:
+        name = str(payload.get("category") or "").strip()
+        category = _find_simple_category(data, name) if name else None
+        if category is None:
+            return jsonify({"ok": False, "error": "choose a To Invest category to add it to"}), 400
+        found = _parse_simple_item(base if name == "Crypto" else symbol, cfg)
+        category["items"].append(found)
+        _log_event(
+            cfg["history_file"], "add", item=found["ticker"], category=name, detail="tradility"
+        )
+    if target:
+        found["target_pct"] = target
+    else:
+        found.pop("target_pct", None)
+    save_simple_list("invest", data)
+    _log_event(
+        cfg["history_file"], "targets", detail=f"tradility {found['ticker']}={target or 'cleared'}"
+    )
+    rows, _summary = _invest_target_rows(data)
+    return jsonify({"ok": True, "target": rows.get(symbol) or rows.get(base)})
+
+
 @app.post("/<page>/restore")
 def simple_list_restore(page):
     key = _simple_list_key_from_page(page)
