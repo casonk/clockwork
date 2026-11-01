@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The Tradility order form has Duration (GTC or Day) and Trading hours (Regular or Extended) for Schwab orders, starting from the policy's `[defaults] time_in_force` and `session`. Extended hours (Schwab's pre-market-through-after-hours session) take limit orders only, so choosing a market order switches back to regular hours. The preview shows both.
 - Register traction-control's daily GitHub Actions check (`actions-switch-check`) as `examples/traction-control/actions-switch-check.toml`, so it appears in the Schedule page and can be enabled or disabled there. Like its siblings it carries `after=`, so it renders for systemd and cron but not launchd.
 - The Accounts panel lists deposits, withdrawals and transfers over the past year (Schwab cash movements and Binance.US deposits and withdrawals, internal journals hidden unless you tick the box) with totals in and out, read through the trader service (`GET /api/tradility-transfers`). When Binance.US withdrawals are enabled in the trading policy the panel also offers a withdrawal form: choose one of the policy's destinations, enter an amount, preview, and type the exact phrase to send. Addresses are never typed in the page and are shown only by their last six characters. Schwab transfers are history only (its API has no money movement).
 - A crypto ticker's order card says why there is no order form when Binance.US trading is not enabled (it needs a separate trade-enabled key and `binance = true` in the trading policy) instead of failing at preview.

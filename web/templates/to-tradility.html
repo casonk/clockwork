@@ -1464,6 +1464,14 @@
         <select name="kind" aria-label="Order type"><option>limit</option><option>market</option></select>
         <input name="quantity" type="number" step="any" min="0" placeholder="Qty" aria-label="Quantity" required>
         <input name="price" type="number" step="any" min="0" placeholder="Limit price" aria-label="Limit price">
+        ${isCrypto() ? '' : `<select name="tif" aria-label="Duration">
+          <option value="gtc" ${((tradeStatus.defaults || {}).time_in_force || 'gtc') === 'gtc' ? 'selected' : ''}>GTC</option>
+          <option value="day" ${((tradeStatus.defaults || {}).time_in_force) === 'day' ? 'selected' : ''}>Day</option>
+        </select>
+        <select name="session" aria-label="Trading hours">
+          <option value="normal" ${((tradeStatus.defaults || {}).session || 'normal') === 'normal' ? 'selected' : ''}>Regular hours</option>
+          <option value="extended" ${((tradeStatus.defaults || {}).session) === 'extended' ? 'selected' : ''}>Extended hours</option>
+        </select>`}
         <button type="submit" class="primary">Preview</button>
       </form>
       <div class="orders-sync" id="trade-default"></div>
@@ -1516,7 +1524,7 @@
     const pct = side === 'buy' ? d.buy_offset_pct : d.sell_offset_pct;
     if (form.elements.kind.value === 'limit') form.elements.price.value = side === 'buy' ? tradeQuote.buy_price : tradeQuote.sell_price;
     document.getElementById('trade-default').textContent =
-      `Mark ${fmtPrice(tradeQuote.mark)} · default: good-till-cancelled limit ${Math.abs(pct)}% ${pct < 0 ? 'below' : 'above'} the mark`;
+      `Mark ${fmtPrice(tradeQuote.mark)} · default: limit ${Math.abs(pct)}% ${pct < 0 ? 'below' : 'above'} the mark`;
   }
 
   function tradeFail(message) {
@@ -1539,11 +1547,11 @@
     tradeFail('');
     const f = Object.fromEntries(new FormData(form).entries());
     try {
-      const pv = await tradeCall('preview', {ticker: detailTicker, account: f.account || '', side: f.side, kind: f.kind, quantity: f.quantity, price: f.kind === 'limit' ? f.price : null});
+      const pv = await tradeCall('preview', {ticker: detailTicker, account: f.account || '', side: f.side, kind: f.kind, quantity: f.quantity, price: f.kind === 'limit' ? f.price : null, ...(f.session ? {session: f.session, tif: f.tif} : {})});
       const o = pv.order;
       tradeStep = {
         kind: 'place', previewId: pv.preview_id, phrase: pv.phrase, warnings: pv.warnings,
-        summary: `${esc(o.side)} ${esc(String(o.quantity))} ${esc(o.ticker)} ${o.kind === 'limit' ? 'at ' + fmtPrice(o.price) + ' (good till cancelled)' : 'at market'} on ${esc(pv.broker)}${o.account ? ' account …' + esc(o.account) : ''}, about ${fmtPrice(pv.notional)} (last price ${fmtPrice(pv.last_price)})`,
+        summary: `${esc(o.side)} ${esc(String(o.quantity))} ${esc(o.ticker)} ${o.kind === 'limit' ? 'at ' + fmtPrice(o.price) + (o.tif === 'day' ? ' (day' : ' (good till cancelled') + (o.session === 'extended' ? ', extended hours)' : ')') : 'at market'} on ${esc(pv.broker)}${o.account ? ' account …' + esc(o.account) : ''}, about ${fmtPrice(pv.notional)} (last price ${fmtPrice(pv.last_price)})`,
       };
     } catch (err) {
       tradeStep = null;
@@ -1643,6 +1651,8 @@
       if (isCrypto()) (accountsData ? Promise.resolve() : loadAccounts()).then(showAccountFunds);
       tradeForm.elements.kind.addEventListener('change', () => {
         tradeForm.elements.price.disabled = tradeForm.elements.kind.value === 'market';
+        // extended hours take limit orders only; a market order trades in regular hours
+        if (tradeForm.elements.session && tradeForm.elements.kind.value === 'market') tradeForm.elements.session.value = 'normal';
         fillDefaults();
       });
       if (tradeQuote && tradeQuote.ticker === detailTicker) fillDefaults();
