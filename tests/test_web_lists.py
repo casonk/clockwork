@@ -129,6 +129,10 @@ def test_tradility_page_distinguishes_reload_from_refresh(client):
     assert "URLSearchParams(window.location.search)" in html
     assert "timeZone: 'UTC'" in html
     assert "detailRecord.returns[detailRange]" in html
+    assert "Company overview" in html
+    assert "Official mission / vision" in html
+    assert "safeExternalUrl" in html
+    assert 'rel="noopener noreferrer"' in html
 
 
 def test_tradility_list_omits_history_and_ticker_detail_returns_it(client, list_files, monkeypatch):
@@ -142,6 +146,17 @@ def test_tradility_list_omits_history_and_ticker_detail_returns_it(client, list_
                         "ticker": "AAPL",
                         "last_price": 313.62,
                         "technical_rating": "buy",
+                        "company_profile": {
+                            "available": True,
+                            "canonical_name": "Apple Inc.",
+                            "description": "Designs consumer technology.",
+                            "sector": "Technology",
+                            "industry": "Consumer Electronics",
+                            "website": "https://www.apple.com",
+                            "vision_statement": None,
+                            "source": "yfinance/yahoo-finance",
+                            "retrieved_at": "2026-11-01T00:00:00Z",
+                        },
                         "price_history": [
                             {"date": "2025-10-31", "close": 270.0},
                             {"date": "2026-10-30", "close": 313.62},
@@ -156,7 +171,9 @@ def test_tradility_list_omits_history_and_ticker_detail_returns_it(client, list_
     summary = client.get("/api/tradility-analysis").get_json()
 
     assert summary["tickers"][0]["detail_available"] is True
+    assert summary["tickers"][0]["profile_available"] is True
     assert "price_history" not in summary["tickers"][0]
+    assert "company_profile" not in summary["tickers"][0]
 
     detail = client.get("/api/tradility-analysis/aapl")
 
@@ -164,6 +181,7 @@ def test_tradility_list_omits_history_and_ticker_detail_returns_it(client, list_
     payload = detail.get_json()
     assert payload["history_period"] == "5y"
     assert payload["ticker"]["technical_rating"] == "buy"
+    assert payload["ticker"]["company_profile"]["canonical_name"] == "Apple Inc."
     assert len(payload["ticker"]["price_history"]) == 2
     assert client.get("/api/tradility-analysis/MISSING").status_code == 404
 

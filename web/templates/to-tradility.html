@@ -252,6 +252,13 @@
     .rating-negative { color: var(--red); }
     .rating-neutral { color: var(--yellow); }
     .detail-disclaimer { color: var(--muted-fg); font-size: 10px; margin-top: 6px; }
+    .company-description { font-size: 12px; line-height: 1.6; margin: 0; color: var(--text); }
+    .company-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin-top: 12px; }
+    .company-fact { min-width: 0; }
+    .company-fact span { display: block; color: var(--muted-fg); font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .company-fact strong { display: block; font-size: 11px; margin-top: 2px; overflow-wrap: anywhere; }
+    .company-link { display: inline-block; color: var(--accent); font-size: 11px; margin-top: 12px; text-decoration: none; }
+    .company-link:hover { text-decoration: underline; }
     .component-list { display: grid; gap: 6px; margin-top: 12px; }
     .component-row, .detail-meta-row { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; }
     .component-row span:first-child, .detail-meta-row span:first-child { color: var(--muted-fg); }
@@ -270,6 +277,7 @@
       .detail-layout { grid-template-columns: 1fr; }
       .detail-chart-wrap { height: 260px; }
       .return-grid { grid-template-columns: repeat(3, 1fr); }
+      .company-facts { grid-template-columns: 1fr; }
     }
 
     /* State messages */
@@ -354,7 +362,7 @@
       <div class="detail-price" id="detail-dialog-price"></div>
       <button class="detail-close" type="button" onclick="closeTickerDetail()" aria-label="Close details">×</button>
     </div>
-    <div id="detail-content"><div class="detail-loading">Loading historical performance…</div></div>
+    <div id="detail-content"><div class="detail-loading">Loading company and market details…</div></div>
   </section>
 </div>
 
@@ -708,7 +716,7 @@
           <span class="card-ind-value" style="${indValFg}">${indValue}</span>
         </div>
         ${extraHtml}
-        ${t.detail_available ? '<div class="card-detail-cue">View chart and rating →</div>' : ''}
+        ${t.detail_available ? '<div class="card-detail-cue">View chart, profile, and rating →</div>' : ''}
       `;
       grid.appendChild(card);
     }
@@ -730,7 +738,7 @@
     document.getElementById('detail-dialog-name').textContent = '';
     document.getElementById('detail-dialog-price').textContent = '';
     document.getElementById('detail-content').innerHTML =
-      '<div class="detail-loading">Loading historical performance…</div>';
+      '<div class="detail-loading">Loading company and market details…</div>';
     overlay.querySelector('.detail-close').focus();
 
     try {
@@ -779,20 +787,68 @@
     return Number(value) > 0 ? 'rating-positive' : 'rating-negative';
   }
 
+  function safeExternalUrl(value) {
+    try {
+      const parsed = new URL(String(value || ''));
+      return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : '';
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  function formatEmployees(value) {
+    if (value == null || value === '') return '—';
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? Math.round(number).toLocaleString() : '—';
+  }
+
+  function formatProfileTime(value) {
+    if (!value) return '—';
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? '—' : parsed.toLocaleDateString();
+  }
+
   function renderTickerDetail(data) {
     const t = data.ticker;
     const returns = t.returns || {};
     const components = t.technical_components || {};
+    const profile = t.company_profile || {};
+    const companyName = profile.canonical_name || t.name || '';
+    const website = safeExternalUrl(profile.website);
+    const industry = profile.industry || profile.category || '—';
+    const sector = profile.sector || profile.fund_family || '—';
+    const vision = profile.vision_statement
+      ? esc(profile.vision_statement)
+      : 'Not supplied by the current source';
     const position = Math.min(100, Math.max(0, Number(t.range_position_52w ?? 0)));
     const returnLabels = [['1m','1M'], ['3m','3M'], ['1y','1Y'], ['3y','3Y'], ['5y','5Y']];
     document.getElementById('detail-dialog-title').textContent = t.ticker || 'Stock details';
     document.getElementById('detail-dialog-name').textContent =
-      [t.asset_class, t.name].filter(Boolean).join(' · ');
+      [companyName, t.asset_class].filter(Boolean).join(' · ');
     document.getElementById('detail-dialog-price').textContent = fmtPrice(t.last_price);
 
     document.getElementById('detail-content').innerHTML = `
       <div class="detail-layout">
         <div class="detail-stack">
+          <section class="detail-card">
+            <div class="detail-card-title">Company overview</div>
+            ${profile.available ? `
+              <p class="company-description">${esc(profile.description || 'No business description was supplied by this source.')}</p>
+              <div class="company-facts">
+                <div class="company-fact"><span>Sector / family</span><strong>${esc(sector)}</strong></div>
+                <div class="company-fact"><span>Industry / category</span><strong>${esc(industry)}</strong></div>
+                <div class="company-fact"><span>Headquarters</span><strong>${esc(profile.headquarters || '—')}</strong></div>
+                <div class="company-fact"><span>Exchange</span><strong>${esc(profile.exchange || '—')}</strong></div>
+                <div class="company-fact"><span>Employees</span><strong>${formatEmployees(profile.employees)}</strong></div>
+                <div class="company-fact"><span>Entity type</span><strong>${esc(profile.entity_type || '—')}</strong></div>
+                <div class="company-fact"><span>Official mission / vision</span><strong>${vision}</strong></div>
+                <div class="company-fact"><span>Profile source</span><strong>${esc(profile.source || 'unknown')} · ${formatProfileTime(profile.retrieved_at)}</strong></div>
+              </div>
+              ${website ? `<a class="company-link" href="${esc(website)}" target="_blank" rel="noopener noreferrer">Visit company website ↗</a>` : ''}
+            ` : `
+              <p class="company-description">No qualitative profile is available for this symbol yet. Run a refresh to populate newly supported equities and funds.</p>
+            `}
+          </section>
           <section class="detail-card">
             <div class="detail-card-title">Historical close</div>
             <div class="detail-range-buttons">
