@@ -229,6 +229,7 @@
     .detail-ticker { font: 800 24px var(--mono); letter-spacing: 0.6px; }
     .detail-name { color: var(--muted-fg); font-size: 12px; }
     .detail-price { font-size: 22px; font-weight: 750; white-space: nowrap; }
+    .orders-sync { color: var(--muted-fg); font-size: 11px; margin: 4px 0 8px; }
     .orders-summary { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-bottom: 10px; font-size: 12px; }
     .orders-summary span { color: var(--muted-fg); }
     .orders-summary strong { color: var(--text); margin-left: 4px; }
@@ -1117,6 +1118,22 @@
     }
   }
 
+  function sourceLabel(source) {
+    return {schwab: 'Schwab', binance: 'Binance.US'}[source] || 'Manual';
+  }
+
+  // Which brokers the read-only export covers, and when it was last fetched.
+  function syncNote() {
+    const sync = detailOrders && detailOrders.synced || {};
+    const names = Object.keys(sync.sources || {});
+    if (!names.length) return 'Broker orders are not synced yet; orders below were entered by hand.';
+    const ok = names.filter(n => sync.sources[n]).map(sourceLabel);
+    const failed = names.filter(n => !sync.sources[n]).map(sourceLabel);
+    const when = sync.generated_at ? new Date(sync.generated_at).toLocaleString() : 'unknown time';
+    return `Synced (read-only) from ${ok.join(', ') || 'no broker'} · ${esc(when)}`
+      + (failed.length ? ` · not available: ${failed.join(', ')}` : '');
+  }
+
   function renderOrders() {
     const box = document.getElementById('detail-orders');
     if (!box || !detailOrders) return;
@@ -1134,10 +1151,11 @@
         <td class="num">${o.price == null ? '—' : fmtPrice(o.price)}</td>
         <td>${esc(o.status)}</td>
         <td>${esc(o.note || '')}</td>
+        <td>${esc(sourceLabel(o.source))}</td>
         <td class="order-actions">
-          ${o.status === 'open' && o.price != null ? `<button type="button" data-order-act="fill" data-id="${esc(o.id)}">Filled</button>` : ''}
-          ${o.status === 'open' ? `<button type="button" data-order-act="cancel" data-id="${esc(o.id)}">Cancel</button>` : ''}
-          <button type="button" data-order-act="delete" data-id="${esc(o.id)}" aria-label="Delete order">×</button>
+          ${o.source && o.source !== 'manual' ? '' : o.status === 'open' && o.price != null ? `<button type="button" data-order-act="fill" data-id="${esc(o.id)}">Filled</button>` : ''}
+          ${o.source && o.source !== 'manual' ? '' : o.status === 'open' ? `<button type="button" data-order-act="cancel" data-id="${esc(o.id)}">Cancel</button>` : ''}
+          ${o.source && o.source !== 'manual' ? '' : `<button type="button" data-order-act="delete" data-id="${esc(o.id)}" aria-label="Delete order">×</button>`}
         </td>
       </tr>`).join('');
     box.innerHTML = `
@@ -1146,8 +1164,9 @@
         <span>Average entry<strong>${entry ? fmtPrice(entry) : '—'}</strong>${source ? ` <span>${source}</span>` : ''}</span>
         <span>Vs last price<strong class="${pl == null ? '' : returnClass(pl)}">${pl == null ? '—' : formatReturn(pl)}</strong></span>
       </div>
-      ${rows ? `<table class="orders-table"><thead><tr><th>Date</th><th>Side</th><th>Type</th><th class="num">Qty</th><th class="num">Price</th><th>Status</th><th>Note</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+      ${rows ? `<table class="orders-table"><thead><tr><th>Date</th><th>Side</th><th>Type</th><th class="num">Qty</th><th class="num">Price</th><th>Status</th><th>Note</th><th>Source</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
              : '<p class="company-description">No orders recorded for this ticker.</p>'}
+      <div class="orders-sync">${syncNote()}</div>
       <form class="order-form" id="order-form" autocomplete="off">
         <select name="side" aria-label="Side"><option>buy</option><option>sell</option></select>
         <select name="kind" aria-label="Order type"><option>limit</option><option>market</option><option>stop</option><option value="stop_limit">stop limit</option></select>
