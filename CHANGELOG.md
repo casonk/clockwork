@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The Tradility detail view links to the symbol's Yahoo Finance quote page as well as the company website. Both sit in one row under the company overview, and Yahoo shows for every symbol, including ones with no profile yet.
 - The Tradility detail view has previous and next buttons (and the left and right arrow keys) that step through the cards in the order the grid is showing, with a position count; the buttons stop at the ends, and a slow load no longer overwrites the card you stepped on to.
 - Tradility indicators are now selectable together. RSI 14, VWAP 20 and Trend 50/200 are toggles (at least one stays on); with several selected each card shows a joint buy probability (each indicator's read combined as independent evidence on an even prior, P = Πp / (Πp + Π(1−p)), each held off 0 and 1), the per-indicator reads, and how many signals were available. The colour, buy/sell/neutral counts, badge, sort and legend all follow the joint value. One indicator behaves as before.
 - Remove the ← button from the Tradility header: it duplicated Home in the top bar and led to the Clockwork jobs page.
