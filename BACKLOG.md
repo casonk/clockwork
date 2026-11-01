@@ -23,6 +23,11 @@ Mark items `[x]` when complete and move them to Done.
 
 ## Done
 
+- [x] [manual:2026-11-01] **Show qualitative Tradility profiles** — add sourced
+  company/fund names, descriptions, classifications, headquarters, websites,
+  exchange, employees, entity type, and freshness to exact-ticker details
+  without bloating the stock-card collection response.
+
 - [x] [manual:2026-10-31] **Add Tradility stock performance details** — make
   cards open on-demand multi-year charts, period returns, 52-week range,
   transparent technical ratings, indicators, and source/freshness context.
