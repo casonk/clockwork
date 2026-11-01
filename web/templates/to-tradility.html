@@ -2032,7 +2032,10 @@
     const last = detailRecord && detailRecord.last_price;
     const entry = pos.avg_entry;
     const pl = entry && last != null ? (last - entry) / entry * 100 : null;
-    const source = pos.source === 'holdings' ? 'from holdings' : pos.source === 'orders' ? 'from filled buys' : '';
+    const shares = n => String(+Number(n).toFixed(4));
+    const source = pos.source === 'orders' ? 'from filled buys'
+      : pos.source === 'live+holdings' ? 'Schwab live + statements' : pos.source === 'holdings' ? 'from statements' : '';
+    const coverage = pos.partial ? ` · covers ${shares(pos.covered_quantity)} of ${shares(pos.quantity)} shares; the rest have no cost on record` : '';
     const rows = detailOrders.orders.map(o => `
       <tr class="order-${esc(o.status)}">
         <td>${esc(o.date)}</td>
@@ -2053,7 +2056,7 @@
     box.innerHTML = `
       <div class="orders-summary">
         <span>Quantity<strong>${pos.quantity == null ? '—' : esc(String(pos.quantity))}</strong></span>
-        <span>Average entry<strong>${entry ? fmtPrice(entry) : '—'}</strong>${source ? ` <span>${source}</span>` : ''}</span>
+        <span>Average entry<strong>${entry ? fmtPrice(entry) : '—'}</strong>${source || coverage ? ` <span>${source}${coverage}</span>` : ''}</span>
         <span>Vs last price<strong class="${pl == null ? '' : returnClass(pl)}">${pl == null ? '—' : formatReturn(pl)}</strong></span>
       </div>
       ${rows ? `<table class="orders-table"><thead><tr><th>Date</th><th>Side</th><th>Type</th><th class="num">Qty</th><th class="num">Price</th><th>Status</th><th>If this fills</th><th>Note</th><th>Source</th><th></th></tr></thead><tbody>${rows}</tbody></table>${openOrdersEffect()}`
@@ -2119,7 +2122,7 @@
     if (!detailOrders) return [];
     const levels = [];
     const entry = detailOrders.position && detailOrders.position.avg_entry;
-    if (entry) levels.push({price: entry, label: `Avg entry ${fmtPrice(entry)}`, kind: 'entry'});
+    if (entry) levels.push({price: entry, label: `Avg entry ${fmtPrice(entry)}${detailOrders.position.partial ? ' (partial)' : ''}`, kind: 'entry'});
     for (const o of detailOrders.orders) {
       if (o.status === 'open' && o.price != null) {
         levels.push({price: o.price, label: `${o.side} ${o.kind.replace('_', ' ')} ${fmtPrice(o.price)}`, kind: 'order'});
