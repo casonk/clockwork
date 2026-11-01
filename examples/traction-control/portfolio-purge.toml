@@ -1,0 +1,28 @@
+
+[[jobs]]
+name = "portfolio-purge"
+launchd_label = "io.github.casonk.traction-control.portfolio-purge"
+description = "Weekly purge of stale local git state across the portfolio"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h/git/util-repos/traction-control"
+exec_start = "/bin/bash scripts/portfolio-purge.sh"
+after = ["network-online.target"]
+standard_output = "journal"
+standard_error = "journal"
+timer_description = "Remove merged branches and finished worktrees across the portfolio"
+
+[jobs.environment]
+PORTFOLIO_PURGE_BACKUP_MAX_AGE_DAYS = "90"
+PORTFOLIO_ROOT = "%h/git"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "Sun *-*-* 04:30:00"
+persistent = true
+randomized_delay_sec = "600"
+
+[jobs.cron]
+expression = "30 4 * * 0"
+command = "mkdir -p $HOME/.local/share/portfolio-purge/runs && cd $HOME/git/util-repos/traction-control && /bin/bash scripts/portfolio-purge.sh >> $HOME/.local/share/portfolio-purge/runs/cron.log 2>&1"
+comments = ["Auto-generated from systemd timer: Sun *-*-* 04:30:00"]
