@@ -139,3 +139,107 @@ def test_the_detail_view_draws_the_average_entry_as_a_horizontal_line_and_lists_
         "detail-orders-card",
     ):
         assert needle in html, needle
+
+
+EXPORT = {
+    "generated_at": "2026-11-01T01:00:00+00:00",
+    "sources": {"schwab": {"ok": True, "orders": 2}, "binance": {"ok": False, "error": "x"}},
+    "orders": {
+        "AAPL": [
+            {
+                "id": "schwab-1",
+                "source": "schwab",
+                "side": "buy",
+                "kind": "limit",
+                "status": "filled",
+                "quantity": 1,
+                "price": 10.0,
+                "date": "2026-10-01",
+                "note": "",
+            },
+            {
+                "id": "schwab-2",
+                "source": "schwab",
+                "side": "sell",
+                "kind": "limit",
+                "status": "open",
+                "quantity": 1,
+                "price": 20.0,
+                "date": "2026-10-20",
+                "note": "",
+            },
+        ],
+        "BTC": [
+            {
+                "id": "binance-1",
+                "source": "binance",
+                "side": "buy",
+                "kind": "limit",
+                "status": "open",
+                "quantity": 1,
+                "price": 5.0,
+                "date": "2026-10-21",
+                "note": "",
+            },
+        ],
+    },
+}
+
+
+def test_broker_orders_are_listed_beside_manual_ones_marked_by_source_and_open_first():
+    manual = {
+        "AAPL": [
+            {
+                "id": "m1",
+                "side": "buy",
+                "kind": "limit",
+                "status": "filled",
+                "quantity": 1,
+                "price": 1.0,
+                "date": "2026-10-10",
+                "note": "",
+            }
+        ]
+    }
+    got = t.summary("AAPL", manual, HOLDINGS, EXPORT)
+    assert [(o["id"], o["source"]) for o in got["orders"]] == [
+        ("schwab-2", "schwab"),
+        ("m1", "manual"),
+        ("schwab-1", "schwab"),
+    ]
+    assert got["synced"] == {
+        "generated_at": EXPORT["generated_at"],
+        "sources": {"schwab": True, "binance": False},
+    }
+
+
+def test_synced_fills_never_become_the_fallback_average_entry():
+    got = t.summary("MSFT", {}, HOLDINGS, {**EXPORT, "orders": {"MSFT": EXPORT["orders"]["AAPL"]}})
+    assert (
+        got["position"]["avg_entry"] is None
+    )  # a year of fills is not the cost of the whole position
+
+
+def test_crypto_export_rows_match_the_usd_pair(api, tmp_path, monkeypatch):
+    c, _ = api
+    export = tmp_path / "export.json"
+    export.write_text(json.dumps(EXPORT))
+    monkeypatch.setenv("CLOCKWORK_TRADILITY_ORDERS_EXPORT", str(export))
+    got = c.get("/api/tradility-orders/BTC-USD").get_json()
+    assert [o["id"] for o in got["orders"]] == ["binance-1"]
+    monkeypatch.setenv("CLOCKWORK_TRADILITY_ORDERS_EXPORT", str(tmp_path / "absent.json"))
+    assert c.get("/api/tradility-orders/BTC-USD").get_json()["orders"] == []
+
+
+def test_the_table_shows_the_source_and_leaves_broker_rows_read_only():
+    from pathlib import Path
+
+    html = (
+        Path(__file__).resolve().parents[1] / "web" / "templates" / "to-tradility.html"
+    ).read_text(encoding="utf-8")
+    for needle in (
+        "function syncNote",
+        "<th>Source</th>",
+        "o.source && o.source !== 'manual' ? ''",
+    ):
+        assert needle in html, needle
