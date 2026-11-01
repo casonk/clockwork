@@ -503,3 +503,24 @@ def test_the_form_offers_one_click_order_templates_priced_from_the_mark():
         < html.index("tradeCall('preview'")
         < html.index("tradeCall('confirm'")
     )
+
+
+def test_the_preview_shows_the_position_impact_and_a_place_order_button_when_configured():
+    from pathlib import Path
+
+    html = (
+        Path(__file__).resolve().parents[1] / "web" / "templates" / "to-tradility.html"
+    ).read_text(encoding="utf-8")
+    for needle in (
+        "function impactTable",
+        "All accounts",
+        "Share of total",
+        "Cash available to trade after",
+        "st.confirmation === 'button'",
+        "'Place order'",
+        "impact: pv.impact, confirmation: pv.confirmation",
+        "const phrase = phraseInput ? phraseInput.value : ''",
+    ):
+        assert needle in html, needle
+    # cancellations never use the button-only path
+    assert "st.kind === 'place' && st.confirmation === 'button'" in html
