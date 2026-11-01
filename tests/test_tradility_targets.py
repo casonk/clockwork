@@ -137,4 +137,54 @@ def test_each_open_order_shows_where_it_would_leave_the_holding_against_its_targ
     ):
         assert needle in HTML, needle
     # history rows are not projected, only open orders
-    assert "o.status === 'open' ? effectText(orderEffect(o)) : ''" in HTML
+    assert "o.status === 'open' ? effectCell(o) : ''" in HTML
+
+
+def test_the_numbers_are_backed_by_accessible_share_bars_on_cards_orders_the_target_card_and_the_preview():
+    for needle in (
+        "function shareBar",
+        "function barLegend",
+        'role="img"',
+        "aria-label=",
+        "sbar-target",
+        "sbar-move",
+        "shareBar(r.current || 0, null, r.target)",
+        "function effectCell",
+        "shareBar(currentShare(), e.after, e.target)",
+        "{big: true}",
+        "shareBar(p.before, p.after, null, {max: shareMax})",
+        "shareBar(r.percent, r.chosen ? r.percent_after : null, null, {max: barMax})",
+    ):
+        assert needle in HTML, needle
+    # theme tokens only: no literal colours inside the bar styles
+    css = HTML[HTML.index(".sbar {") : HTML.index(".card-target {")]
+    assert "#" not in css.replace("/* ", "").split("*/")[-1]
+    assert "var(--accent)" in css and "var(--text)" in css
+
+
+def test_the_detail_view_fills_the_window_below_the_top_bar_and_can_open_in_its_own_window():
+    for needle in (
+        "top: var(--detail-top, 0px)",
+        "z-index: 250",
+        "function placeDetailOverlay",
+        "--detail-top",
+        "function popOutDetail",
+        "window.open(url",
+        "resizable=yes",
+        "window=1",
+        "body.popout",
+        'id="detail-popout"',
+        "if (IS_POPOUT) { window.close(); return; }",
+        "display: block; position: relative",
+    ):
+        assert needle in HTML, needle
+    overlay = HTML[HTML.index(".detail-overlay {") : HTML.index(".detail-overlay[hidden]")]
+    assert "inset: 0" not in overlay  # no longer covers the top bar
+    assert "width: min(980px" not in HTML  # no longer a 980px card
+
+
+def test_the_target_bar_is_redrawn_once_the_open_orders_are_known():
+    assert "function refreshTargetCard" in HTML
+    assert HTML.index("refreshTargetCard();\n    await loadTradeStatus();") > HTML.index(
+        "detailOrders = data;"
+    )

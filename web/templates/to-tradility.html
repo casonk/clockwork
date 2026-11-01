@@ -212,18 +212,23 @@
 
     /* ── Stock detail dialog ── */
     body.detail-open { overflow: hidden; }
+    /* The detail view fills the window below the top bar (--detail-top is the bar's bottom edge, set from
+       the page), so the bar and its theme controls stay available. It sits under the bar (z-index 300)
+       so the bar's menus open over it. */
     .detail-overlay {
-      position: fixed; inset: 0; z-index: 1000;
-      background: color-mix(in srgb, var(--bg) 82%, transparent);
-      backdrop-filter: blur(7px); padding: 20px;
-      display: grid; place-items: center;
+      position: fixed; left: 0; right: 0; bottom: 0; top: var(--detail-top, 0px); z-index: 250;
+      background: var(--bg); padding: 0; display: block;
     }
     .detail-overlay[hidden] { display: none; }
     .detail-panel {
-      width: min(980px, 100%); max-height: calc(100vh - 40px); overflow: auto;
-      background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
-      box-shadow: 0 24px 80px rgba(0,0,0,0.55); padding: 20px;
+      width: 100%; height: 100%; overflow: auto; box-sizing: border-box;
+      background: var(--surface); border: 0; border-top: 1px solid var(--border); border-radius: 0;
+      box-shadow: none; padding: 20px clamp(16px, 3vw, 44px);
     }
+    .detail-layout { max-width: 1700px; margin: 0 auto; }
+    /* a detail opened in its own window shows nothing but the detail (and the top bar) */
+    body.popout header, body.popout .controls, body.popout .accounts-panel, body.popout .stats-bar,
+    body.popout main, body.popout #detail-popout, body.popout .detail-close { display: none; }
     .detail-header { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 16px; }
     .detail-title { flex: 1; min-width: 0; }
     .detail-ticker { font: 800 24px var(--mono); letter-spacing: 0.6px; }
@@ -253,7 +258,23 @@
     .template-chips button.buy { border-color: color-mix(in srgb, var(--green) 60%, var(--border)); }
     .template-chips button.sell { border-color: color-mix(in srgb, var(--red) 60%, var(--border)); }
     .template-chips button.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
-    .order-effect { font-size: 11px; white-space: nowrap; }
+    .order-effect { font-size: 11px; min-width: 190px; }
+    /* share bars: the fill is what you hold now, the lighter segment is the change an order makes,
+       and the ink tick is the To Invest target. One hue and ink, so it reads in every theme. */
+    .sbar { display: block; margin-top: 4px; }
+    .sbar-track { display: block; position: relative; height: 8px; border-radius: 4px; background: color-mix(in srgb, var(--border) 55%, transparent); overflow: hidden; }
+    .sbar-now, .sbar-move { position: absolute; top: 0; bottom: 0; }
+    .sbar-now { left: 0; background: var(--accent); border-radius: 0 4px 4px 0; }
+    .sbar-move.up { background: color-mix(in srgb, var(--accent) 38%, var(--surface)); border-radius: 0 4px 4px 0; border-left: 2px solid var(--surface); }
+    .sbar-move.down { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 55%, var(--surface)) 0 2px, transparent 2px 4px); border-radius: 0 4px 4px 0; border-left: 2px solid var(--surface); }
+    .sbar-target { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text); }
+    .sbar-big .sbar-track { height: 14px; border-radius: 7px; }
+    .sbar-big .sbar-now, .sbar-big .sbar-move { border-radius: 0 7px 7px 0; }
+    .sbar-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 10px; color: var(--muted-fg); margin-top: 4px; }
+    .sbar-legend i { display: inline-block; width: 10px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+    .sbar-legend i.k-now { background: var(--accent); }
+    .sbar-legend i.k-up { background: color-mix(in srgb, var(--accent) 38%, var(--surface)); }
+    .sbar-legend i.k-target { width: 2px; background: var(--text); border-radius: 0; }
     .card-target { font-size: 10px; margin-top: 3px; color: var(--muted-fg); }
     .card-target.under { color: var(--accent); }
     .card-target.over { color: var(--red); }
@@ -300,7 +321,7 @@
       border-radius: 99px; padding: 3px 10px; cursor: pointer; font-size: 11px; font-weight: 700;
     }
     .detail-range-btn.active { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
-    .detail-chart-wrap { position: relative; height: 310px; }
+    .detail-chart-wrap { position: relative; height: clamp(280px, 40vh, 560px); }
     #detail-chart { width: 100%; height: 100%; display: block; }
     .detail-chart-summary { display: flex; justify-content: space-between; gap: 12px; color: var(--muted-fg); font-size: 11px; margin-top: 5px; }
     .detail-rating { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
@@ -424,6 +445,7 @@
       <span class="detail-pos" id="detail-pos"></span>
       <button class="detail-step" id="detail-prev" type="button" onclick="stepTickerDetail(-1)" aria-label="Previous ticker" title="Previous (←)">‹</button>
       <button class="detail-step" id="detail-next" type="button" onclick="stepTickerDetail(1)" aria-label="Next ticker" title="Next (→)">›</button>
+      <button class="detail-step" id="detail-popout" type="button" onclick="popOutDetail()" aria-label="Open in its own window" title="Open in its own window (resizable, keeps the top bar and theme)">⧉</button>
       <button class="detail-close" type="button" onclick="closeTickerDetail()" aria-label="Close details">×</button>
     </div>
     <div id="detail-content"><div class="detail-loading">Loading company and market details…</div></div>
@@ -653,13 +675,35 @@
     return v == null ? '—' : Number(v).toFixed(2) + '%';
   }
 
+  // A horizontal share bar. `now` is the fill, `after` (optional) adds a lighter segment for an order's
+  // change (hatched when it shrinks the holding), and `target` is an ink tick. With a target the scale puts
+  // the tick at 75% of the width, so bars are comparable as "progress to target"; `max` overrides that
+  // (used where bars sit side by side in one table). Text and a tooltip carry the exact numbers.
+  function shareBar(now, after, target, {max = null, big = false} = {}) {
+    const hasAfter = after != null && Math.abs(after - now) > 1e-9;
+    const top = Math.max(now || 0, after == null ? 0 : after, target || 0);
+    const scale = max || (target ? Math.max(target / 0.75, top * 1.05) : Math.max(top * 1.2, 0.01));
+    const w = v => Math.max(0, Math.min(100, (v || 0) / scale * 100));
+    const lo = Math.min(now || 0, hasAfter ? after : now || 0), hi = Math.max(now || 0, hasAfter ? after : now || 0);
+    const label = `Now ${pctPlain(now)}${hasAfter ? `, after ${pctPlain(after)}` : ''}${target != null ? `, target ${pctPlain(target)}` : ''}`;
+    return `<span class="sbar${big ? ' sbar-big' : ''}" role="img" aria-label="${esc(label)}" title="${esc(label)}"><span class="sbar-track">
+      <span class="sbar-now" style="width:${w(hasAfter && after < now ? after : now).toFixed(2)}%"></span>
+      ${hasAfter ? `<span class="sbar-move ${after > now ? 'up' : 'down'}" style="left:${w(lo).toFixed(2)}%;width:${(w(hi) - w(lo)).toFixed(2)}%"></span>` : ''}
+      ${target != null ? `<span class="sbar-target" style="left:calc(${w(target).toFixed(2)}% - 1px)"></span>` : ''}
+    </span></span>`;
+  }
+
+  function barLegend(withMove) {
+    return `<div class="sbar-legend"><span><i class="k-now"></i>now</span>${withMove ? '<span><i class="k-up"></i>change from open orders</span>' : ''}<span><i class="k-target"></i>To Invest target</span></div>`;
+  }
+
   function targetChip(ticker) {
     const r = targetFor(ticker);
     if (!r || r.target == null) return '';
     const gap = targetGap(ticker);
     const kind = gap > 0.05 ? 'under' : gap < -0.05 ? 'over' : 'on';
     const now = r.current == null ? 'not held' : `now ${pctPlain(r.current)}`;
-    return `<div class="card-target ${kind}" title="To Invest: ${esc(r.category)}">Target ${pctPlain(r.target)} · ${now}</div>`;
+    return `<div class="card-target ${kind}" title="To Invest: ${esc(r.category)}">Target ${pctPlain(r.target)} · ${now}${shareBar(r.current || 0, null, r.target)}</div>`;
   }
 
   async function loadData({followActiveRefresh = true} = {}) {
@@ -989,6 +1033,27 @@
   }
 
   // ── Historical-performance detail ───────────────────────────────────────────
+  // The detail view fills the window under the top bar; its top edge follows the bar's height (which
+  // changes with the width), so the bar and its theme controls stay usable.
+  function placeDetailOverlay() {
+    const nav = document.querySelector('.cw-site-nav');
+    const top = nav ? Math.max(0, Math.round(nav.getBoundingClientRect().bottom)) : 0;
+    document.getElementById('detail-overlay').style.setProperty('--detail-top', top + 'px');
+  }
+  window.addEventListener('resize', placeDetailOverlay);
+
+  // The detail in its own, resizable browser window. It is the same page in "popout" mode, so the top bar
+  // is there and follows the theme: the choice lives in localStorage, which windows of this site share.
+  const IS_POPOUT = new URLSearchParams(window.location.search).get('window') === '1';
+  if (IS_POPOUT) document.body.classList.add('popout');
+
+  function popOutDetail() {
+    if (!detailTicker) return;
+    const url = `${window.location.pathname}?ticker=${encodeURIComponent(detailTicker)}&window=1`;
+    const opened = window.open(url, `tradility-${detailTicker}`, 'popup=yes,width=1240,height=900,resizable=yes,scrollbars=yes');
+    if (opened) closeTickerDetail();
+  }
+
   function paintDetailSteps() {
     const at = shownOrder.indexOf(detailTicker);
     document.getElementById('detail-prev').disabled = at <= 0;
@@ -1015,6 +1080,7 @@
     tradeQuote = null;
     heldData = null;
     const overlay = document.getElementById('detail-overlay');
+    placeDetailOverlay();
     overlay.hidden = false;
     document.body.classList.add('detail-open');
     document.getElementById('detail-dialog-title').textContent = ticker;
@@ -1042,6 +1108,7 @@
   }
 
   function closeTickerDetail() {
+    if (IS_POPOUT) { window.close(); return; }
     document.getElementById('detail-overlay').hidden = true;
     document.body.classList.remove('detail-open');
     detailRecord = null;
@@ -1250,6 +1317,7 @@
       if (box) box.innerHTML = `<div class="error-card">Could not load orders: ${esc(err.message)}</div>`;
       return;
     }
+    refreshTargetCard();
     await loadTradeStatus();
     // so the account list can show what each account can spend, and a buy can be checked before previewing
     if (tradeStatus && tradeStatus.available) loadHeld();
@@ -1341,7 +1409,9 @@
     const gap = targetGap(ticker), room = gap != null && targetsData.portfolio_value ? gap / 100 * targetsData.portfolio_value : null;
     const basket = r.mode === 'basket' && r.basket_pct != null && r.target_input != null
       ? ` <span class="orders-sync">(${esc(String(r.target_input))}% of the ${esc(r.category)} basket, which is ${esc(String(r.basket_pct))}% of the portfolio)</span>` : '';
-    return `<div class="orders-summary">
+    const pending = detailOrders ? openOrdersShare() : null;
+    return `${r.target != null ? `<div>${shareBar(r.current || 0, pending, r.target, {big: true})}${barLegend(pending != null)}</div>` : ''}
+      <div class="orders-summary" style="margin-top:8px">
         <span>Category<strong>${esc(r.category)}</strong></span>
         <span>Target<strong>${pctPlain(r.target)}</strong>${basket}</span>
         <span>Now<strong>${r.current == null ? 'not held' : pctPlain(r.current)}</strong></span>
@@ -1374,6 +1444,14 @@
       bindTargetForm();
     }
     renderGrid();
+  }
+
+  // The target bar also shows what the open orders would add, so redraw it once the orders are known.
+  function refreshTargetCard() {
+    const box = document.getElementById('detail-target');
+    if (!box || !targetsData || !detailRecord) return;
+    box.innerHTML = targetCardHtml(detailTicker, detailRecord.asset_class);
+    bindTargetForm();
   }
 
   function bindTargetForm() {
@@ -1419,6 +1497,24 @@
     return `→ ${pctPlain(e.after)}${gap}`;
   }
 
+  function effectCell(o) {
+    const e = orderEffect(o);
+    if (!e) return '—';
+    return `<div>${effectText(e)}</div>${shareBar(currentShare(), e.after, e.target)}`;
+  }
+
+  // The share after every open order fills, in order, or null.
+  function openOrdersShare() {
+    const open = detailOrders.orders.filter(o => o.status === 'open');
+    let share = currentShare();
+    if (!open.length || share == null || !(targetsData && targetsData.portfolio_value)) return null;
+    for (const o of open) {
+      const e = orderEffect(o, share);
+      if (e) share = e.after;
+    }
+    return share;
+  }
+
   function openOrdersEffect() {
     const open = detailOrders.orders.filter(o => o.status === 'open');
     if (!open.length) return '';
@@ -1431,7 +1527,8 @@
     const r = targetFor(detailTicker);
     const gap = r && r.target != null ? r.target - share : null;
     const text = gap == null ? `${pctPlain(share)} of the portfolio` : `${pctPlain(share)} of the portfolio, ${Math.abs(gap) <= 0.05 ? 'on' : (gap > 0 ? pctPlain(gap) + ' below' : pctPlain(-gap) + ' above')} the ${pctPlain(r.target)} target`;
-    return `<div class="orders-sync">If all ${open.length} open order${open.length === 1 ? '' : 's'} fill${open.length === 1 ? 's' : ''}: ${text}.</div>`;
+    return `<div class="orders-sync">If all ${open.length} open order${open.length === 1 ? '' : 's'} fill${open.length === 1 ? 's' : ''}: ${text}.
+      ${shareBar(currentShare(), share, r && r.target != null ? r.target : null, {big: true})}${barLegend(true)}</div>`;
   }
 
   function sourceLabel(source) {
@@ -1717,10 +1814,11 @@
     const stmt = statements || [];
     if (!list.length && !stmt.length) return `<div class="orders-sync">You hold no ${esc(symbol)} in any connected account.</div>`;
     const shares = n => esc(String(+Number(n).toFixed(6)));
+    const barMax = Math.max(0.01, ...list.flatMap(r => [r.percent || 0, r.percent_after || 0])) * 1.15;
     const body = list.map(r => `<tr${r.chosen ? ' class="order-open"' : ''}><td>${esc(r.label)}${r.chosen ? ' (this order)' : ''}</td>
       <td class="num">${shares(r.quantity)}${r.chosen ? ' → ' + shares(r.quantity_after) : ''}</td>
       <td class="num">${money(r.value)}${r.chosen ? ' → ' + money(r.value_after) : ''}</td>
-      <td class="num">${pctText(r.percent)}${r.chosen ? ' → ' + pctText(r.percent_after) : ''}</td></tr>`).join('')
+      <td class="num">${pctText(r.percent)}${r.chosen ? ' → ' + pctText(r.percent_after) : ''}${r.percent != null ? shareBar(r.percent, r.chosen ? r.percent_after : null, null, {max: barMax}) : ''}</td></tr>`).join('')
       + stmt.map(s2 => `<tr><td>${esc(s2.name)} <span class="account-flag">statement ${esc(s2.as_of)}</span></td><td class="num">${shares(s2.quantity)}</td><td class="num">${money(s2.market_value)}</td><td class="num">—</td></tr>`).join('');
     return `<table class="orders-table impact-table"><thead><tr><th>Where you hold ${esc(symbol)}</th><th class="num">Shares</th><th class="num">Value</th><th class="num">Share of account</th></tr></thead><tbody>${body}</tbody></table>`;
   }
@@ -1735,16 +1833,18 @@
     if (after == null) return '';
     const gap = r.target - after;
     const verdict = gap > 0.05 ? `still ${pctPlain(gap)} below` : gap < -0.05 ? `${pctPlain(-gap)} above` : 'on';
-    return `<div class="orders-sync"><strong>To Invest target ${pctPlain(r.target)}</strong> (${esc(r.category)}): this order moves the holding from ${pctPlain(before)} to ${pctPlain(after)} of everything, ${verdict} the target.</div>`;
+    return `<div class="orders-sync"><strong>To Invest target ${pctPlain(r.target)}</strong> (${esc(r.category)}): this order moves the holding from ${pctPlain(before)} to ${pctPlain(after)} of everything, ${verdict} the target.
+      ${shareBar(before || 0, after, r.target, {big: true})}${barLegend(true)}</div>`;
   }
 
   function impactTable(im) {
     if (!im) return '<div class="orders-sync">Position impact is not available right now.</div>';
     const a = im.account, o = im.overall;
+    const shareMax = Math.max(0.01, ...[a.percent, o.percent, im.everything && im.everything.percent].filter(Boolean).flatMap(p => [p.before || 0, p.after || 0])) * 1.15;
     const row = (label, q, v, p, total) => `<tr><td>${esc(label)}</td>
       <td class="num">${esc(String(+q.before.toFixed(6)))} → ${esc(String(+q.after.toFixed(6)))}</td>
       <td class="num">${money(v.before)} → ${money(v.after)} <span class="${v.after >= v.before ? 'ret-pos' : 'ret-neg'}">(${signed(v.after - v.before)})</span></td>
-      <td class="num">${pctText(p.before)} → ${pctText(p.after)}</td><td class="num">${money(total)}</td></tr>`;
+      <td class="num">${pctText(p.before)} → ${pctText(p.after)}${p.before != null && p.after != null ? shareBar(p.before, p.after, null, {max: shareMax}) : ''}</td><td class="num">${money(total)}</td></tr>`;
     return `<table class="orders-table impact-table"><thead><tr><th>${esc(im.symbol)} position</th><th class="num">Shares</th><th class="num">Value</th><th class="num">Share of total</th><th class="num">Total</th></tr></thead><tbody>
       ${row(a.label || 'This account', a.quantity, a.value, a.percent, a.total)}
       ${row('All live accounts (Schwab + Binance.US)', o.quantity, o.value, o.percent, o.total)}
@@ -1775,7 +1875,7 @@
   // DAY, DAY EXT, GTC and GTC EXT; the rest are checked here and again by the service.
   const TIF_CHOICES = [['day', 'Day'], ['gtc', 'GTC'], ['fok', 'Fill or kill'], ['ioc', 'Immediate or cancel'],
                        ['end_of_week', 'End of week'], ['end_of_month', 'End of month'], ['next_end_of_month', 'Next end of month']];
-  const SESSION_CHOICES = [['normal', 'Regular hours'], ['extended', 'Extended (pre + regular + after)'],
+  const SESSION_CHOICES = [['normal', 'Regular hours'], ['extended', 'Extended hours'],
                            ['am', 'Pre-market only'], ['pm', 'After-hours only']];
   const TIF_LABEL = Object.fromEntries(TIF_CHOICES);
   const HOURS_LABEL = {normal: '', extended: ', extended hours', am: ', pre-market only', pm: ', after-hours only'};
@@ -1941,7 +2041,7 @@
         <td class="num">${esc(String(o.quantity))}</td>
         <td class="num">${o.price == null ? '—' : fmtPrice(o.price)}</td>
         <td>${esc(o.status)}</td>
-        <td class="order-effect">${o.status === 'open' ? effectText(orderEffect(o)) : ''}</td>
+        <td class="order-effect">${o.status === 'open' ? effectCell(o) : ''}</td>
         <td>${esc(o.note || '')}</td>
         <td>${esc(sourceLabel(o.source))}</td>
         <td class="order-actions">
