@@ -513,7 +513,7 @@ def test_the_preview_shows_the_position_impact_and_a_place_order_button_when_con
     ).read_text(encoding="utf-8")
     for needle in (
         "function impactTable",
-        "All accounts",
+        "All live accounts",
         "Share of total",
         "Cash available to trade after",
         "st.confirmation === 'button'",
@@ -524,3 +524,20 @@ def test_the_preview_shows_the_position_impact_and_a_place_order_button_when_con
         assert needle in html, needle
     # cancellations never use the button-only path
     assert "st.kind === 'place' && st.confirmation === 'button'" in html
+
+
+def test_the_form_warns_before_the_preview_when_an_account_cannot_afford_the_buy_and_labels_what_all_means():
+    from pathlib import Path
+
+    html = (
+        Path(__file__).resolve().parents[1] / "web" / "templates" / "to-tradility.html"
+    ).read_text(encoding="utf-8")
+    for needle in (
+        "available to trade here, so Schwab is likely to reject it",
+        "' to trade'",
+        "All live accounts (Schwab + Binance.US)",
+        "Plus ${im.everything.institutions",
+        "from statements",
+        "Not read live.",
+    ):
+        assert needle in html, needle
