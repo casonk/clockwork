@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Tradility records your position and orders per ticker. The detail view has a Position and orders card: quantity, average entry (total cost basis over quantity from the holdings export, summed across accounts and only when every lot has a cost basis; otherwise the average of your recorded filled buys), and the gain against the last price, plus order history and open orders you add, mark filled, cancel or delete (`/api/tradility-orders/<ticker>`, stored owner-only in the gitignored `config/tradility-orders.json`, `CLOCKWORK_TRADILITY_ORDERS_FILE` moves it). The chart draws the average entry as a horizontal line and each open order as a dashed line; the price scale widens to include them. No broker export of orders exists yet, so orders are entered by hand.
 - The Tradility detail chart range (1M to 5Y) is shared by every card: changing it on one chart applies to all of them, including when you step with previous and next, and the choice is remembered in this browser.
 - The Tradility detail view links to the symbol's Yahoo Finance quote page as well as the company website. Both sit in one row under the company overview, and Yahoo shows for every symbol, including ones with no profile yet.
 - The Tradility detail view has previous and next buttons (and the left and right arrow keys) that step through the cards in the order the grid is showing, with a position count; the buttons stop at the ends, and a slow load no longer overwrites the card you stepped on to.
