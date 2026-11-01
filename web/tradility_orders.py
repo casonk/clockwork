@@ -431,6 +431,16 @@ def trade_holdings(ticker: str):
     return jsonify(payload), code
 
 
+@bp.post("/api/tradility-trade/fidelity-ticket")
+def fidelity_ticket():
+    """Prepare (never send) an order for a Fidelity account: checked and laid out by the service."""
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"ok": False, "error": "send a JSON object"}), 400
+    code, payload = call_trader("POST", "/fidelity/ticket", body)
+    return jsonify(payload), code
+
+
 @bp.get("/api/tradility-trade/quote/<path:ticker>")
 def trade_quote(ticker: str):
     """The current mark and the policy's default limit prices (from the trader service)."""

@@ -1738,6 +1738,14 @@
     const form = document.getElementById('trade-form');
     if (!note || !form) return;
     const mask = form.elements.account ? form.elements.account.value : '';
+    const submit = document.getElementById('trade-submit');
+    if (submit) submit.textContent = mask.startsWith('fid:') ? 'Prepare Fidelity ticket' : 'Preview';
+    if (mask.startsWith('fid:')) {
+      const fa = ((tradeStatus && tradeStatus.fidelity_accounts) || []).find(a => 'fid:' + a.id === mask);
+      note.classList.remove('trade-warn');
+      note.textContent = `Fidelity has no order API, so this only prepares a ticket for you to submit on Fidelity. ${fa && fa.as_of ? 'Balances and holdings here are from the ' + fa.as_of + ' statement.' : ''}`;
+      return;
+    }
     const acct = ((accountsData && accountsData.accounts) || []).find(a => a.broker === (isCrypto() ? 'binance' : 'schwab') && (isCrypto() || a.id === mask));
     note.textContent = acct
       ? `${acct.label}: buying power ${money(acct.buying_power)} · cash ${money(acct.cash)} · ${acct.margin_eligible ? 'margin account' : 'cash account'}`
@@ -1776,6 +1784,7 @@
             const spend = info ? (info.spendable != null ? info.spendable : info.buying_power) : null;
             return `<option value="${esc(a)}">…${esc(a)}${spend == null ? '' : ' · ' + money(spend) + ' available'}</option>`;
           }).join('')}
+          ${(tradeStatus.fidelity_accounts || []).map(a => `<option value="fid:${esc(a.id)}">${esc(a.label)}${a.type ? ' (' + esc(a.type) + ')' : ''} · Fidelity, you submit it</option>`).join('')}
         </select>`}
         <select name="side" aria-label="Side"><option>buy</option><option>sell</option></select>
         <select name="kind" aria-label="Order type"><option>limit</option><option>market</option></select>
@@ -1787,7 +1796,7 @@
         <select name="session" aria-label="Trading hours">
           ${SESSION_CHOICES.map(([v, label]) => `<option value="${v}" ${((tradeStatus.defaults || {}).session || 'normal') === v ? 'selected' : ''}>${label}</option>`).join('')}
         </select>`}
-        <button type="submit" class="primary">Preview</button>
+        <button type="submit" class="primary" id="trade-submit">Preview</button>
       </form>
       <div class="template-chips" id="trade-templates" aria-label="Order templates"></div>
       <div class="orders-sync" id="trade-default"></div>
@@ -1856,8 +1865,24 @@
       ${holdingsTable(im.symbol, im.holdings, null)}`;
   }
 
+  function fidelityPanel() {
+    const t = tradeStep.ticket;
+    return `<div>
+      <p>${tradeStep.summary}</p>
+      <table class="orders-table"><tbody>${t.fields.map(([k, v]) => `<tr><td>${esc(k)}</td><td><strong>${esc(v)}</strong></td></tr>`).join('')}</tbody></table>
+      ${impactTable(t.impact)}
+      ${(t.warnings || []).map(w => `<div class="trade-warn">${esc(w)}</div>`).join('')}
+      <p>Nothing is sent from here. Review these fields on Fidelity's trade page and submit the order there, then record it.</p>
+      <button type="button" id="fid-copy">Copy ticket</button>
+      <a class="company-link" href="${esc(t.url)}" target="_blank" rel="noopener noreferrer">Open Fidelity's trade page ↗</a>
+      <button type="button" class="primary" id="fid-record">I placed it at Fidelity</button>
+      <button type="button" id="trade-discard">Discard</button>
+    </div>`;
+  }
+
   function confirmPanel() {
     const st = tradeStep;
+    if (st.kind === 'fidelity') return fidelityPanel();
     const button = st.kind === 'place' && st.confirmation === 'button';
     return `<div>
       <p>${st.summary}</p>
@@ -1977,8 +2002,61 @@
     return data;
   }
 
+  // Fidelity has no order API, so an order for a Fidelity account is only prepared: the service checks it
+  // and lays it out in Fidelity's fields, and you submit it on Fidelity's own page.
+  function fidelityAccount(form) {
+    const v = form.elements.account ? form.elements.account.value : '';
+    return v.startsWith('fid:') ? v.slice(4) : null;
+  }
+
+  async function startFidelityTicket(form, mask) {
+    const f = Object.fromEntries(new FormData(form).entries());
+    try {
+      const t = await tradeCall('fidelity-ticket', {ticker: detailTicker, account: mask, side: f.side, kind: f.kind, quantity: f.quantity, price: f.kind === 'limit' ? f.price : null, ...(f.session ? {session: f.session, tif: f.tif} : {})});
+      tradeStep = {kind: 'fidelity', ticket: t, warnings: t.warnings, impact: t.impact, summary: `Prepare for Fidelity: ${esc(t.order.side)} ${esc(String(t.order.quantity))} ${esc(t.order.ticker)}${t.order.price != null ? ' at ' + fmtPrice(t.order.price) : ' at market'}, about ${fmtPrice(t.notional)} (last price ${fmtPrice(t.last_price)})`};
+    } catch (err) {
+      tradeStep = null;
+      renderOrders();
+      tradeFail(err.message);
+      return;
+    }
+    renderOrders();
+  }
+
+  async function recordFidelityOrder() {
+    const st = tradeStep, o = st.ticket.order;
+    tradeStep = null;
+    try {
+      const res = await fetch(`/api/tradility-orders/${encodeURIComponent(detailTicker)}`, {
+        method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
+        body: JSON.stringify({side: o.side, kind: o.kind, quantity: o.quantity, price: o.price, status: 'open', note: `${st.ticket.fields[0][1]} (submitted at Fidelity)`}),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      detailOrders = data;
+    } catch (err) {
+      renderOrders();
+      tradeFail(err.message);
+      return;
+    }
+    renderOrders();
+    tradeFail('Recorded as an open order. Fidelity is not read live, so mark it filled or cancelled here when it is.');
+  }
+
+  async function copyTicket() {
+    const text = tradeStep && tradeStep.ticket ? tradeStep.ticket.text : '';
+    try {
+      await navigator.clipboard.writeText(text);
+      tradeFail('Ticket copied.');
+    } catch (err) {
+      tradeFail('Could not copy; select the fields above instead.');
+    }
+  }
+
   async function startPreview(form) {
     tradeFail('');
+    const fid = fidelityAccount(form);
+    if (fid) return startFidelityTicket(form, fid);
     const f = Object.fromEntries(new FormData(form).entries());
     try {
       const pv = await tradeCall('preview', {ticker: detailTicker, account: f.account || '', side: f.side, kind: f.kind, quantity: f.quantity, price: f.kind === 'limit' ? f.price : null, ...(f.session ? {session: f.session, tif: f.tif} : {})});
@@ -2104,6 +2182,10 @@
       if (tradeQuote && tradeQuote.ticker === detailTicker) { fillDefaults(); paintTemplates(); }
       else if (!tradeQuote) loadQuote();
     }
+    const copy = box.querySelector('#fid-copy');
+    if (copy) copy.addEventListener('click', copyTicket);
+    const record = box.querySelector('#fid-record');
+    if (record) record.addEventListener('click', recordFidelityOrder);
     const go = box.querySelector('#trade-go');
     if (go) go.addEventListener('click', sendStep);
     const discard = box.querySelector('#trade-discard');

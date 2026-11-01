@@ -650,3 +650,47 @@ def test_the_holdings_route_forwards_and_the_page_shows_where_a_stock_is_held_pe
     ):
         assert needle in html, needle
     assert "cash_available_to_trade" not in html  # the field that was always 0
+
+
+def test_the_fidelity_ticket_route_forwards_and_the_form_only_prepares_never_sends(
+    api, monkeypatch
+):
+    from pathlib import Path
+
+    c, _ = api
+    seen = []
+    monkeypatch.setattr(
+        t,
+        "call_trader",
+        lambda m, p, b=None: seen.append((m, p)) or (200, {"ok": True, "venue": "fidelity"}),
+    )
+    assert (
+        c.post("/api/tradility-trade/fidelity-ticket", json={"ticker": "AAPL"}).get_json()["venue"]
+        == "fidelity"
+    )
+    assert seen == [("POST", "/fidelity/ticket")]
+    assert (
+        c.post(
+            "/api/tradility-trade/fidelity-ticket", data="x", content_type="text/plain"
+        ).status_code
+        == 400
+    )
+    html = (
+        Path(__file__).resolve().parents[1] / "web" / "templates" / "to-tradility.html"
+    ).read_text(encoding="utf-8")
+    for needle in (
+        "function startFidelityTicket",
+        "function fidelityPanel",
+        "Nothing is sent from here",
+        "I placed it at Fidelity",
+        "Open Fidelity's trade page",
+        "Prepare Fidelity ticket",
+        'value="fid:',
+        "(submitted at Fidelity)",
+        "Fidelity has no order API",
+    ):
+        assert needle in html, needle
+    # a Fidelity account never reaches the preview/confirm path that sends orders
+    assert html.index("if (fid) return startFidelityTicket(form, fid);") < html.index(
+        "tradeCall('preview'"
+    )
