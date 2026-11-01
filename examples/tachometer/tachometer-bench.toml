@@ -1,0 +1,23 @@
+
+[[jobs]]
+name = "tachometer-bench"
+description = "Nightly benchmark tier (short/mid/full) for the tuning history"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h/git/util-repos/tachometer"
+exec_start = "/usr/bin/env bash %h/git/util-repos/tachometer/scripts/run_bench.sh"
+standard_output = "journal"
+standard_error = "journal"
+timer_description = "Run the overdue benchmark tier at night"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "*-*-* 02:30:00"
+persistent = false
+accuracy_sec = "60"
+randomized_delay_sec = "10min"
+
+[jobs.cron]
+expression = "30 2 * * *"
+command = "mkdir -p $HOME/.local/share/tachometer-bench/runs && cd $HOME/git/util-repos/tachometer && /usr/bin/env bash $HOME/git/util-repos/tachometer/scripts/run_bench.sh >> $HOME/.local/share/tachometer-bench/runs/cron.log 2>&1"
+comments = ["Auto-generated from systemd timer: *-*-* 02:30:00"]

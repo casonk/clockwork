@@ -1,0 +1,26 @@
+
+[[jobs]]
+name = "intake-newsletter"
+description = "intake daily newsletter digest"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h"
+exec_start = "/bin/bash -lc 'export PYTHONPATH=\"%h/git/util-repos/intake${PYTHONPATH:+:$PYTHONPATH}\"; until /usr/bin/python -c \"import intake.cli\" >/dev/null 2>&1; do echo \"intake newsletter timer: waiting for intake module path to become available\"; sleep 30; done; exec /usr/bin/python -m intake.cli newsletter --send'"
+after = ["network-online.target"]
+wants = ["network-online.target"]
+standard_output = "journal"
+standard_error = "journal"
+timer_description = "Email intake newsletter highlights daily"
+
+[jobs.environment]
+PYTHONUNBUFFERED = "1"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "*-*-* 20:00:00"
+persistent = true
+
+[jobs.cron]
+expression = "0 20 * * *"
+command = "mkdir -p $HOME/.local/share/intake-newsletter/runs && /bin/bash -lc 'export PYTHONPATH=\"$HOME/git/util-repos/intake${PYTHONPATH:+:$PYTHONPATH}\"; until /usr/bin/python -c \"import intake.cli\" >/dev/null 2>&1; do echo \"intake newsletter timer: waiting for intake module path to become available\"; sleep 30; done; exec /usr/bin/python -m intake.cli newsletter --send' >> $HOME/.local/share/intake-newsletter/runs/cron.log 2>&1"
+comments = ["Auto-generated from systemd timer: *-*-* 20:00:00"]
