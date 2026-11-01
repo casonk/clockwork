@@ -338,7 +338,7 @@ def test_the_form_defaults_to_a_gtc_limit_around_the_mark_and_makes_you_pick_the
     for needle in (
         '<option value="">Account…</option>',
         "function fillDefaults",
-        "good-till-cancelled limit",
+        "default: limit ",
         "tradeForm.elements.side.addEventListener('change', fillDefaults)",
         "includes('*')",
         "account: f.account || ''",
@@ -444,3 +444,20 @@ def test_the_page_shows_history_without_journals_and_makes_withdrawals_use_a_typ
     ):
         assert needle in html, needle
     assert html.index("withdrawCall('preview'") < html.index("withdrawCall('confirm'")
+
+
+def test_the_form_offers_the_trading_hours_and_duration_prefilled_from_the_policy():
+    from pathlib import Path
+
+    html = (
+        Path(__file__).resolve().parents[1] / "web" / "templates" / "to-tradility.html"
+    ).read_text(encoding="utf-8")
+    for needle in (
+        'name="session" aria-label="Trading hours"',
+        'name="tif" aria-label="Duration"',
+        "Extended hours",
+        "time_in_force || 'gtc'",
+        "extended hours)",
+        "...(f.session ? {session: f.session, tif: f.tif} : {})",
+    ):
+        assert needle in html, needle
