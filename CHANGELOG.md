@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Tradility on a phone, the real cause: each stack of detail cards sized itself to its widest card (the orders table and order form), so everything above Technical market rating was wider than the screen and ran off it. The stack's column is now `minmax(0, 1fr)` and cards can shrink; the page no longer clips what overflows. Measured at 390px wide: a card was 527px before and is 360px now.
 - Tradility on a phone: opening a card no longer zooms the page. The detail column could be stretched past the screen by the wide orders tables (the browser then zoomed out the layout), and form fields under 16px made iOS zoom in on focus. On narrow screens the column is `minmax(0, 1fr)`, tables scroll inside themselves, fields are 16px, buttons are taller to tap, and text size adjustment is pinned.
 
 - A Fidelity ticket has a **Stage on Fidelity** button when the trading policy allows driving Fidelity's website (`[fidelity] automation`): the service fills in Fidelity's own ticket in its browser, presses Fidelity's Preview and checks what it shows (symbol, action, quantity, price, type, duration, account) against the order, listing each check. In `stage` mode that is all; in `submit` mode a **Place order at Fidelity** button then presses the final button once, after the usual confirmation (button or typed phrase). Routes `POST /api/tradility-trade/fidelity-stage` and `fidelity-submit`.

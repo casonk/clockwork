@@ -349,7 +349,10 @@
     .range-track { height: 7px; background: var(--surface3); border-radius: 99px; position: relative; margin: 14px 0 5px; }
     .range-marker { position: absolute; top: -4px; width: 3px; height: 15px; background: var(--accent); border-radius: 2px; transform: translateX(-50%); }
     .range-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted-fg); }
-    .detail-stack { display: grid; gap: 12px; }
+    /* minmax(0, 1fr) and min-width: 0 let a card shrink to the stack; an auto track would grow to the
+       widest thing in it (a wide table, the order form) and push the whole stack off a narrow screen */
+    .detail-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
+    .detail-card { min-width: 0; }
     #detail-orders-card { order: 2; }  /* the chart comes first, then the position and orders */
     .detail-loading { padding: 70px 20px; text-align: center; color: var(--muted-fg); }
     @media (max-width: 720px) {
@@ -358,7 +361,6 @@
       /* minmax(0, 1fr): a plain 1fr lets a wide table stretch the column past the screen, which the
          phone answers by zooming the page; the tables scroll inside themselves instead */
       .detail-layout { grid-template-columns: minmax(0, 1fr); }
-      .detail-panel { overflow-x: hidden; }
       .detail-chart-wrap { height: 260px; }
       .detail-header { flex-wrap: wrap; gap: 8px; }
       .detail-title { flex-basis: 100%; }
