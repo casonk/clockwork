@@ -91,3 +91,56 @@ def test_the_chart_range_is_shared_by_every_card_and_remembered():
     assert "const RANGE_KEY = 'tradility-detail-range';" in TEMPLATE
     assert "localStorage.setItem(RANGE_KEY, range)" in TEMPLATE
     assert "if (!RANGES.includes(range)) return;" in TEMPLATE
+
+
+@needs_node
+def test_fundamentals_read_as_a_buy_probability_and_join_the_others():
+    r = run_node(f"""
+        const base = {json.dumps(TICKER)};
+        const strong = {{...base, fundamental_signal_count: 8, fundamental_score: 8, fundamental_rating: 'strong_buy'}};
+        const weak = {{...base, fundamental_signal_count: 8, fundamental_score: -8, fundamental_rating: 'strong_sell'}};
+        const none = {{...base, fundamental_rating: 'unavailable', fundamental_signal_count: 3, fundamental_score: 3}};
+        console.log(JSON.stringify({{
+          strong: signalT(strong, 'fund'), weak: signalT(weak, 'fund'), none: signalT(none, 'fund'),
+          missing: signalT(base, 'fund'), joint: jointT(strong, ['trend', 'fund']).t,
+        }}));
+        """)
+    assert r["strong"] == pytest.approx(0.9) and r["weak"] == pytest.approx(0.1)
+    assert r["none"] is None and r["missing"] is None
+    assert r["joint"] > 0.9
+
+
+def test_the_fundamentals_card_and_button_are_in_the_page():
+    assert 'data-ind="fund"' in TEMPLATE and "Fundamentals · Schwab" in TEMPLATE
+    assert "${fundamentalsCardHtml(t)}" in TEMPLATE
+
+
+@needs_node
+def test_the_fundamentals_card_renders_signals_figures_and_fund_notes():
+    start = TEMPLATE.index("  const FUND_LABELS = [")
+    end = TEMPLATE.index("  function setDetailRange(")
+    code = (
+        "const esc = s => String(s); const ratingLabel = v => v; const ratingClass = v => 'c-' + v;\n"
+        + TEMPLATE[start:end]
+    )
+    t = {
+        "fundamentals": {"pe": 12.0, "roe": 22.0, "market_cap": 5.03e12, "beta": 1.1},
+        "fundamental_signals": [
+            {"key": "pe", "label": "Valuation (P/E)", "value": 12.0, "signal": "buy", "rule": "r"}
+        ],
+        "fundamental_rating": "buy",
+        "fundamental_score": 1,
+        "fundamental_signal_count": 4,
+    }
+    fund = {"fundamentals": {"beta": 1.0}}
+    render = (
+        "console.log(JSON.stringify(["
+        f"fundamentalsCardHtml({json.dumps(t)}), "
+        f"fundamentalsCardHtml({json.dumps(fund)}), "
+        "fundamentalsCardHtml({})]));"
+    )
+    out = subprocess.run(["node", "-e", code + render], capture_output=True, text=True, check=True)
+    company, etf, empty = json.loads(out.stdout)
+    assert "12.00x · buy" in company and "$5.03T" in company and "22.00%" in company
+    assert "+1 / 4" in company and "c-buy" in company
+    assert "no buy or sell rules" in etf and empty == ""
