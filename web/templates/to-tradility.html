@@ -60,6 +60,32 @@
     /* strength: weak is dashed and quiet, strong is solid and bold; the tag spells it out */
     .ind-btn.lvl-weak { border-style: dashed; opacity: 0.8; }
     .ind-btn.lvl-strong { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+    .ind-settings { position: relative; }
+    .ind-settings > summary {
+      list-style: none; cursor: pointer; padding: 5px 12px; border-radius: 99px;
+      border: 1px solid var(--border); background: var(--surface2); color: var(--muted-fg);
+      font-size: 12px; font-weight: 600;
+    }
+    .ind-settings > summary::-webkit-details-marker { display: none; }
+    .ind-settings[open] > summary { color: var(--accent); border-color: var(--accent); }
+    .ind-settings-body {
+      position: absolute; z-index: 60; top: calc(100% + 6px); left: 0; width: min(420px, 92vw);
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      box-shadow: 0 8px 28px rgba(0,0,0,0.35); padding: 12px 14px; display: grid; gap: 12px;
+    }
+    .ind-set { display: grid; gap: 6px; }
+    .ind-set h4 { margin: 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted-fg); }
+    .ind-set-row { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 12px; }
+    .ind-set-row label { display: inline-flex; gap: 5px; align-items: center; color: var(--text); }
+    .ind-set select {
+      background: var(--bg); color: var(--text); border: 1px solid var(--border);
+      border-radius: 6px; padding: 3px 6px; font-size: 12px;
+    }
+    .ind-set-reset {
+      justify-self: start; padding: 4px 12px; border-radius: 99px; cursor: pointer;
+      border: 1px solid var(--border); background: var(--surface2); color: var(--muted-fg); font-size: 12px;
+    }
+    .ind-set-reset:hover { color: var(--text); border-color: var(--muted-fg); }
     .ind-tag { font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; margin-left: 5px; }
     .ind-tag:empty { display: none; }
 
@@ -403,11 +429,16 @@
 <div class="controls">
   <span class="controls-label" title="Select one or more. Several are combined into one joint buy probability.">Indicators</span>
   <div class="indicator-group" role="group" aria-label="Indicators (select several to combine them)">
-    <button class="ind-btn active" data-ind="rsi" data-name="RSI 14" aria-pressed="true" onclick="toggleIndicator('rsi')">RSI 14<span class="ind-tag"></span></button>
-    <button class="ind-btn" data-ind="vwap" data-name="VWAP 20" aria-pressed="false" onclick="toggleIndicator('vwap')">VWAP 20<span class="ind-tag"></span></button>
-    <button class="ind-btn" data-ind="trend" data-name="Trend 50/200" aria-pressed="false" onclick="toggleIndicator('trend')">Trend 50/200<span class="ind-tag"></span></button>
-    <button class="ind-btn" data-ind="fund" data-name="Fundamentals" aria-pressed="false" onclick="toggleIndicator('fund')" title="Schwab fundamentals: valuation, profitability, growth, balance sheet">Fundamentals<span class="ind-tag"></span></button>
+    <button class="ind-btn active" data-ind="rsi"  aria-pressed="true" onclick="toggleIndicator('rsi')"><span class="ind-name">RSI 14</span><span class="ind-tag"></span></button>
+    <button class="ind-btn" data-ind="vwap"  aria-pressed="false" onclick="toggleIndicator('vwap')"><span class="ind-name">VWAP 20</span><span class="ind-tag"></span></button>
+    <button class="ind-btn" data-ind="trend"  aria-pressed="false" onclick="toggleIndicator('trend')"><span class="ind-name">Trend 50/200</span><span class="ind-tag"></span></button>
+    <button class="ind-btn" data-ind="fund"  aria-pressed="false" onclick="toggleIndicator('fund')" title="Schwab fundamentals: valuation, profitability, growth, balance sheet"><span class="ind-name">Fundamentals</span><span class="ind-tag"></span></button>
   </div>
+
+  <details class="ind-settings" id="ind-settings">
+    <summary title="Choose what each indicator measures">⚙ Settings</summary>
+    <div class="ind-settings-body" id="ind-settings-body"></div>
+  </details>
 
   <span class="controls-label" style="margin-left:6px">Class</span>
   <div class="filter-group" id="class-filters"></div>
@@ -504,28 +535,91 @@
     ];
   }
 
+  // ── Indicator settings ──────────────────────────────────────────────────────
+  // What each indicator measures, chosen from the Settings panel and kept in this browser. The
+  // server computes the alternative windows (indicator_variants), so a setting only picks one.
+  const DEFAULT_SETTINGS = {
+    rsi:   { period: 14, buy: 30, sell: 70 },          // window, and the oversold / overbought bands
+    vwap:  { window: 20, band: 3 },                     // window, and how far from VWAP is decisive (%)
+    trend: { short: 50, long: 200, gap: 5 },           // the two averages, and a decisive gap (%)
+    fund:  { groups: ['valuation', 'profitability', 'growth', 'balance', 'short'], agree: 50 },
+  };
+  const FUND_GROUPS = {
+    valuation: ['pe', 'peg'], profitability: ['roe', 'net_margin'], growth: ['rev_growth', 'eps_growth'],
+    balance: ['debt_to_equity', 'current_ratio', 'interest_coverage'], short: ['short_float'],
+  };
+  let settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+
+  // The value of a window the server computed; the standard windows also have their own fields.
+  const STANDARD_FIELD = { rsi: { 14: 'rsi_14' }, vwap: { 20: 'vwap_20' }, sma: { 50: 'sma_50', 200: 'sma_200' } };
+  function variant(ticker, kind, n) {
+    const found = ticker.indicator_variants && ticker.indicator_variants[kind]
+      ? ticker.indicator_variants[kind][String(n)] : undefined;
+    if (found != null) return found;
+    const field = STANDARD_FIELD[kind] && STANDARD_FIELD[kind][n];
+    return field && ticker[field] != null ? ticker[field] : null;
+  }
+  const rsiValue  = t => variant(t, 'rsi', settings.rsi.period);
+  const vwapValue = t => variant(t, 'vwap', settings.vwap.window);
+  function trendRead(t) {
+    const a = variant(t, 'sma', settings.trend.short), b = variant(t, 'sma', settings.trend.long);
+    const price = t.last_price;
+    if (a == null || b == null || price == null) {
+      const standard = settings.trend.short === 50 && settings.trend.long === 200;
+      return standard && t.long_term_trend && t.long_term_trend !== 'unknown' ? t.long_term_trend : null;
+    }
+    if (a > b && price > b) return 'bullish';
+    if (a < b && price < b) return 'bearish';
+    return 'mixed';
+  }
+  // The fundamental rules in the chosen groups: {score, n}, or null when too few apply.
+  function fundRead(t) {
+    const rules = t.fundamental_signals;
+    if (Array.isArray(rules)) {
+      const keys = new Set(settings.fund.groups.flatMap(g => FUND_GROUPS[g] || []));
+      const picked = rules.filter(r => keys.has(r.key));
+      const all = settings.fund.groups.length === Object.keys(FUND_GROUPS).length;
+      if (!picked.length || (all && t.fundamental_rating === 'unavailable') || (!all && picked.length < 2)) return null;
+      return { score: picked.reduce((sum, r) => sum + (r.score ?? (r.signal === 'buy' ? 1 : r.signal === 'sell' ? -1 : 0)), 0), n: picked.length };
+    }
+    const n = t.fundamental_signal_count;
+    if (!n || t.fundamental_rating === 'unavailable' || t.fundamental_score == null) return null;
+    return { score: t.fundamental_score, n };
+  }
+
+  // The rating word for a chosen set of fundamental rules, on the same scale as the server's.
+  function fundRating(read) {
+    const ratio = read.score / read.n;
+    return ratio >= 0.5 ? 'strong_buy' : ratio >= 0.2 ? 'buy' : ratio <= -0.5 ? 'strong_sell' : ratio <= -0.2 ? 'sell' : 'hold';
+  }
+  const indName = ind => ind === 'rsi' ? `RSI ${settings.rsi.period}`
+    : ind === 'vwap' ? `VWAP ${settings.vwap.window}`
+    : ind === 'trend' ? `Trend ${settings.trend.short}/${settings.trend.long}` : 'Fundamentals';
+
   // Each indicator reads as a probability that the ticker is a buy: t=1 buy/green, t=0 sell/red
   // (inverse of the raw colormap for RSI/VWAP). null means the indicator has no value.
   function signalT(ticker, ind) {
     if (ticker.fetch_status === 'error') return null;
     if (ind === 'rsi') {
-      if (ticker.rsi_14 == null) return null;
-      return 1 - ticker.rsi_14 / 100;          // RSI 0→t=1 (green), RSI 100→t=0 (red)
+      const v = rsiValue(ticker);
+      if (v == null) return null;
+      return 1 - v / 100;                      // RSI 0→t=1 (green), RSI 100→t=0 (red)
     } else if (ind === 'vwap') {
-      const p = ticker.last_price, v = ticker.vwap_20;
+      const p = ticker.last_price, v = vwapValue(ticker);
       if (p == null || v == null || v === 0) return null;
       const d = (p - v) / v;                   // % above/below VWAP
       return Math.max(0, Math.min(1, 0.5 - d / 0.6));  // ±30% mapped to [0,1]
     }
     if (ind === 'fund') {
       // the share of fundamental rules that lean one way, held to 0.1–0.9 like the other reads
-      const n = ticker.fundamental_signal_count;
-      if (!n || ticker.fundamental_rating === 'unavailable' || ticker.fundamental_score == null) return null;
-      return 0.5 + 0.4 * Math.max(-1, Math.min(1, ticker.fundamental_score / n));
+      const read = fundRead(ticker);
+      if (!read) return null;
+      return 0.5 + 0.4 * Math.max(-1, Math.min(1, read.score / read.n));
     }
-    if (ticker.long_term_trend === 'bullish') return 0.85;
-    if (ticker.long_term_trend === 'bearish') return 0.15;
-    if (ticker.long_term_trend === 'mixed') return 0.5;
+    const read = trendRead(ticker);
+    if (read === 'bullish') return 0.85;
+    if (read === 'bearish') return 0.15;
+    if (read === 'mixed') return 0.5;
     return null;
   }
 
@@ -543,13 +637,22 @@
   const LEVEL_WEIGHT = { weak: 0.5, normal: 1, strong: 2 };
   const LEVELS = ['weak', 'normal', 'strong'];
   function decisive(ticker, ind) {
-    if (ind === 'rsi') return ticker.rsi_14 <= 30 || ticker.rsi_14 >= 70;
-    if (ind === 'vwap') return Math.abs((ticker.last_price - ticker.vwap_20) / ticker.vwap_20) >= 0.03;
-    if (ind === 'fund') return Math.abs(ticker.fundamental_score / ticker.fundamental_signal_count) >= 0.5;
-    if (ticker.sma_50 != null && ticker.sma_200) {
-      return Math.abs((ticker.sma_50 - ticker.sma_200) / ticker.sma_200) >= 0.05;   // 50/200 spread
+    if (ind === 'rsi') {
+      const v = rsiValue(ticker);
+      return v <= settings.rsi.buy || v >= settings.rsi.sell;
     }
-    return ticker.long_term_trend === 'bullish' || ticker.long_term_trend === 'bearish';
+    if (ind === 'vwap') {
+      const v = vwapValue(ticker);
+      return Math.abs((ticker.last_price - v) / v) >= settings.vwap.band / 100;
+    }
+    if (ind === 'fund') {
+      const read = fundRead(ticker);
+      return Math.abs(read.score / read.n) >= settings.fund.agree / 100;
+    }
+    const a = variant(ticker, 'sma', settings.trend.short), b = variant(ticker, 'sma', settings.trend.long);
+    if (a != null && b) return Math.abs((a - b) / b) >= settings.trend.gap / 100;   // gap between the averages
+    const read = trendRead(ticker);
+    return read === 'bullish' || read === 'bearish';
   }
   function strengthT(ticker, ind, level) {
     const p = signalT(ticker, ind);
@@ -616,14 +719,14 @@
       document.getElementById('legend-lbl-sell').textContent = 'Joint buy probability low';
     } else if (activeIndicator() === 'rsi') {
       document.getElementById('legend-ticks').innerHTML =
-        '<span>0</span><span>30</span><span>50</span><span>70</span><span>100</span>';
+        `<span>0</span><span>${settings.rsi.buy}</span><span>50</span><span>${settings.rsi.sell}</span><span>100</span>`;
       document.getElementById('legend-lbl-buy').textContent  = 'Oversold (buy)';
       document.getElementById('legend-lbl-mid').textContent  = 'Neutral';
       document.getElementById('legend-lbl-sell').textContent = 'Overbought (sell)';
     } else if (activeIndicator() === 'vwap') {
       document.getElementById('legend-ticks').innerHTML =
         '<span>−30%</span><span>−15%</span><span>0%</span><span>+15%</span><span>+30%</span>';
-      document.getElementById('legend-lbl-buy').textContent  = 'Below VWAP (buy)';
+      document.getElementById('legend-lbl-buy').textContent  = `Below VWAP ${settings.vwap.window} (buy)`;
       document.getElementById('legend-lbl-mid').textContent  = 'At VWAP';
       document.getElementById('legend-lbl-sell').textContent = 'Above VWAP (sell)';
     } else if (activeIndicator() === 'fund') {
@@ -635,9 +738,9 @@
     } else {
       document.getElementById('legend-ticks').innerHTML =
         '<span>Bullish</span><span></span><span>Mixed</span><span></span><span>Bearish</span>';
-      document.getElementById('legend-lbl-buy').textContent  = '50-day above 200-day';
+      document.getElementById('legend-lbl-buy').textContent  = `${settings.trend.short}-day above ${settings.trend.long}-day`;
       document.getElementById('legend-lbl-mid').textContent  = 'Mixed';
-      document.getElementById('legend-lbl-sell').textContent = '50-day below 200-day';
+      document.getElementById('legend-lbl-sell').textContent = `${settings.trend.short}-day below ${settings.trend.long}-day`;
     }
   }
 
@@ -885,7 +988,8 @@
       b.classList.toggle('lvl-strong', level === 'strong');
       b.setAttribute('aria-pressed', String(on));
       b.querySelector('.ind-tag').textContent = on ? LEVEL_TAG[level] : '';
-      b.setAttribute('aria-label', `${b.dataset.name}: ${on ? level : 'off'}. Click to change strength.`);
+      b.querySelector('.ind-name').textContent = indName(ind);
+      b.setAttribute('aria-label', `${indName(ind)}: ${on ? level : 'off'}. Click to change strength.`);
     });
   }
   function toggleIndicator(ind) {
@@ -946,37 +1050,39 @@
     const note = many && own !== null
       ? `${Math.round(own * 100)}% buy${level === 'normal' ? '' : ' · ' + level}` : '';
     if (ind === 'rsi') {
-      const value = t.rsi_14 != null ? t.rsi_14.toFixed(1) : '—';
+      const rsiV = rsiValue(t);
+      const value = rsiV != null ? rsiV.toFixed(1) : '—';
       let extra = '';
-      if (t.rsi_14 != null && !many) {
-        const pct  = Math.min(100, Math.max(0, t.rsi_14));
+      if (rsiV != null && !many) {
+        const pct  = Math.min(100, Math.max(0, rsiV));
         const fill = pal ? `background:${pal.fill}` : '';
         extra = `<div class="rsi-bar-wrap"><div class="rsi-bar-fill" style="width:${pct}%;${fill}"></div></div>`;
       }
-      return { label: 'RSI 14', value, extra, note };
+      return { label: indName('rsi'), value, extra, note };
     }
     if (ind === 'vwap') {
       let extra = '';
-      if (t.last_price != null && t.vwap_20 != null && t.vwap_20 !== 0) {
-        const delta = (t.last_price - t.vwap_20) / t.vwap_20 * 100;
+      const v = vwapValue(t);
+      if (t.last_price != null && v != null && v !== 0) {
+        const delta = (t.last_price - v) / v * 100;
         extra = `<div class="vwap-delta" style="${col}">${delta >= 0 ? '+' : ''}${delta.toFixed(2)}% vs VWAP</div>`;
       }
-      return { label: 'VWAP 20', value: t.vwap_20 != null ? fmtPrice(t.vwap_20) : '—', extra, note };
+      return { label: indName('vwap'), value: v != null ? fmtPrice(v) : '—', extra, note };
     }
     if (ind === 'fund') {
-      const n = t.fundamental_signal_count;
-      const value = n && t.fundamental_rating !== 'unavailable' ? ratingLabel(t.fundamental_rating) : '—';
-      const extra = n ? `<div class="vwap-delta" style="${col}">${n} rules · score ${t.fundamental_score >= 0 ? '+' : ''}${t.fundamental_score}</div>` : '';
+      const read = fundRead(t);
+      const value = read ? ratingLabel(fundRating(read)) : '—';
+      const extra = read ? `<div class="vwap-delta" style="${col}">${read.n} rules · score ${read.score >= 0 ? '+' : ''}${read.score}</div>` : '';
       return { label: 'Fundamentals', value, extra, note };
     }
     let extra = '';
-    if (t.sma_50 != null && t.sma_200 != null && t.sma_200 !== 0) {
-      const spread = (t.sma_50 - t.sma_200) / t.sma_200 * 100;
-      extra = `<div class="vwap-delta" style="${col}">${spread >= 0 ? '+' : ''}${spread.toFixed(2)}% 50/200 spread</div>`;
+    const a = variant(t, 'sma', settings.trend.short), b = variant(t, 'sma', settings.trend.long);
+    if (a != null && b) {
+      const spread = (a - b) / b * 100;
+      extra = `<div class="vwap-delta" style="${col}">${spread >= 0 ? '+' : ''}${spread.toFixed(2)}% ${settings.trend.short}/${settings.trend.long} spread</div>`;
     }
-    const value = t.sma_50 != null && t.sma_200 != null
-      ? `${fmtPrice(t.sma_50)} / ${fmtPrice(t.sma_200)}` : '—';
-    return { label: 'SMA 50 / 200', value, extra, note };
+    const value = a != null && b ? `${fmtPrice(a)} / ${fmtPrice(b)}` : '—';
+    return { label: `SMA ${settings.trend.short} / ${settings.trend.long}`, value, extra, note };
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -1081,14 +1187,15 @@
         if (many) {
           badge = t._t > 0.6 ? 'Buy' : t._t < 0.4 ? 'Sell' : 'Neutral';
         } else if (activeIndicator() === 'rsi') {
-          badge = t._t > 0.7 ? 'Oversold' : t._t < 0.3 ? 'Overbought' : 'Neutral';
+          const rv = rsiValue(t);
+          badge = rv <= settings.rsi.buy ? 'Oversold' : rv >= settings.rsi.sell ? 'Overbought' : 'Neutral';
         } else if (activeIndicator() === 'vwap') {
           badge = t._t > 0.55 ? 'Below' : t._t < 0.45 ? 'Above' : 'At VWAP';
         } else if (activeIndicator() === 'fund') {
           badge = t._t > 0.6 ? 'Strong' : t._t < 0.4 ? 'Weak' : 'Mixed';
         } else {
-          badge = t.long_term_trend === 'bullish' ? 'Bullish'
-            : t.long_term_trend === 'bearish' ? 'Bearish' : 'Mixed';
+          const tr = trendRead(t);
+          badge = tr === 'bullish' ? 'Bullish' : tr === 'bearish' ? 'Bearish' : 'Mixed';
         }
       } else {
         badge = t.fetch_status === 'error' ? 'No data' : '—';
@@ -2497,6 +2604,83 @@
       .replace(/&/g,'&amp;').replace(/</g,'&lt;')
       .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
+
+  // ── Indicator settings panel ─────────────────────────────────────────────────
+  const SETTINGS_KEY = 'tradility-indicator-settings';
+  const SMA_PAIRS = ['20/50', '20/100', '50/100', '50/200', '100/200', '200/300'];
+  const FUND_GROUP_LABELS = {
+    valuation: 'Valuation (P/E, PEG)', profitability: 'Profitability (ROE, margin)',
+    growth: 'Growth (revenue, earnings)', balance: 'Balance sheet (debt, liquidity, coverage)',
+    short: 'Short interest',
+  };
+  function saveSettings() {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (_) { /* private mode */ }
+  }
+  function loadSettings() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
+      if (!saved || typeof saved !== 'object') return;
+      for (const key of Object.keys(DEFAULT_SETTINGS)) {
+        if (saved[key] && typeof saved[key] === 'object') Object.assign(settings[key], saved[key]);
+      }
+      settings.fund.groups = (settings.fund.groups || []).filter(g => g in FUND_GROUPS);
+      if (!settings.fund.groups.length) settings.fund.groups = [...DEFAULT_SETTINGS.fund.groups];
+    } catch (_) { /* unreadable settings fall back to the defaults */ }
+  }
+  function setting(path, value) {
+    const [group, key] = path.split('.');
+    settings[group][key] = value;
+    applySettings();
+  }
+  function toggleFundGroup(group, on) {
+    const next = new Set(settings.fund.groups);
+    if (on) next.add(group); else next.delete(group);
+    if (!next.size) { buildSettingsPanel(); return; }   // keep at least one group
+    settings.fund.groups = Object.keys(FUND_GROUPS).filter(g => next.has(g));
+    applySettings();
+  }
+  function resetSettings() {
+    settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+    buildSettingsPanel();
+    applySettings();
+  }
+  function applySettings() {
+    saveSettings();
+    paintIndicatorButtons();
+    paintLegend();
+    renderGrid();
+  }
+  function selectHtml(path, current, options, suffix = '') {
+    return `<select onchange="setting('${path}', Number(this.value))">${options.map(o =>
+      `<option value="${o}" ${Number(o) === Number(current) ? 'selected' : ''}>${o}${suffix}</option>`).join('')}</select>`;
+  }
+  function buildSettingsPanel() {
+    const s = settings;
+    document.getElementById('ind-settings-body').innerHTML = `
+      <div class="ind-set"><h4>RSI</h4><div class="ind-set-row">
+        <label>Period ${selectHtml('rsi.period', s.rsi.period, [7, 14, 21], ' days')}</label>
+        <label>Oversold at or below ${selectHtml('rsi.buy', s.rsi.buy, [20, 25, 30, 35, 40])}</label>
+        <label>Overbought at or above ${selectHtml('rsi.sell', s.rsi.sell, [60, 65, 70, 75, 80])}</label>
+      </div></div>
+      <div class="ind-set"><h4>VWAP</h4><div class="ind-set-row">
+        <label>Window ${selectHtml('vwap.window', s.vwap.window, [10, 20, 50], ' days')}</label>
+        <label>Decisive beyond ±${selectHtml('vwap.band', s.vwap.band, [1, 3, 5, 10], '%')}</label>
+      </div></div>
+      <div class="ind-set"><h4>Trend</h4><div class="ind-set-row">
+        <label>Averages <select onchange="const [a, b] = this.value.split('/').map(Number); settings.trend.short = a; settings.trend.long = b; applySettings();">${SMA_PAIRS.map(pair =>
+          `<option value="${pair}" ${pair === s.trend.short + '/' + s.trend.long ? 'selected' : ''}>${pair}-day</option>`).join('')}</select></label>
+        <label>Decisive gap ${selectHtml('trend.gap', s.trend.gap, [2, 5, 10], '%')}</label>
+      </div></div>
+      <div class="ind-set"><h4>Fundamentals</h4><div class="ind-set-row">
+        ${Object.keys(FUND_GROUPS).map(g => `<label><input type="checkbox" ${s.fund.groups.includes(g) ? 'checked' : ''} onchange="toggleFundGroup('${g}', this.checked)">${FUND_GROUP_LABELS[g]}</label>`).join('')}
+      </div><div class="ind-set-row">
+        <label>Decisive when rules agree ${selectHtml('fund.agree', s.fund.agree, [50, 75, 100], '%')}</label>
+      </div></div>
+      <button type="button" class="ind-set-reset" onclick="resetSettings()">Reset to defaults</button>`;
+  }
+  loadSettings();
+  buildSettingsPanel();
+  paintIndicatorButtons();
 
   // Repaint legend after fonts/layout settle
   window.addEventListener('load', paintLegend);
