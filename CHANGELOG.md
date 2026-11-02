@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Tradility: a Fundamentals · Schwab card in each company's detail (the reported figures and the buy/neutral/sell rule behind each, with its threshold on hover), and a Fundamentals indicator button that joins RSI, VWAP and trend in the card colouring and the joint buy probability. Funds and ETFs show figures without rules.
 - Tradility on a phone, the real cause: each stack of detail cards sized itself to its widest card (the orders table and order form), so everything above Technical market rating was wider than the screen and ran off it. The stack's column is now `minmax(0, 1fr)` and cards can shrink; the page no longer clips what overflows. Measured at 390px wide: a card was 527px before and is 360px now.
 - Tradility on a phone: opening a card no longer zooms the page. The detail column could be stretched past the screen by the wide orders tables (the browser then zoomed out the layout), and form fields under 16px made iOS zoom in on focus. On narrow screens the column is `minmax(0, 1fr)`, tables scroll inside themselves, fields are 16px, buttons are taller to tap, and text size adjustment is pinned.
 

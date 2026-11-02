@@ -401,6 +401,7 @@
     <button class="ind-btn active" data-ind="rsi"   aria-pressed="true"  onclick="toggleIndicator('rsi')">RSI 14</button>
     <button class="ind-btn"        data-ind="vwap"  aria-pressed="false" onclick="toggleIndicator('vwap')">VWAP 20</button>
     <button class="ind-btn"        data-ind="trend" aria-pressed="false" onclick="toggleIndicator('trend')">Trend 50/200</button>
+    <button class="ind-btn"        data-ind="fund"  aria-pressed="false" onclick="toggleIndicator('fund')" title="Schwab fundamentals: valuation, profitability, growth, balance sheet">Fundamentals</button>
   </div>
 
   <span class="controls-label" style="margin-left:6px">Class</span>
@@ -511,6 +512,12 @@
       const d = (p - v) / v;                   // % above/below VWAP
       return Math.max(0, Math.min(1, 0.5 - d / 0.6));  // ±30% mapped to [0,1]
     }
+    if (ind === 'fund') {
+      // the share of fundamental rules that lean one way, held to 0.1–0.9 like the other reads
+      const n = ticker.fundamental_signal_count;
+      if (!n || ticker.fundamental_rating === 'unavailable' || ticker.fundamental_score == null) return null;
+      return 0.5 + 0.4 * Math.max(-1, Math.min(1, ticker.fundamental_score / n));
+    }
     if (ticker.long_term_trend === 'bullish') return 0.85;
     if (ticker.long_term_trend === 'bearish') return 0.15;
     if (ticker.long_term_trend === 'mixed') return 0.5;
@@ -591,6 +598,12 @@
       document.getElementById('legend-lbl-buy').textContent  = 'Below VWAP (buy)';
       document.getElementById('legend-lbl-mid').textContent  = 'At VWAP';
       document.getElementById('legend-lbl-sell').textContent = 'Above VWAP (sell)';
+    } else if (activeIndicator() === 'fund') {
+      document.getElementById('legend-ticks').innerHTML =
+        '<span>Strong</span><span></span><span>Mixed</span><span></span><span>Weak</span>';
+      document.getElementById('legend-lbl-buy').textContent  = 'Fundamentals favour a buy';
+      document.getElementById('legend-lbl-mid').textContent  = 'Mixed';
+      document.getElementById('legend-lbl-sell').textContent = 'Fundamentals favour a sell';
     } else {
       document.getElementById('legend-ticks').innerHTML =
         '<span>Bullish</span><span></span><span>Mixed</span><span></span><span>Bearish</span>';
@@ -899,6 +912,12 @@
       }
       return { label: 'VWAP 20', value: t.vwap_20 != null ? fmtPrice(t.vwap_20) : '—', extra, note };
     }
+    if (ind === 'fund') {
+      const n = t.fundamental_signal_count;
+      const value = n && t.fundamental_rating !== 'unavailable' ? ratingLabel(t.fundamental_rating) : '—';
+      const extra = n ? `<div class="vwap-delta" style="${col}">${n} rules · score ${t.fundamental_score >= 0 ? '+' : ''}${t.fundamental_score}</div>` : '';
+      return { label: 'Fundamentals', value, extra, note };
+    }
     let extra = '';
     if (t.sma_50 != null && t.sma_200 != null && t.sma_200 !== 0) {
       const spread = (t.sma_50 - t.sma_200) / t.sma_200 * 100;
@@ -1014,6 +1033,8 @@
           badge = t._t > 0.7 ? 'Oversold' : t._t < 0.3 ? 'Overbought' : 'Neutral';
         } else if (activeIndicator() === 'vwap') {
           badge = t._t > 0.55 ? 'Below' : t._t < 0.45 ? 'Above' : 'At VWAP';
+        } else if (activeIndicator() === 'fund') {
+          badge = t._t > 0.6 ? 'Strong' : t._t < 0.4 ? 'Weak' : 'Mixed';
         } else {
           badge = t.long_term_trend === 'bullish' ? 'Bullish'
             : t.long_term_trend === 'bearish' ? 'Bearish' : 'Mixed';
@@ -1272,6 +1293,7 @@
             </div>
             <p class="detail-disclaimer">Rule-based technical composite—not analyst consensus or investment advice. Authorized analyst ratings remain a separate planned data source.</p>
           </section>
+          ${fundamentalsCardHtml(t)}
           <section class="detail-card">
             <div class="detail-card-title">52-week range</div>
             <div class="range-track"><span class="range-marker" style="left:${position}%"></span></div>
@@ -1293,6 +1315,52 @@
         </div>
       </div>`;
     requestAnimationFrame(drawDetailChart);
+  }
+
+  // Schwab fundamentals: the figures, and for companies the rules that read them as buy or sell.
+  const FUND_LABELS = [
+    ['pe', 'P/E', 'x'], ['peg', 'PEG', 'x'], ['pb', 'Price / book', 'x'], ['roe', 'Return on equity', '%'],
+    ['net_margin', 'Net margin', '%'], ['gross_margin', 'Gross margin', '%'],
+    ['rev_growth', 'Revenue growth (year)', '%'], ['eps_growth', 'EPS growth (TTM)', '%'],
+    ['debt_to_equity', 'Debt / equity', '%'], ['current_ratio', 'Current ratio', 'x'],
+    ['interest_coverage', 'Interest coverage', 'x'], ['dividend_yield', 'Dividend yield', '%'],
+    ['short_float', 'Short interest / float', '%'], ['beta', 'Beta', ''],
+    ['market_cap', 'Market cap', '$'], ['eps_ttm', 'EPS (TTM)', '$'],
+  ];
+  function fundNumber(value, unit) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    if (unit === '$' && Math.abs(n) >= 1e6) {
+      const units = [[1e12, 'T'], [1e9, 'B'], [1e6, 'M']];
+      const [div, suffix] = units.find(([d]) => Math.abs(n) >= d);
+      return '$' + (n / div).toFixed(2) + suffix;
+    }
+    const text = Math.abs(n) >= 100 ? n.toFixed(0) : n.toFixed(2);
+    return unit === '$' ? '$' + text : unit === '%' ? text + '%' : unit === 'x' ? text + 'x' : text;
+  }
+  function fundamentalsCardHtml(t) {
+    const f = t.fundamentals;
+    if (!f || !Object.keys(f).length) return '';
+    const read = t.fundamental_signals || [];
+    const rating = t.fundamental_rating;
+    const head = read.length && rating !== 'unavailable' ? `
+      <div class="detail-rating">
+        <span class="detail-rating-label ${ratingClass(rating)}">${esc(ratingLabel(rating))}</span>
+        <strong>${t.fundamental_score >= 0 ? '+' : ''}${t.fundamental_score} / ${t.fundamental_signal_count}</strong>
+      </div>` : '';
+    const signals = read.map(r => `<div class="component-row" title="${esc(r.rule)}"><span>${esc(r.label)}</span><strong class="${r.signal === 'buy' ? 'rating-positive' : r.signal === 'sell' ? 'rating-negative' : 'rating-neutral'}">${fundNumber(r.value, (FUND_LABELS.find(x => x[0] === r.key) || [])[2] || '')} · ${esc(r.signal)}</strong></div>`).join('');
+    const shown = new Set(read.map(r => r.key));
+    const others = FUND_LABELS.filter(([k]) => f[k] != null && !shown.has(k))
+      .map(([k, label, unit]) => `<div class="detail-meta-row"><span>${esc(label)}</span><strong>${fundNumber(f[k], unit)}</strong></div>`).join('');
+    const note = read.length ? '' : '<p class="detail-disclaimer">Funds report aggregates that do not read the same way, so no buy or sell rules are applied.</p>';
+    return `
+      <section class="detail-card" id="detail-fundamentals-card">
+        <div class="detail-card-title">Fundamentals · Schwab</div>
+        ${head}
+        <div class="component-list">${signals}${others}</div>
+        ${note}
+        <p class="detail-disclaimer">Rule-based reads of Schwab's reported figures (hover a row for its threshold)—a separate view from the technical rating, not analyst consensus or investment advice.</p>
+      </section>`;
   }
 
   function setDetailRange(range) {
