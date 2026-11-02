@@ -57,6 +57,11 @@
     }
     .ind-btn.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
     .ind-btn:hover:not(.active) { border-color: var(--muted-fg); color: var(--text); }
+    /* strength: weak is dashed and quiet, strong is solid and bold; the tag spells it out */
+    .ind-btn.lvl-weak { border-style: dashed; opacity: 0.8; }
+    .ind-btn.lvl-strong { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+    .ind-tag { font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; margin-left: 5px; }
+    .ind-tag:empty { display: none; }
 
     .filter-group { display: flex; gap: 4px; flex-wrap: wrap; }
     .filter-btn {
@@ -398,10 +403,10 @@
 <div class="controls">
   <span class="controls-label" title="Select one or more. Several are combined into one joint buy probability.">Indicators</span>
   <div class="indicator-group" role="group" aria-label="Indicators (select several to combine them)">
-    <button class="ind-btn active" data-ind="rsi"   aria-pressed="true"  onclick="toggleIndicator('rsi')">RSI 14</button>
-    <button class="ind-btn"        data-ind="vwap"  aria-pressed="false" onclick="toggleIndicator('vwap')">VWAP 20</button>
-    <button class="ind-btn"        data-ind="trend" aria-pressed="false" onclick="toggleIndicator('trend')">Trend 50/200</button>
-    <button class="ind-btn"        data-ind="fund"  aria-pressed="false" onclick="toggleIndicator('fund')" title="Schwab fundamentals: valuation, profitability, growth, balance sheet">Fundamentals</button>
+    <button class="ind-btn active" data-ind="rsi" data-name="RSI 14" aria-pressed="true" onclick="toggleIndicator('rsi')">RSI 14<span class="ind-tag"></span></button>
+    <button class="ind-btn" data-ind="vwap" data-name="VWAP 20" aria-pressed="false" onclick="toggleIndicator('vwap')">VWAP 20<span class="ind-tag"></span></button>
+    <button class="ind-btn" data-ind="trend" data-name="Trend 50/200" aria-pressed="false" onclick="toggleIndicator('trend')">Trend 50/200<span class="ind-tag"></span></button>
+    <button class="ind-btn" data-ind="fund" data-name="Fundamentals" aria-pressed="false" onclick="toggleIndicator('fund')" title="Schwab fundamentals: valuation, profitability, growth, balance sheet">Fundamentals<span class="ind-tag"></span></button>
   </div>
 
   <span class="controls-label" style="margin-left:6px">Class</span>
@@ -529,20 +534,43 @@
   // reinforce each other and opposing ones cancel. Each p is held off 0 and 1 so one extreme
   // reading cannot settle the answer alone. Indicators with no value are left out; the card says
   // how many of the selected indicators contributed.
+  //
+  // An indicator also has a strength, cycled from its button. A weak one counts for half as much
+  // (its probability is raised to the power 0.5); a strong one counts double (power 2) and speaks
+  // only on a decisive reading, so a middling reading is left at an even 0.5. Normal is the plain
+  // read above. `levels` maps an indicator to 'weak' | 'normal' | 'strong' (default normal).
   const P_FLOOR = 0.02;
-  function jointT(ticker, inds) {
+  const LEVEL_WEIGHT = { weak: 0.5, normal: 1, strong: 2 };
+  const LEVELS = ['weak', 'normal', 'strong'];
+  function decisive(ticker, ind) {
+    if (ind === 'rsi') return ticker.rsi_14 <= 30 || ticker.rsi_14 >= 70;
+    if (ind === 'vwap') return Math.abs((ticker.last_price - ticker.vwap_20) / ticker.vwap_20) >= 0.03;
+    if (ind === 'fund') return Math.abs(ticker.fundamental_score / ticker.fundamental_signal_count) >= 0.5;
+    if (ticker.sma_50 != null && ticker.sma_200) {
+      return Math.abs((ticker.sma_50 - ticker.sma_200) / ticker.sma_200) >= 0.05;   // 50/200 spread
+    }
+    return ticker.long_term_trend === 'bullish' || ticker.long_term_trend === 'bearish';
+  }
+  function strengthT(ticker, ind, level) {
+    const p = signalT(ticker, ind);
+    if (p === null || level !== 'strong') return p;
+    return decisive(ticker, ind) ? p : 0.5;
+  }
+  function jointT(ticker, inds, levels) {
     let buy = 1, sell = 1, used = 0;
     for (const ind of inds) {
-      const p = signalT(ticker, ind);
+      const level = (levels && levels[ind]) || 'normal';
+      const p = strengthT(ticker, ind, level);
       if (p === null) continue;
       const q = Math.max(P_FLOOR, Math.min(1 - P_FLOOR, p));
-      buy *= q; sell *= 1 - q; used++;
+      const w = LEVEL_WEIGHT[level] || 1;
+      buy *= Math.pow(q, w); sell *= Math.pow(1 - q, w); used++;
     }
     return used ? { t: buy / (buy + sell), used } : null;
   }
 
   function colormapT(ticker) {
-    const joint = jointT(ticker, [...activeIndicators]);
+    const joint = jointT(ticker, [...activeIndicators], indicatorLevels);
     return joint ? joint.t : null;
   }
 
@@ -616,6 +644,7 @@
   // ── State ───────────────────────────────────────────────────────────────────
   let allTickers    = [];
   let activeIndicators = new Set(['rsi']);
+  let indicatorLevels  = {};   // indicator -> 'weak' | 'normal' | 'strong' (absent means normal)
   const activeIndicator = () => [...activeIndicators][0];
   let activeClasses   = new Set(['all']);
   let allClasses      = [];
@@ -837,18 +866,38 @@
   }
 
   // ── Indicator switch ─────────────────────────────────────────────────────────
+  // A button cycles off → weak → normal → strong → off. At least one indicator stays on, so the
+  // last one skips "off".
+  const LEVEL_TAG = { weak: 'weak', normal: '', strong: 'strong' };
+  function nextIndicatorState(ind) {
+    if (!activeIndicators.has(ind)) return 'weak';
+    const level = indicatorLevels[ind] || 'normal';
+    if (level === 'strong') return activeIndicators.size === 1 ? 'weak' : 'off';
+    return LEVELS[LEVELS.indexOf(level) + 1];
+  }
+  function paintIndicatorButtons() {
+    document.querySelectorAll('.ind-btn').forEach(b => {
+      const ind = b.dataset.ind;
+      const on = activeIndicators.has(ind);
+      const level = on ? (indicatorLevels[ind] || 'normal') : '';
+      b.classList.toggle('active', on);
+      b.classList.toggle('lvl-weak', level === 'weak');
+      b.classList.toggle('lvl-strong', level === 'strong');
+      b.setAttribute('aria-pressed', String(on));
+      b.querySelector('.ind-tag').textContent = on ? LEVEL_TAG[level] : '';
+      b.setAttribute('aria-label', `${b.dataset.name}: ${on ? level : 'off'}. Click to change strength.`);
+    });
+  }
   function toggleIndicator(ind) {
-    if (activeIndicators.has(ind)) {
-      if (activeIndicators.size === 1) return;   // keep at least one selected
+    const next = nextIndicatorState(ind);
+    if (next === 'off') {
       activeIndicators.delete(ind);
+      delete indicatorLevels[ind];
     } else {
       activeIndicators.add(ind);
+      indicatorLevels[ind] = next;
     }
-    document.querySelectorAll('.ind-btn').forEach(b => {
-      const on = activeIndicators.has(b.dataset.ind);
-      b.classList.toggle('active', on);
-      b.setAttribute('aria-pressed', String(on));
-    });
+    paintIndicatorButtons();
     paintLegend();
     renderGrid();
   }
@@ -892,8 +941,10 @@
   // several indicators are combined.
   function indicatorBlock(t, ind, pal, many) {
     const col = pal ? `color:${pal.fg}` : '';
-    const own = signalT(t, ind);
-    const note = many && own !== null ? `${Math.round(own * 100)}% buy` : '';
+    const level = indicatorLevels[ind] || 'normal';
+    const own = strengthT(t, ind, level);
+    const note = many && own !== null
+      ? `${Math.round(own * 100)}% buy${level === 'normal' ? '' : ' · ' + level}` : '';
     if (ind === 'rsi') {
       const value = t.rsi_14 != null ? t.rsi_14.toFixed(1) : '—';
       let extra = '';
@@ -1011,7 +1062,7 @@
 
       const price = t.last_price != null ? fmtPrice(t.last_price) : '—';
 
-      const joint = jointT(t, [...activeIndicators]);
+      const joint = jointT(t, [...activeIndicators], indicatorLevels);
       const many = activeIndicators.size > 1;
       const blocks = [...activeIndicators].map(ind => indicatorBlock(t, ind, pal, many));
       const indLabel = many ? 'Joint buy probability' : blocks[0].label;
