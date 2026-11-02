@@ -23,3 +23,10 @@ def test_form_fields_are_16px_so_ios_does_not_zoom_on_focus():
 
 def test_text_size_adjust_is_pinned():
     assert "text-size-adjust: 100%" in PAGE.read_text(encoding="utf-8")
+
+
+def test_a_detail_stack_cannot_be_widened_by_its_cards():
+    text = PAGE.read_text(encoding="utf-8")
+    stack = text[text.index(".detail-stack {") :].split("}", 1)[0]
+    assert "grid-template-columns: minmax(0, 1fr)" in stack and "min-width: 0" in stack
+    assert ".detail-card { min-width: 0; }" in text
