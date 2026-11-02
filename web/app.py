@@ -6782,6 +6782,7 @@ _SERVICE_ICONS: dict[str, str] = {
     "pit-box-remote-desktop": "🖥️",
     "nordility-web": "🛡️",
     "magneto-web": "🧲",
+    "auto-pass-web": "🔑",
     "session-control": "🤖",
 }
 
@@ -6793,6 +6794,7 @@ _REPO_GROUP: dict[str, str] = {
     "./util-repos/pit-box": "Pit Box",
     "./util-repos/nordility": "Infrastructure",
     "./util-repos/magneto": "Infrastructure",
+    "./util-repos/auto-pass": "Infrastructure",
     "./util-repos/session-control": "AI",
 }
 
