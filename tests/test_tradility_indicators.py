@@ -133,18 +133,13 @@ def test_the_fundamentals_card_renders_signals_figures_and_fund_notes():
         "fundamental_signal_count": 4,
     }
     fund = {"fundamentals": {"beta": 1.0}}
-    out = subprocess.run(
-        [
-            "node",
-            "-e",
-            code + f"""
-        console.log(JSON.stringify([fundamentalsCardHtml({json.dumps(t)}),
-          fundamentalsCardHtml({json.dumps(fund)}), fundamentalsCardHtml({{}})]));""",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
+    render = (
+        "console.log(JSON.stringify(["
+        f"fundamentalsCardHtml({json.dumps(t)}), "
+        f"fundamentalsCardHtml({json.dumps(fund)}), "
+        "fundamentalsCardHtml({})]));"
     )
+    out = subprocess.run(["node", "-e", code + render], capture_output=True, text=True, check=True)
     company, etf, empty = json.loads(out.stdout)
     assert "12.00x · buy" in company and "$5.03T" in company and "22.00%" in company
     assert "+1 / 4" in company and "c-buy" in company
