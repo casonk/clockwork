@@ -80,3 +80,52 @@ def test_settings_panel_changes_what_the_cards_read_without_script_errors():
         assert page.inner_text(".ind-btn[data-ind=rsi] .ind-name") == "RSI 14"
         browser.close()
     assert errors == []
+
+
+def test_accounts_panel_lists_bank_accounts_and_their_total():
+    html = web_app.app.test_client().get("/to-tradility").get_data(as_text=True)
+    accounts = {
+        "ok": True,
+        "generated_at": "2026-11-02T00:00:00Z",
+        "sources": {},
+        "accounts": [],
+        "statements": [],
+        "banks": [
+            {
+                "bank": "Huntington",
+                "name": "Platinum Perks Checking",
+                "type": "checking",
+                "mask": "1921",
+                "balance": 5045.65,
+                "as_of": "2026-04-10",
+                "money_in": 309.13,
+                "money_out": 2299.99,
+                "interest": 0.14,
+            }
+        ],
+    }
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+        page = browser.new_page(viewport={"width": 1200, "height": 800})
+        page.on("pageerror", lambda e: errors.append(str(e)))
+
+        def respond(route):
+            url = route.request.url
+            if "tradility-analysis" in url:
+                route.fulfill(json=DATA)
+            elif "tradility-accounts" in url:
+                route.fulfill(json=accounts)
+            else:
+                route.fulfill(json={"ok": False})
+
+        page.route("**/api/**", respond)
+        page.set_content(html.replace("</head>", "<base href='http://localhost/'></head>"))
+        page.wait_for_selector(".ticker-card")
+        page.click("#accounts-panel > summary")
+        page.wait_for_selector("#accounts-body .account-card")
+        text = page.inner_text("#accounts-panel")
+        browser.close()
+    assert "Huntington checking …1921" in text and "$5,045.65" in text
+    assert "bank accounts" in text and "not part of the investment totals" in text
+    assert errors == []
