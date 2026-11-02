@@ -1590,6 +1590,30 @@ def test_registry_entry_sets_top_bar_pin_and_icon(tmp_path, monkeypatch):
     assert [(c["name"], c["icon"]) for c in pinned] == [("example-web", "💼")]
 
 
+def test_auto_pass_registry_entry_gets_an_infrastructure_home_card(tmp_path, monkeypatch):
+    (tmp_path / "services.local.toml").write_text(
+        "[[services]]\n"
+        'name = "auto-pass-web"\n'
+        'description = "Auto Pass"\n'
+        'hostname = "passwords.example.invalid"\n'
+        'owner_repo = "./util-repos/auto-pass"\n'
+        'access_mode = "shared-mtls"\n'
+        'ingress = "wiring-harness-caddy"\n'
+        "port = 8081\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(web_app, "WIRING_HARNESS_DIR", tmp_path)
+
+    with web_app.app.test_request_context("/home"):
+        groups = dict(web_app._load_portal_groups())
+
+    card = groups["Infrastructure"][0]
+    assert card["name"] == "auto-pass-web"
+    assert card["display"] == "Auto Pass"
+    assert card["url"] == "https://passwords.example.invalid"
+    assert card["icon"] == "🔑"
+
+
 def test_site_navigation_groups_registry_services_and_keeps_pins_first(tmp_path, monkeypatch):
     (tmp_path / "services.local.toml").write_text(
         "[[services]]\n"

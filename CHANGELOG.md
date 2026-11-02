@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Auto Pass web example (`examples/auto-pass/web-service.toml`, loopback port 8081) and an Infrastructure card with a key icon for the `auto-pass-web` registry entry on Home.
 - Tradility: indicators have a strength. Each indicator button (RSI, VWAP, Trend, Fundamentals) cycles off → weak → normal → strong → off (the last one on skips off) and shows it as a tag. Weak counts half in the joint buy probability; strong counts double and speaks only on a decisive reading (RSI at or past 30/70, price 3% from VWAP, a 5% gap between the 50- and 200-day averages, or fundamentals with at least half the rules agreeing); normal is unchanged. Cards list each indicator's strength beside its read.
 - Tradility: a Fundamentals · Schwab card in each company's detail (the reported figures and the buy/neutral/sell rule behind each, with its threshold on hover), and a Fundamentals indicator button that joins RSI, VWAP and trend in the card colouring and the joint buy probability. Funds and ETFs show figures without rules.
 - Tradility on a phone, the real cause: each stack of detail cards sized itself to its widest card (the orders table and order form), so everything above Technical market rating was wider than the screen and ran off it. The stack's column is now `minmax(0, 1fr)` and cards can shrink; the page no longer clips what overflows. Measured at 390px wide: a card was 527px before and is 360px now.

@@ -72,6 +72,19 @@ def test_load_shock_relay_gmail_digest_manifest_parses_interval_timer():
     assert manifest.jobs[0].cron.expression == "0 * * * *"
 
 
+def test_load_auto_pass_web_manifest_uses_loopback_port_8081():
+    manifest = load_manifest(
+        Path(__file__).resolve().parent.parent / "examples" / "auto-pass" / "web-service.toml"
+    )
+
+    assert len(manifest.jobs) == 1
+    job = manifest.jobs[0]
+    assert job.name == "auto-pass-web"
+    assert job.service_type == "simple"
+    assert job.exec_start.endswith("auto-pass web --host 127.0.0.1 --port 8081")
+    assert job.after == ("network-online.target", "auto-pass-serve.service")
+
+
 def test_load_example_scheduler_intraday_manifest_parses_three_jobs():
     manifest = load_manifest(
         Path(__file__).resolve().parent.parent

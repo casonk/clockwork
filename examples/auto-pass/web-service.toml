@@ -1,0 +1,14 @@
+[[jobs]]
+name = "auto-pass-web"
+description = "Auto Pass credential administration UI — localhost FastAPI, mTLS terminated by Caddy"
+scope = "user"
+service_type = "simple"
+working_directory = "%h/git/util-repos/auto-pass"
+exec_start = "%h/.local/bin/auto-pass web --host 127.0.0.1 --port 8081"
+after = ["network-online.target", "auto-pass-serve.service"]
+wants = ["network-online.target", "auto-pass-serve.service"]
+restart = "on-failure"
+restart_sec = "5"
+standard_output = "journal"
+standard_error = "journal"
+service_install_wanted_by = ["default.target"]

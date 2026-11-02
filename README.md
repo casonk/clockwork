@@ -37,6 +37,11 @@ The tracked manifests under `examples/` use placeholder paths, usernames, and
 config locations on purpose. They show the scheduler shape without publishing
 machine-specific local paths or host identities.
 
+`examples/auto-pass/web-service.toml` runs the Auto Pass credential UI on
+loopback port 8081. Its private hostname and mTLS ingress remain in Wiring
+Harness's ignored local service registry; Clockwork turns that registry entry
+into the Auto Pass card on Home.
+
 ## Install
 
 ```bash
