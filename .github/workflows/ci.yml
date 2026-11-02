@@ -27,3 +27,7 @@ jobs:
       # slipped through a 3.10-3.12 matrix because every tested interpreter
       # agreed with each other and disagreed with the developer's.
       python-versions: '["3.10", "3.11", "3.12", "3.13", "3.14"]'
+      coverage: true
+      coverage-source: clockwork,web
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
