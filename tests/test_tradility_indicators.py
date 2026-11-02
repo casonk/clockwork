@@ -13,7 +13,7 @@ TEMPLATE = (
 
 
 def script(body: str) -> str:
-    start = TEMPLATE.index("  function signalT(")
+    start = TEMPLATE.index("  // ── Indicator settings")
     end = TEMPLATE.index("  function colormapT(")
     return TEMPLATE[start:end] + "\n" + body
 
@@ -202,3 +202,58 @@ def test_the_button_cycle_order_and_the_last_indicator_never_turns_off():
     )
     out = subprocess.run(["node", "-e", code], capture_output=True, text=True, check=True)
     assert json.loads(out.stdout) == ["normal", "strong", "off", "weak", "weak"]
+
+
+@needs_node
+def test_settings_choose_which_window_each_indicator_reads():
+    r = run_node("""
+        const t = {last_price: 102, rsi_14: 40, vwap_20: 100, sma_50: 110, sma_200: 100, long_term_trend: 'bullish',
+          indicator_variants: {rsi: {7: 20, 14: 40, 21: 55}, vwap: {10: 98, 20: 100, 50: 90},
+                               sma: {20: 95, 50: 110, 100: 105, 200: 100, 300: 90}}};
+        const out = {};
+        out.rsi14 = signalT(t, 'rsi');
+        settings.rsi.period = 7;  out.rsi7 = signalT(t, 'rsi');
+        settings.vwap.window = 50; out.vwap50 = signalT(t, 'vwap');
+        out.trend50_200 = signalT(t, 'trend');
+        settings.trend.short = 20; settings.trend.long = 100; out.trend20_100 = signalT(t, 'trend');
+        console.log(JSON.stringify(out));
+        """)
+    assert r["rsi14"] == pytest.approx(0.6) and r["rsi7"] == pytest.approx(0.8)
+    assert r["vwap50"] < 0.5  # price is above the 50-day VWAP
+    assert r["trend50_200"] == 0.85  # 50 > 200 and price above 200
+    assert r["trend20_100"] == 0.15  # 20-day below 100-day and price below it too: bearish
+
+
+@needs_node
+def test_a_strong_indicator_uses_the_chosen_bands_and_gaps():
+    r = run_node("""
+        const t = {last_price: 101, rsi_14: 38, vwap_20: 100, sma_50: 103, sma_200: 100, long_term_trend: 'bullish'};
+        const at = (ind) => jointT(t, [ind], {[ind]: 'strong'}).t;
+        const out = {};
+        out.rsiDefault = at('rsi');                       // 38 is not past the 30 band
+        settings.rsi.buy = 40; out.rsiWide = at('rsi');   // oversold at or below 40
+        out.trendDefault = at('trend');                   // 3% gap < 5%
+        settings.trend.gap = 2; out.trendWide = at('trend');
+        console.log(JSON.stringify(out));
+        """)
+    assert r["rsiDefault"] == pytest.approx(0.5) and r["rsiWide"] > 0.5
+    assert r["trendDefault"] == pytest.approx(0.5) and r["trendWide"] > 0.5
+
+
+@needs_node
+def test_fundamental_groups_pick_which_rules_count():
+    r = run_node("""
+        const rules = [
+          {key: 'pe', signal: 'buy', score: 1}, {key: 'peg', signal: 'buy', score: 1},
+          {key: 'roe', signal: 'sell', score: -1}, {key: 'net_margin', signal: 'sell', score: -1},
+          {key: 'rev_growth', signal: 'buy', score: 1}, {key: 'current_ratio', signal: 'neutral', score: 0}];
+        const t = {fundamental_signals: rules, fundamental_rating: 'hold'};
+        const out = {all: fundRead(t)};
+        settings.fund.groups = ['valuation'];
+        out.valuation = fundRead(t);
+        settings.fund.groups = ['short'];
+        out.none = fundRead(t);
+        console.log(JSON.stringify(out));
+        """)
+    assert r["all"] == {"score": 1, "n": 6} and r["valuation"] == {"score": 2, "n": 2}
+    assert r["none"] is None
