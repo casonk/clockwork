@@ -210,6 +210,7 @@
     .vwap-delta { font-size: 10px; font-weight: 600; margin-top: 4px; }
     .card-detail-cue { margin-top: 7px; font-size: 9px; color: var(--muted-fg); }
 
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
     /* ── Stock detail dialog ── */
     body.detail-open { overflow: hidden; }
     /* The detail view fills the window below the top bar (--detail-top is the bar's bottom edge, set from
@@ -354,8 +355,21 @@
     @media (max-width: 720px) {
       .detail-overlay { padding: 0; place-items: stretch; }
       .detail-panel { max-height: 100vh; width: 100%; border-radius: 0; padding: 15px; }
-      .detail-layout { grid-template-columns: 1fr; }
+      /* minmax(0, 1fr): a plain 1fr lets a wide table stretch the column past the screen, which the
+         phone answers by zooming the page; the tables scroll inside themselves instead */
+      .detail-layout { grid-template-columns: minmax(0, 1fr); }
+      .detail-panel { overflow-x: hidden; }
       .detail-chart-wrap { height: 260px; }
+      .detail-header { flex-wrap: wrap; gap: 8px; }
+      .detail-title { flex-basis: 100%; }
+      .orders-table { display: block; overflow-x: auto; max-width: 100%; }
+      .order-effect { min-width: 0; }
+      .order-form select, .order-form input, .order-form input[name=note],
+      .target-form input, .target-form select, .trade-box input[type=text] { max-width: 100%; }
+      /* 16px stops iOS zooming into a field on focus, and keeps the zoom after it */
+      input, select, textarea { font-size: 16px !important; }
+      .order-form button, .target-form button, .trade-box button, .template-chips button,
+      .order-actions button, .detail-range-btn { min-height: 36px; font-size: 13px; }
       .return-grid { grid-template-columns: repeat(3, 1fr); }
       .company-facts { grid-template-columns: 1fr; }
     }
