@@ -58,7 +58,7 @@ def test_missing_signals_are_left_out_and_counted_and_extremes_are_held_off():
 def test_the_indicator_buttons_toggle_and_keep_at_least_one():
     assert "toggleIndicator('rsi')" in TEMPLATE and "setIndicator(" not in TEMPLATE
     assert 'aria-pressed="true"' in TEMPLATE
-    assert "if (activeIndicators.size === 1) return;" in TEMPLATE
+    assert "activeIndicators.size === 1 ? 'weak' : 'off'" in TEMPLATE
 
 
 def test_the_detail_dialog_steps_through_the_cards_in_grid_order():
@@ -144,3 +144,61 @@ def test_the_fundamentals_card_renders_signals_figures_and_fund_notes():
     assert "12.00x · buy" in company and "$5.03T" in company and "22.00%" in company
     assert "+1 / 4" in company and "c-buy" in company
     assert "no buy or sell rules" in etf and empty == ""
+
+
+@needs_node
+def test_a_weak_indicator_counts_half_and_a_strong_one_double_but_only_when_decisive():
+    r = run_node(f"""
+        const t = {json.dumps(TICKER)};   // RSI 30 -> 0.70, decisive (<= 30)
+        const mid = {{...t, rsi_14: 45}};  // 0.55, not decisive
+        const at = (x, lvl) => jointT(x, ['rsi'], {{rsi: lvl}}).t;
+        console.log(JSON.stringify({{
+          weak: at(t, 'weak'), normal: at(t, 'normal'), strong: at(t, 'strong'),
+          midNormal: at(mid, 'normal'), midStrong: at(mid, 'strong'),
+          none: jointT(t, ['rsi']).t,
+        }}));
+        """)
+    assert r["normal"] == pytest.approx(0.70) and r["none"] == pytest.approx(0.70)
+    assert 0.5 < r["weak"] < r["normal"] < r["strong"]
+    assert r["strong"] == pytest.approx(0.49 / (0.49 + 0.09))  # 0.7^2 against 0.3^2
+    assert r["midNormal"] == pytest.approx(0.55) and r["midStrong"] == pytest.approx(0.5)
+
+
+@needs_node
+def test_strength_changes_how_far_one_indicator_pulls_against_another():
+    r = run_node("""
+        const t = {rsi_14: 30, last_price: 100, vwap_20: 90, long_term_trend: 'bullish', sma_50: 110, sma_200: 100};
+        // RSI says buy (0.70); VWAP 11% above says sell; trend says buy
+        const base = jointT(t, ['rsi', 'vwap']).t;
+        const vwapStrong = jointT(t, ['rsi', 'vwap'], {vwap: 'strong'}).t;
+        const vwapWeak = jointT(t, ['rsi', 'vwap'], {vwap: 'weak'}).t;
+        console.log(JSON.stringify({base, vwapStrong, vwapWeak}));
+        """)
+    assert r["vwapStrong"] < r["base"] < r["vwapWeak"]
+
+
+def test_indicator_buttons_cycle_and_show_their_strength():
+    assert 'class="ind-tag"' in TEMPLATE and ".ind-btn.lvl-strong" in TEMPLATE
+    assert "off → weak → normal → strong → off" in TEMPLATE
+
+
+@needs_node
+def test_the_button_cycle_order_and_the_last_indicator_never_turns_off():
+    start = TEMPLATE.index("  const LEVEL_TAG =")
+    end = TEMPLATE.index("  function paintIndicatorButtons(")
+    code = (
+        "const LEVELS = ['weak', 'normal', 'strong'];\n"
+        "let activeIndicators = new Set(['rsi', 'vwap']); let indicatorLevels = {};\n"
+        + TEMPLATE[start:end]
+        + """
+        const seq = [];
+        indicatorLevels = {rsi: 'weak'};
+        for (const lvl of ['weak', 'normal', 'strong']) { indicatorLevels.rsi = lvl; seq.push(nextIndicatorState('rsi')); }
+        seq.push(nextIndicatorState('fund'));
+        activeIndicators = new Set(['rsi']); indicatorLevels = {rsi: 'strong'};
+        seq.push(nextIndicatorState('rsi'));
+        console.log(JSON.stringify(seq));
+        """
+    )
+    out = subprocess.run(["node", "-e", code], capture_output=True, text=True, check=True)
+    assert json.loads(out.stdout) == ["normal", "strong", "off", "weak", "weak"]
