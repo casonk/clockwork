@@ -38,6 +38,7 @@ LISTS_MENU = (
     ("To Code", "💻", "/to-code"),
     ("To Invest", "📈", "/to-invest"),
     ("Tradility", "📊", "/to-tradility"),
+    ("Finances", "💰", "/finances"),
 )
 MEDIA_MENU = (
     ("To Watch", "📺", "/to-watch"),
