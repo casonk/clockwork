@@ -1,0 +1,178 @@
+"""Load /finances in a phone-sized browser with sample data: it renders and does not overflow."""
+
+from __future__ import annotations
+
+import shutil
+
+import pytest
+
+pytest.importorskip("playwright.sync_api")
+from playwright.sync_api import sync_playwright  # noqa: E402
+
+from web import app as web_app  # noqa: E402
+
+CHROMIUM = (
+    shutil.which("chromium-browser") or shutil.which("chromium") or shutil.which("google-chrome")
+)
+pytestmark = pytest.mark.skipif(CHROMIUM is None, reason="no Chromium for a browser test")
+
+POINTS = [
+    {
+        "month": f"2026-{m:02d}",
+        "total": 300000.0 + m * 5000,
+        "cash": 20000.0,
+        "total_with_cash": 320000.0 + m * 5000,
+        "invest": 300000.0 + m * 5000,
+        "bank": 20000.0,
+        "crypt": 0.0,
+        "cred": -500.0,
+    }
+    for m in range(1, 11)
+]
+ACCOUNTS = [
+    {
+        "id": "fid-401k",
+        "label": "FID - Fidelity 401(k) (***401K)",
+        "institution": "fid",
+        "category": "invest",
+        "nature": "asset",
+        "group": "Investments",
+        "balance": 90846.38,
+        "as_of": "2026-10-29",
+        "age_days": 5,
+        "stale": False,
+        "counted": True,
+        "possible_duplicate": False,
+    },
+    {
+        "id": "cs-old",
+        "label": "CS - Schwab One Brokerage (***6427)",
+        "institution": "cs",
+        "category": "invest",
+        "nature": "asset",
+        "group": "Investments",
+        "balance": 121072.54,
+        "as_of": "2026-01-31",
+        "age_days": 276,
+        "stale": True,
+        "counted": True,
+        "possible_duplicate": True,
+    },
+    {
+        "id": "hunt-mma",
+        "label": "HUNT - Huntington Relationship MMA Account (-------4990)",
+        "institution": "hunt",
+        "category": "bank",
+        "nature": "asset",
+        "group": "Cash",
+        "balance": 13854.2,
+        "as_of": "2026-10-19",
+        "age_days": 15,
+        "stale": False,
+        "counted": False,
+        "possible_duplicate": False,
+    },
+    {
+        "id": "co-card",
+        "label": "CO - VentureOne Credit Card | World Elite Mastercard (***5653)",
+        "institution": "co",
+        "category": "cred",
+        "nature": "liability",
+        "group": "Credit",
+        "balance": -548.87,
+        "as_of": "2026-03-20",
+        "age_days": 228,
+        "stale": True,
+        "counted": True,
+        "possible_duplicate": False,
+    },
+]
+SUMMARY = {
+    "as_of": "2026-10-31",
+    "net_worth": 359542.61,
+    "cash": 20028.77,
+    "net_worth_with_cash": 379571.38,
+    "groups": {
+        "invest": {"label": "Investments", "balance": 360067.17, "accounts": 2},
+        "bank": {"label": "Cash", "balance": 20028.77, "accounts": 1},
+        "cred": {"label": "Credit", "balance": -524.56, "accounts": 1},
+    },
+    "change": {
+        "month": {"amount": 28616.74, "percent": 8.15},
+        "quarter": None,
+        "year": {"amount": -4200.0, "percent": -1.1},
+    },
+    "stale_accounts": 2,
+    "possible_duplicates": 1,
+}
+FRESH = {
+    "sources": [
+        {
+            "source": "bank/hunt",
+            "status": "success",
+            "ended": "2026-11-02T16:12:19Z",
+            "age_days": 0,
+            "downloaded": 8,
+            "failure": "",
+        },
+        {
+            "source": "bank/macu",
+            "status": "failed",
+            "ended": "2026-11-02T16:58:46Z",
+            "age_days": 0,
+            "downloaded": 0,
+            "failure": "post_login_challenge_not_cleared",
+        },
+    ]
+}
+
+
+def route(r):
+    url = r.request.url
+    if url.endswith("/summary"):
+        return r.fulfill(json=SUMMARY)
+    if url.endswith("/freshness"):
+        return r.fulfill(json=FRESH)
+    if "/networth" in url:
+        return r.fulfill(json={"points": POINTS})
+    if url.endswith("/history"):
+        return r.fulfill(
+            json={
+                "points": [
+                    {"as_of": "2026-01-31", "balance": 1.0},
+                    {"as_of": "2026-02-28", "balance": 2.0},
+                ]
+            }
+        )
+    if url.endswith("/accounts"):
+        return r.fulfill(json={"accounts": ACCOUNTS})
+    return r.fulfill(json={})
+
+
+def test_the_page_renders_on_a_phone_without_overflow_or_script_errors():
+    html = web_app.app.test_client().get("/finances").get_data(as_text=True)
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+        page = browser.new_page(viewport={"width": 390, "height": 800})
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.route("**/api/finances/**", route)
+        page.set_content(html.replace("</head>", "<base href='http://localhost/'></head>"))
+        page.wait_for_selector(".hero-value")
+        assert "$379,571" in page.inner_text(".hero-value")
+        assert page.evaluate("document.documentElement.scrollWidth <= 390")
+        assert "2 balances are older than 45 days" in page.inner_text("#notice")
+        assert not page.locator("#cross").is_visible() and not page.locator("#dot").is_visible()
+        assert page.locator(".acct").count() == 4
+        page.click(".acct[data-id='fid-401k']")
+        page.wait_for_selector("#detail-fid-401k svg.spark")
+        page.locator("#chart").scroll_into_view_if_needed()
+        box = page.locator("#chart").bounding_box()
+        page.mouse.move(box["x"] + box["width"] * 0.5, box["y"] + 80)
+        page.wait_for_selector("#tip:not([hidden])")
+        assert "Investments" in page.inner_text("#tip")
+        page.click("#range button[data-months='12']")
+        page.uncheck("#with-cash")
+        assert page.evaluate("document.documentElement.scrollWidth <= 390")
+        browser.close()
+    assert errors == []
