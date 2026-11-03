@@ -128,8 +128,13 @@ FRESH = {
 }
 
 
+SEEN: list[str] = []
+
+
 def route(r):
     url = r.request.url
+    SEEN.append(url)
+    url = url.split("?")[0]
     if url.endswith("/summary"):
         return r.fulfill(json=SUMMARY)
     if url.endswith("/freshness"):
@@ -164,7 +169,7 @@ def test_the_page_renders_on_a_phone_without_overflow_or_script_errors():
         assert page.evaluate("document.documentElement.scrollWidth <= 390")
         assert "2 balances are older than 45 days" in page.inner_text("#notice")
         assert not page.locator("#cross").is_visible() and not page.locator("#dot").is_visible()
-        assert page.locator(".acct").count() == 4
+        assert page.locator(".acct").count() == 3  # the uncounted bank account is hidden by default
         page.click(".acct[data-id='fid-401k']")
         page.wait_for_selector("#detail-fid-401k svg.spark")
         assert "Money in $309.13" in page.inner_text(".acct[data-id='fid-401k']")
@@ -173,8 +178,42 @@ def test_the_page_renders_on_a_phone_without_overflow_or_script_errors():
         page.mouse.move(box["x"] + box["width"] * 0.5, box["y"] + 80)
         page.wait_for_selector("#tip:not([hidden])")
         assert "Investments" in page.inner_text("#tip")
-        page.click("#range button[data-months='12']")
         page.uncheck("#with-cash")
+        assert page.evaluate("document.documentElement.scrollWidth <= 390")
+
+        # accounts and dates are chosen, not preset
+        page.click("#filters > summary")
+        assert "3 of 4 accounts" in page.inner_text(
+            "#filters-summary"
+        )  # the bank account is not counted here
+        SEEN.clear()
+        page.uncheck("#picker input[data-id='cs-old']")
+        page.wait_for_timeout(500)
+        summary_calls = [u for u in SEEN if "/summary" in u]
+        assert summary_calls and "accounts=fid-401k%2Cco-card" in summary_calls[-1].replace(
+            ",", "%2C"
+        )
+        assert "2 of 4 accounts" in page.inner_text("#filters-summary")
+        assert page.locator(".acct").count() == 2
+        assert "Selected accounts (2 of 4)" in page.inner_text("#hero")
+
+        SEEN.clear()
+        page.fill("#from", "2026-03")
+        page.fill("#to", "2026-08")
+        page.wait_for_timeout(500)
+        last = [u for u in SEEN if "/networth" in u][-1]
+        assert "from=2026-03" in last and "to=2026-08" in last
+        assert "Mar 2026" in page.inner_text("#filters-summary")
+
+        page.click("#presets button[data-p='ytd']")
+        page.wait_for_timeout(500)
+        assert page.input_value("#from") == "2026-01" and page.input_value("#to") == ""
+        page.click("#tools button[data-act='counted']")
+        page.wait_for_timeout(500)
+        assert "3 of 4 accounts" in page.inner_text("#filters-summary")
+        page.click("#tools button[data-act='none']")
+        page.wait_for_timeout(300)
+        assert "No accounts selected" in page.inner_text("#hero")
         assert page.evaluate("document.documentElement.scrollWidth <= 390")
         browser.close()
     assert errors == []
