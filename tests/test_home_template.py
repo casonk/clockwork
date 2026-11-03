@@ -14,6 +14,14 @@ def test_home_cards_use_shrinkable_mobile_grid_tracks():
     assert "overflow-wrap: anywhere;" in css
 
 
+def test_home_card_badges_start_on_their_own_line():
+    css = HOME_TEMPLATE.read_text()
+    card_footer = css.split(".card-footer {", 1)[1].split("}", 1)[0]
+
+    assert "flex-direction: column;" in card_footer
+    assert "align-items: flex-start;" in card_footer
+
+
 def test_standalone_pages_share_site_navigation():
     templates = HOME_TEMPLATE.parent
     for path in templates.glob("*.html"):
