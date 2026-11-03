@@ -1797,6 +1797,7 @@
 
   // ── Accounts ─────────────────────────────────────────────────────────────────
   let accountsData = null;
+  let financeSummary = null; // net worth and cash come from the Finances page's read-only API
 
   async function loadAccounts() {
     const body = document.getElementById('accounts-body');
@@ -1806,6 +1807,10 @@
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
       accountsData = data;
+      try {
+        const fin = await fetch('/api/finances/summary');
+        financeSummary = fin.ok ? await fin.json() : null;
+      } catch (err) { financeSummary = null; }
     } catch (err) {
       accountsData = null;
       body.innerHTML = `<div class="error-card">Could not load accounts: ${esc(err.message)}. Account details need the trader service to be running.</div>`;
@@ -1818,30 +1823,6 @@
     return value == null ? '' : `<dt>${esc(label)}</dt><dd>${value}</dd>`;
   }
 
-  // Bank accounts come from the finance pipeline's bank statements, so each is as of its statement date.
-  function bankAgeDays(asOf, now = Date.now()) {
-    const t = Date.parse(asOf);
-    return Number.isFinite(t) ? Math.max(0, Math.floor((now - t) / 86400000)) : null;
-  }
-  function bankCardsHtml(banks, now = Date.now()) {
-    return (banks || []).map(b => {
-      const age = bankAgeDays(b.as_of, now);
-      const old = age != null && age > 45;
-      const kind = String(b.type || 'account');
-      return `<div class="account-card">
-        <h4><span>${esc(b.bank)} ${esc(kind)} …${esc(b.mask)}</span><span class="account-flag${old ? ' warn' : ''}">${old ? `statement ${age} days old` : 'bank statement'}</span></h4>
-        <div class="orders-sync" style="margin:0 0 6px">${esc(b.name)}</div>
-        <dl>
-          ${row('Balance', money(b.balance))}
-          ${row('As of', esc(b.as_of))}
-          ${row('Money in', b.money_in == null ? null : money(b.money_in))}
-          ${row('Money out', b.money_out == null ? null : money(b.money_out))}
-          ${row('Interest', b.interest ? money(b.interest) : null)}
-        </dl>
-      </div>`;
-    }).join('');
-  }
-
   function renderAccounts() {
     const body = document.getElementById('accounts-body');
     const accounts = (accountsData && accountsData.accounts) || [];
@@ -1850,12 +1831,9 @@
     const total = accounts.reduce((sum, a) => sum + (a.total_value || 0), 0);
     const statements = (accountsData && accountsData.statements) || [];
     const statementTotal = statements.reduce((sum, i) => sum + (i.total || 0), 0);
-    const banks = (accountsData && accountsData.banks) || [];
-    const bankTotal = banks.reduce((sum, b) => sum + (b.balance || 0), 0);
     const parts = [];
     if (accounts.length) parts.push(`${money(total)} live across ${accounts.length}`);
     if (statements.length) parts.push(`${money(statementTotal)} from statements`);
-    if (banks.length) parts.push(`${money(bankTotal)} in ${banks.length} bank accounts`);
     document.getElementById('accounts-total').textContent = parts.length ? `· ${parts.join(' + ')}` : '';
     body.innerHTML = `<div class="accounts-grid">${accounts.map(a => `
       <div class="account-card">
@@ -1888,10 +1866,13 @@
         <dl>${row('Total value', money(i.total))}${row('As of', esc(i.as_of))}</dl>
         <div class="orders-sync">Not read live. This is the last statement the finance pipeline has, so the value may be out of date.</div>
       </div>`).join('')}
-      ${bankCardsHtml(banks)}
+      ${financeSummary ? `<a class="account-card" href="/finances" style="text-decoration:none;color:inherit">
+        <h4><span>Net worth and bank accounts</span><span class="account-flag">Finances →</span></h4>
+        <dl>${row('Net worth', money(financeSummary.net_worth_with_cash))}${row('Cash in bank accounts', money(financeSummary.cash))}</dl>
+        <div class="orders-sync">Bank accounts, balances over time and data freshness are on the Finances page.</div>
+      </a>` : ''}
       ${failed.length ? `<div class="account-warning">Not available: ${failed.join(' · ')}</div>` : ''}
     </div>
-    ${banks.length ? '<div class="orders-sync" style="padding:0 12px 4px">Bank accounts are from the finance pipeline\'s bank statements, as of each statement date, and are not part of the investment totals or the order previews.</div>' : ''}
     <div class="orders-sync" style="padding:0 12px 10px">Updated ${esc(new Date(accountsData.generated_at).toLocaleTimeString())} · <a href="#" id="accounts-refresh">Refresh</a></div>
     <div id="money-box"></div>`;
     document.getElementById('accounts-refresh').addEventListener('click', event => { event.preventDefault(); loadAccounts(); });
