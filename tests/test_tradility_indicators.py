@@ -257,32 +257,3 @@ def test_fundamental_groups_pick_which_rules_count():
         """)
     assert r["all"] == {"score": 1, "n": 6} and r["valuation"] == {"score": 2, "n": 2}
     assert r["none"] is None
-
-
-@needs_node
-def test_bank_cards_show_balance_age_and_flag_old_statements():
-    start = TEMPLATE.index("  function bankAgeDays(")
-    end = TEMPLATE.index("  function renderAccounts()")
-    code = (
-        "const esc = s => String(s);\n"
-        "const money = v => '$' + Number(v || 0).toFixed(2);\n"
-        "const row = (l, v) => v == null ? '' : `<dt>${l}</dt><dd>${v}</dd>`;\n"
-        + TEMPLATE[start:end]
-        + """
-        const now = Date.parse('2026-11-01');
-        const banks = [
-          {bank: 'Huntington', type: 'checking', mask: '1921', name: 'Platinum', balance: 5045.65,
-           as_of: '2026-04-10', money_in: 309.13, money_out: 2299.99, interest: 0.14},
-          {bank: 'Huntington', type: 'savings', mask: '8743', name: 'Premier', balance: 513.18,
-           as_of: '2026-10-20', money_in: 0, money_out: 0, interest: 0},
-        ];
-        console.log(JSON.stringify([bankCardsHtml(banks, now), bankCardsHtml([], now)]));
-        """
-    )
-    out = subprocess.run(["node", "-e", code], capture_output=True, text=True, check=True)
-    html, empty = json.loads(out.stdout)
-    assert "Huntington checking …1921" in html and "$5045.65" in html
-    assert (
-        "statement 205 days old" in html and "bank statement" in html
-    )  # the recent one is not flagged
-    assert html.count("account-flag warn") == 1 and empty == ""

@@ -38,6 +38,7 @@ ACCOUNTS = [
         "nature": "asset",
         "group": "Investments",
         "balance": 90846.38,
+        "flows": {"money_in": 309.13, "money_out": 2299.99, "interest": 0.14},
         "as_of": "2026-10-29",
         "age_days": 5,
         "stale": False,
@@ -166,6 +167,7 @@ def test_the_page_renders_on_a_phone_without_overflow_or_script_errors():
         assert page.locator(".acct").count() == 4
         page.click(".acct[data-id='fid-401k']")
         page.wait_for_selector("#detail-fid-401k svg.spark")
+        assert "Money in $309.13" in page.inner_text(".acct[data-id='fid-401k']")
         page.locator("#chart").scroll_into_view_if_needed()
         box = page.locator("#chart").bounding_box()
         page.mouse.move(box["x"] + box["width"] * 0.5, box["y"] + 80)

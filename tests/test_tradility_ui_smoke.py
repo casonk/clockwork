@@ -82,7 +82,7 @@ def test_settings_panel_changes_what_the_cards_read_without_script_errors():
     assert errors == []
 
 
-def test_accounts_panel_lists_bank_accounts_and_their_total():
+def test_accounts_panel_links_to_finances_for_net_worth_and_cash():
     html = web_app.app.test_client().get("/to-tradility").get_data(as_text=True)
     accounts = {
         "ok": True,
@@ -90,19 +90,6 @@ def test_accounts_panel_lists_bank_accounts_and_their_total():
         "sources": {},
         "accounts": [],
         "statements": [],
-        "banks": [
-            {
-                "bank": "Huntington",
-                "name": "Platinum Perks Checking",
-                "type": "checking",
-                "mask": "1921",
-                "balance": 5045.65,
-                "as_of": "2026-04-10",
-                "money_in": 309.13,
-                "money_out": 2299.99,
-                "interest": 0.14,
-            }
-        ],
     }
     errors: list[str] = []
     with sync_playwright() as p:
@@ -116,6 +103,8 @@ def test_accounts_panel_lists_bank_accounts_and_their_total():
                 route.fulfill(json=DATA)
             elif "tradility-accounts" in url:
                 route.fulfill(json=accounts)
+            elif "finances/summary" in url:
+                route.fulfill(json={"net_worth_with_cash": 379800.05, "cash": 20921.32})
             else:
                 route.fulfill(json={"ok": False})
 
@@ -126,6 +115,6 @@ def test_accounts_panel_lists_bank_accounts_and_their_total():
         page.wait_for_selector("#accounts-body .account-card")
         text = page.inner_text("#accounts-panel")
         browser.close()
-    assert "Huntington checking …1921" in text and "$5,045.65" in text
-    assert "bank accounts" in text and "not part of the investment totals" in text
+    assert "$379,800.05" in text and "$20,921.32" in text
+    assert "Huntington" not in text and "Finances" in text
     assert errors == []
