@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1, user-scalable=yes">
+  <title>Finances — Clockwork</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+    body {
+      background: var(--bg); color: var(--text); font-family: var(--font);
+      font-size: var(--font-size); line-height: 1.5; min-height: 100vh;
+    }
+    .page { max-width: 760px; margin: 0 auto; padding: 14px 16px 48px; display: grid;
+            grid-template-columns: minmax(0, 1fr); gap: 14px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+            padding: 14px; min-width: 0; }
+    h2 { font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+         color: var(--muted); margin-bottom: 10px; }
+    [hidden] { display: none !important; }
+    .muted { color: var(--muted); }
+    .money { font-variant-numeric: tabular-nums; }
+    body.hide-amounts .money { filter: blur(7px); }
+
+    /* hero */
+    .hero-top { display: flex; align-items: flex-start; gap: 10px; }
+    .hero-top > div { flex: 1; min-width: 0; }
+    .hero-label { font-size: 12px; color: var(--muted); }
+    .hero-value { font-size: clamp(30px, 9vw, 44px); font-weight: 700; letter-spacing: -.02em; line-height: 1.1; }
+    .hero-sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+    .eye { background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+           border-radius: 8px; min-width: 44px; min-height: 44px; font-size: 18px; cursor: pointer; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .chip { font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border);
+            background: var(--surface2); white-space: nowrap; }
+    .chip.up { color: var(--green); background: var(--green-dim); border-color: transparent; }
+    .chip.down { color: var(--red); background: var(--red-dim); border-color: transparent; }
+
+    /* notice */
+    .notice { border-color: var(--yellow); background: var(--yellow-dim); font-size: 14px; }
+    .notice strong { color: var(--text); }
+
+    /* controls */
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .seg button { background: var(--surface2); color: var(--muted); border: 0; min-height: 44px;
+                  padding: 0 14px; font: inherit; font-size: 14px; cursor: pointer; }
+    .seg button + button { border-left: 1px solid var(--border); }
+    .seg button[aria-pressed="true"] { background: var(--accent-dim); color: var(--accent); font-weight: 700; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between;
+               margin-bottom: 8px; }
+    .switch { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; font-size: 14px; cursor: pointer; }
+    .switch input { width: 20px; height: 20px; accent-color: var(--accent); }
+
+    /* chart */
+    .chart-wrap { position: relative; touch-action: pan-y; }
+    svg.chart { display: block; width: 100%; height: 220px; overflow: visible; }
+    .grid-line { stroke: var(--border); stroke-width: 1; opacity: .7; }
+    .axis-text { fill: var(--muted); font-size: 11px; }
+    .line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+    .area { fill: color-mix(in srgb, var(--accent) 16%, transparent); stroke: none; }
+    .cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+    .dot { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+    .tip { position: absolute; top: 0; pointer-events: none; background: var(--surface2); border: 1px solid var(--border);
+           border-radius: 8px; padding: 8px 10px; font-size: 12px; line-height: 1.5; min-width: 150px;
+           box-shadow: 0 4px 14px rgba(0,0,0,.25); z-index: 2; }
+    .tip b { font-size: 14px; display: block; }
+    .tip .row { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); }
+    .tip .row span:last-child { color: var(--text); }
+    details.table-view { margin-top: 8px; font-size: 13px; }
+    details.table-view summary { cursor: pointer; color: var(--muted); min-height: 44px; display: flex; align-items: center; }
+    details.table-view .scroll { max-height: 260px; overflow: auto; }
+    table.data { width: 100%; border-collapse: collapse; font-size: 12px; }
+    table.data th, table.data td { text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--border); }
+    table.data th:first-child, table.data td:first-child { text-align: left; }
+
+    /* composition */
+    .stack { display: flex; gap: 2px; height: 16px; }
+    .stack > span { display: block; min-width: 3px; }
+    .stack > span:first-child { border-radius: 4px 0 0 4px; }
+    .stack > span:last-child { border-radius: 0 4px 4px 0; }
+    .legend { margin-top: 12px; display: grid; gap: 2px; }
+    .legend-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto auto; gap: 10px; align-items: center;
+                  min-height: 40px; font-size: 14px; }
+    .swatch { width: 12px; height: 12px; border-radius: 3px; }
+    .legend-row .pct { color: var(--muted); font-size: 12px; min-width: 38px; text-align: right; }
+
+    /* accounts */
+    .group-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; margin: 6px 0 6px; }
+    .group-head h3 { font-size: 15px; }
+    .acct { width: 100%; text-align: left; background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+            border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; font: inherit; cursor: pointer; min-height: 56px; display: block; }
+    .acct:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .acct-top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+    .acct-name { font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
+    .acct-bal { font-size: 15px; font-weight: 700; white-space: nowrap; }
+    .acct-bal.neg::before { content: "−"; }
+    .acct-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); margin-top: 3px; }
+    .badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
+    .badge.warn { color: var(--yellow); background: var(--yellow-dim); border-color: transparent; }
+    .acct.uncounted { opacity: .72; }
+    .acct-detail { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+    svg.spark { display: block; width: 100%; height: 64px; }
+    .spark-lbl { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+
+    /* freshness */
+    .fresh-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: baseline;
+                 padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+    .fresh-row:last-child { border-bottom: 0; }
+    .fresh-row .why { grid-column: 2 / 4; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+    .ok { color: var(--green); } .bad { color: var(--red); } .warnc { color: var(--yellow); }
+
+    .error-card { color: var(--red); font-size: 14px; }
+    .skeleton { color: var(--muted); font-size: 14px; }
+  </style>
+  {% include "_theme_head.html" %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
+</head>
+<body>
+{% include "_site_nav.html" %}
+
+<main class="page">
+  <section class="card" id="hero" aria-live="polite"><div class="skeleton">Loading…</div></section>
+  <section class="card notice" id="notice" hidden></section>
+
+  <section class="card">
+    <h2>Net worth over time</h2>
+    <div class="toolbar">
+      <div class="seg" role="group" aria-label="Range" id="range">
+        <button type="button" data-months="12" aria-pressed="false">1Y</button>
+        <button type="button" data-months="36" aria-pressed="false">3Y</button>
+        <button type="button" data-months="0" aria-pressed="true">All</button>
+      </div>
+      <label class="switch"><input type="checkbox" id="with-cash" checked> Include cash</label>
+    </div>
+    <div class="chart-wrap" id="chart-wrap"><svg class="chart" id="chart" role="img" aria-label="Net worth over time"></svg><div class="tip" id="tip" hidden></div></div>
+    <details class="table-view"><summary>Table view</summary><div class="scroll" id="table"></div></details>
+  </section>
+
+  <section class="card"><h2>What it is made of</h2><div id="mix"></div></section>
+  <section class="card"><h2>Accounts</h2><div id="accounts"></div></section>
+  <section class="card"><h2>Data freshness</h2><div id="fresh"></div></section>
+</main>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const usd0 = new Intl.NumberFormat('en-US', {style: 'currency', currency: 'USD', maximumFractionDigits: 0});
+  const usd2 = new Intl.NumberFormat('en-US', {style: 'currency', currency: 'USD'});
+  const money = (n, exact) => (exact ? usd2 : usd0).format(n ?? 0);
+  const compact = (n) => {
+    const a = Math.abs(n);
+    const s = a >= 1e6 ? (a / 1e6).toFixed(1) + 'M' : a >= 1e3 ? Math.round(a / 1e3) + 'K' : String(Math.round(a));
+    return (n < 0 ? '−$' : '$') + s;
+  };
+  const monthName = (m) => new Date(m + '-15').toLocaleDateString('en-US', {month: 'short', year: 'numeric'});
+  const dayName = (d) => new Date(d + 'T12:00:00').toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'});
+
+  const state = {summary: null, accounts: [], points: [], months: 0, cash: true, open: null};
+  try { if (localStorage.getItem('finances-hide') === '1') document.body.classList.add('hide-amounts'); } catch (e) {}
+
+  async function api(path) {
+    const r = await fetch('/api/finances/' + path, {headers: {Accept: 'application/json'}});
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || ('HTTP ' + r.status));
+    return r.json();
+  }
+
+  function renderHero() {
+    const s = state.summary;
+    const chip = (label, d) => {
+      if (!d) return '';
+      const up = d.amount >= 0;
+      return `<span class="chip ${up ? 'up' : 'down'}">${up ? '▲' : '▼'} ${up ? '+' : '−'}${esc(money(Math.abs(d.amount)))} (${up ? '+' : '−'}${Math.abs(d.percent).toFixed(1)}%) ${label}</span>`;
+    };
+    $('hero').innerHTML = `
+      <div class="hero-top"><div>
+        <div class="hero-label">Net worth, including cash</div>
+        <div class="hero-value money">${esc(money(s.net_worth_with_cash))}</div>
+        <div class="hero-sub"><span class="money">${esc(money(s.net_worth))}</span> invested and credit · <span class="money">${esc(money(s.cash))}</span> cash · as of ${esc(dayName(s.as_of))}</div>
+      </div><button class="eye" id="eye" type="button" aria-label="Hide or show amounts" title="Hide or show amounts">👁</button></div>
+      <div class="chips">${chip('1 mo', s.change.month)}${chip('3 mo', s.change.quarter)}${chip('1 yr', s.change.year)}</div>`;
+    $('eye').onclick = () => {
+      const on = document.body.classList.toggle('hide-amounts');
+      try { localStorage.setItem('finances-hide', on ? '1' : '0'); } catch (e) {}
+    };
+  }
+
+  function renderNotice() {
+    const el = $('notice');
+    const stale = state.accounts.filter((a) => a.stale && (a.counted || a.category === 'bank'));
+    if (!stale.length) { el.hidden = true; return; }
+    const worth = stale.reduce((t, a) => t + Math.abs(a.balance), 0);
+    const total = Math.abs(state.summary.net_worth_with_cash) || 1;
+    const dupes = state.accounts.filter((a) => a.possible_duplicate).length;
+    el.hidden = false;
+    el.innerHTML = `⚠ <strong>${stale.length} ${stale.length === 1 ? 'balance is' : 'balances are'} older than 45 days</strong>, worth <span class="money">${esc(money(worth))}</span> (${Math.round(100 * worth / total)}% of the total). They still count at their last statement.` +
+      (dupes ? ` ${dupes} ${dupes === 1 ? 'account shares' : 'accounts share'} an identical balance with another and may be counted twice.` : '');
+  }
+
+  /* ---- net worth chart ---- */
+  const series = () => {
+    const pts = state.months ? state.points.slice(-state.months) : state.points;
+    return pts.map((p) => ({m: p.month, v: state.cash ? p.total_with_cash : p.total, p}));
+  };
+
+  function drawChart() {
+    const svg = $('chart'), data = series();
+    const W = svg.clientWidth || 320, H = 220, L = 6, R = 6, T = 10, B = 24;
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    if (data.length < 2) { svg.innerHTML = '<text class="axis-text" x="8" y="40">Not enough history yet.</text>'; return; }
+    let lo = Math.min(...data.map((d) => d.v)), hi = Math.max(...data.map((d) => d.v));
+    if (hi === lo) { hi += 1; lo -= 1; }
+    const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+    const x = (i) => L + (i * (W - L - R)) / (data.length - 1);
+    const y = (v) => T + ((hi - v) * (H - T - B)) / (hi - lo);
+    const path = data.map((d, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(d.v).toFixed(1)}`).join('');
+    const ticks = [0, 0.5, 1].map((f) => lo + f * (hi - lo));
+    const grid = ticks.map((t) => `<line class="grid-line" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text class="axis-text" x="${L + 2}" y="${y(t) - 4}">${esc(compact(t))}</text>`).join('');
+    const xl = [0, Math.floor((data.length - 1) / 2), data.length - 1]
+      .map((i, k) => `<text class="axis-text" x="${x(i)}" y="${H - 6}" text-anchor="${k === 0 ? 'start' : k === 2 ? 'end' : 'middle'}">${esc(monthName(data[i].m))}</text>`).join('');
+    svg.innerHTML = `${grid}${xl}<path class="area" d="${path}L${x(data.length - 1)},${H - B}L${x(0)},${H - B}Z"/><path class="line" d="${path}"/>
+      <line class="cross" id="cross" y1="${T}" y2="${H - B}" hidden/><circle class="dot" id="dot" r="5" hidden/>`;
+    svg._geo = {x, y, data, W, H};
+    $('table').innerHTML = `<table class="data"><tr><th>Month</th><th>Total</th><th>Invest</th><th>Cash</th><th>Credit</th></tr>` +
+      data.slice().reverse().map((d) => `<tr><td>${esc(monthName(d.m))}</td><td class="money">${esc(money(d.v))}</td><td class="money">${esc(money(d.p.invest))}</td><td class="money">${esc(money(d.p.cash))}</td><td class="money">${esc(money(d.p.cred))}</td></tr>`).join('') + '</table>';
+  }
+
+  function wireChart() {
+    const svg = $('chart'), tip = $('tip'), wrap = $('chart-wrap');
+    const move = (ev) => {
+      const g = svg._geo; if (!g) return;
+      const rect = svg.getBoundingClientRect();
+      const px = ((ev.clientX - rect.left) / rect.width) * g.W;
+      let best = 0, bd = Infinity;
+      g.data.forEach((_, i) => { const d = Math.abs(g.x(i) - px); if (d < bd) { bd = d; best = i; } });
+      const d = g.data[best], cx = g.x(best), cy = g.y(d.v);
+      const cross = $('cross'), dot = $('dot');
+      cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.removeAttribute('hidden');
+      dot.setAttribute('cx', cx); dot.setAttribute('cy', cy); dot.removeAttribute('hidden');
+      const p = d.p;
+      tip.innerHTML = `<b class="money">${esc(money(d.v))}</b><span class="muted">${esc(monthName(d.m))}</span>
+        <div class="row"><span>Investments</span><span class="money">${esc(money(p.invest))}</span></div>
+        <div class="row"><span>Cash</span><span class="money">${esc(money(p.cash))}</span></div>
+        <div class="row"><span>Credit</span><span class="money">${esc(money(p.cred))}</span></div>`;
+      tip.hidden = false;
+      const w = tip.offsetWidth, left = (cx / g.W) * wrap.clientWidth;
+      tip.style.left = Math.max(0, Math.min(wrap.clientWidth - w, left - w / 2)) + 'px';
+    };
+    const leave = () => { tip.hidden = true; ['cross', 'dot'].forEach((i) => { const e = $(i); if (e) e.setAttribute('hidden', ''); }); };
+    svg.addEventListener('pointermove', move);
+    svg.addEventListener('pointerdown', move);
+    svg.addEventListener('pointerleave', leave);
+    svg.addEventListener('pointercancel', leave);
+    $('range').addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      state.months = Number(b.dataset.months);
+      [...$('range').children].forEach((c) => c.setAttribute('aria-pressed', String(c === b)));
+      drawChart();
+    });
+    $('with-cash').addEventListener('change', (e) => { state.cash = e.target.checked; drawChart(); });
+    if (window.ResizeObserver) new ResizeObserver(() => drawChart()).observe(wrap);
+  }
+
+  /* ---- composition ---- */
+  function renderMix() {
+    const g = state.summary.groups;
+    const rows = [
+      ['invest', 'Investments', 100], ['bank', 'Cash', 62], ['crypt', 'Crypto', 36],
+    ].filter(([k]) => g[k] && g[k].balance > 0);
+    const total = rows.reduce((t, [k]) => t + g[k].balance, 0) || 1;
+    const tint = (pct) => `color-mix(in srgb, var(--accent) ${pct}%, var(--surface))`;
+    const bar = rows.map(([k, , pct]) => `<span title="${esc(g[k].label)}" style="flex:${g[k].balance};background:${tint(pct)}"></span>`).join('');
+    const legend = rows.map(([k, label, pct]) => `<div class="legend-row"><span class="swatch" style="background:${tint(pct)}"></span><span>${esc(label)}</span><span class="money">${esc(money(g[k].balance))}</span><span class="pct">${(100 * g[k].balance / total).toFixed(0)}%</span></div>`).join('');
+    const credit = g.cred ? `<div class="legend-row"><span class="swatch" style="border:1px solid var(--muted)"></span><span>Credit owed</span><span class="money">−${esc(money(Math.abs(g.cred.balance)))}</span><span class="pct"></span></div>` : '';
+    $('mix').innerHTML = `<div class="stack" role="img" aria-label="Share of assets by group">${bar}</div><div class="legend">${legend}${credit}</div>`;
+  }
+
+  /* ---- accounts ---- */
+  const GROUP_ORDER = ['invest', 'bank', 'crypt', 'cred'];
+  const short = (label) => label.replace(/^[A-Z]{2,4} - /, '');
+  function renderAccounts() {
+    const html = GROUP_ORDER.map((cat) => {
+      const list = state.accounts.filter((a) => a.category === cat && (a.balance !== 0 || a.counted));
+      if (!list.length) return '';
+      const sum = list.filter((a) => a.counted || cat === 'bank').reduce((t, a) => t + a.balance, 0);
+      const cards = list.map((a) => {
+        const badges = [
+          a.stale ? `<span class="badge warn">⚠ ${a.age_days}d old</span>` : '',
+          !a.counted && cat !== 'bank' ? '<span class="badge">not in totals</span>' : '',
+          a.possible_duplicate ? '<span class="badge warn">⚠ same balance as another</span>' : '',
+        ].join('');
+        const open = state.open === a.id;
+        return `<button type="button" class="acct ${a.counted || cat === 'bank' ? '' : 'uncounted'}" data-id="${esc(a.id)}" aria-expanded="${open}">
+          <div class="acct-top"><span class="acct-name">${esc(short(a.label))}</span><span class="acct-bal money ${a.balance < 0 ? 'neg' : ''}">${esc(money(Math.abs(a.balance), true))}</span></div>
+          <div class="acct-meta"><span>${esc(a.institution.toUpperCase())}</span><span>as of ${esc(dayName(a.as_of))}</span>${badges}</div>
+          ${open ? '<div class="acct-detail" id="detail-' + esc(a.id) + '"><span class="muted">Loading history…</span></div>' : ''}
+        </button>`;
+      }).join('');
+      return `<div class="group-head"><h3>${esc(state.summary.groups[cat]?.label || cat)}</h3><span class="muted money">${esc(money(sum))}</span></div>${cards}`;
+    }).join('');
+    $('accounts').innerHTML = html || '<span class="muted">No accounts yet.</span>';
+    if (state.open) loadHistory(state.open);
+  }
+
+  async function loadHistory(id) {
+    const box = document.getElementById('detail-' + id);
+    if (!box) return;
+    try {
+      const pts = (await api(`accounts/${encodeURIComponent(id)}/history`)).points.slice(-36);
+      if (pts.length < 2) { box.innerHTML = '<span class="muted">Only one statement so far.</span>'; return; }
+      const W = box.clientWidth || 300, H = 64;
+      const vs = pts.map((p) => p.balance);
+      let lo = Math.min(...vs), hi = Math.max(...vs); if (hi === lo) { hi += 1; lo -= 1; }
+      const x = (i) => (i * (W - 14)) / (pts.length - 1) + 4, y = (v) => 6 + ((hi - v) * (H - 12)) / (hi - lo);
+      const d = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.balance).toFixed(1)}`).join('');
+      box.innerHTML = `<svg class="spark" viewBox="0 0 ${W} ${H}" role="img" aria-label="Balance history"><path class="line" d="${d}"/><circle class="dot" cx="${x(pts.length - 1)}" cy="${y(vs[vs.length - 1])}" r="4"/></svg>
+        <div class="spark-lbl"><span>${esc(dayName(pts[0].as_of))} · <span class="money">${esc(compact(vs[0]))}</span></span><span>${esc(dayName(pts[pts.length - 1].as_of))} · <span class="money">${esc(compact(vs[vs.length - 1]))}</span></span></div>`;
+    } catch (e) { box.innerHTML = `<span class="error-card">${esc(e.message)}</span>`; }
+  }
+
+  $('accounts').addEventListener('click', (e) => {
+    const b = e.target.closest('.acct'); if (!b) return;
+    state.open = state.open === b.dataset.id ? null : b.dataset.id;
+    renderAccounts();
+  });
+
+  /* ---- freshness ---- */
+  function renderFresh(sources) {
+    const rows = sources.map((s) => {
+      let icon = '✓', cls = 'ok', word = 'ok';
+      if (s.status !== 'success') { icon = '✕'; cls = 'bad'; word = 'failed'; }
+      else if (s.age_days !== null && s.age_days > 10) { icon = '⚠'; cls = 'warnc'; word = 'stale'; }
+      const ago = s.age_days === null ? '' : s.age_days === 0 ? 'today' : s.age_days + 'd ago';
+      return `<div class="fresh-row"><span class="${cls}" aria-hidden="true">${icon}</span><span>${esc(s.source)} <span class="${cls}">${word}</span></span><span class="muted">${esc(ago)}</span>${s.failure ? `<span class="why">${esc(s.failure)}</span>` : ''}</div>`;
+    }).join('');
+    $('fresh').innerHTML = rows || '<span class="muted">No download records.</span>';
+  }
+
+  async function init() {
+    wireChart();
+    try {
+      const [summary, accts, nw, fresh] = await Promise.all([api('summary'), api('accounts'), api('networth'), api('freshness')]);
+      state.summary = summary; state.accounts = accts.accounts; state.points = nw.points;
+      renderHero(); renderNotice(); drawChart(); renderMix(); renderAccounts(); renderFresh(fresh.sources);
+    } catch (e) {
+      $('hero').innerHTML = `<div class="error-card">Could not load finances: ${esc(e.message)}</div>`;
+    }
+  }
+  init();
+})();
+</script>
+</body>
+</html>
