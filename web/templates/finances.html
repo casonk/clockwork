@@ -109,6 +109,26 @@
     .fresh-row .why { grid-column: 2 / 4; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
     .ok { color: var(--green); } .bad { color: var(--red); } .warnc { color: var(--yellow); }
 
+    /* filters */
+    #filters > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: 8px; font-size: 14px; list-style: none; }
+    #filters > summary::before { content: '▸'; color: var(--muted); }
+    #filters[open] > summary::before { content: '▾'; }
+    #filters-summary { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .filters-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 8px; }
+    .field-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .field-row label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); min-width: 0; }
+    input[type="month"] { font: inherit; font-size: 16px; color: var(--text); background: var(--surface2); border: 1px solid var(--border);
+                          border-radius: 8px; padding: 8px 10px; min-height: 44px; width: 100%; min-width: 0; color-scheme: light dark; }
+    .tools { display: flex; flex-wrap: wrap; gap: 8px; }
+    .tool { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+            min-height: 44px; padding: 0 12px; font: inherit; font-size: 14px; cursor: pointer; }
+    .tool:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .pick-group { border-top: 1px solid var(--border); padding-top: 6px; }
+    .pick-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 8px; align-items: center; min-height: 44px; font-size: 14px; cursor: pointer; }
+    .pick-row input { width: 20px; height: 20px; accent-color: var(--accent); }
+    .pick-row .nm { overflow-wrap: anywhere; }
+    .pick-row.head { font-weight: 700; }
+    .pick-row .bal { color: var(--muted); font-size: 13px; white-space: nowrap; }
     .error-card { color: var(--red); font-size: 14px; }
     .skeleton { color: var(--muted); font-size: 14px; }
   </style>
@@ -122,14 +142,29 @@
   <section class="card" id="hero" aria-live="polite"><div class="skeleton">Loading…</div></section>
   <section class="card notice" id="notice" hidden></section>
 
+  <details class="card" id="filters">
+    <summary><span>⚙</span><span id="filters-summary">Accounts and dates</span></summary>
+    <div class="filters-body">
+      <div class="field-row">
+        <label>From <input type="month" id="from" aria-label="From month"></label>
+        <label>To <input type="month" id="to" aria-label="To month"></label>
+      </div>
+      <div class="seg" id="presets" role="group" aria-label="Date shortcuts">
+        <button type="button" data-p="1y">1Y</button><button type="button" data-p="3y">3Y</button><button type="button" data-p="ytd">YTD</button><button type="button" data-p="all">All</button>
+      </div>
+      <div class="tools" id="tools">
+        <button type="button" class="tool" data-act="counted">Counted accounts</button>
+        <button type="button" class="tool" data-act="none">None</button>
+        <button type="button" class="tool" data-act="everything">Everything</button>
+      </div>
+      <label class="switch"><input type="checkbox" id="show-out"> Show accounts not in totals</label>
+      <div id="picker"></div>
+    </div>
+  </details>
+
   <section class="card">
     <h2>Net worth over time</h2>
     <div class="toolbar">
-      <div class="seg" role="group" aria-label="Range" id="range">
-        <button type="button" data-months="12" aria-pressed="false">1Y</button>
-        <button type="button" data-months="36" aria-pressed="false">3Y</button>
-        <button type="button" data-months="0" aria-pressed="true">All</button>
-      </div>
       <label class="switch"><input type="checkbox" id="with-cash" checked> Include cash</label>
     </div>
     <div class="chart-wrap" id="chart-wrap"><svg class="chart" id="chart" role="img" aria-label="Net worth over time"></svg><div class="tip" id="tip" hidden></div></div>
@@ -158,31 +193,69 @@
   const monthName = (m) => new Date(m + '-15').toLocaleDateString('en-US', {month: 'short', year: 'numeric'});
   const dayName = (d) => new Date(d + 'T12:00:00').toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'});
 
-  const state = {summary: null, accounts: [], points: [], months: 0, cash: true, open: null};
+  const GROUP_LABELS = {invest: 'Investments', bank: 'Cash', crypt: 'Crypto', cred: 'Credit'};
+  const GROUP_ORDER = ['invest', 'bank', 'crypt', 'cred'];
+  const state = {summary: null, all: [], points: [], cash: true, open: null,
+                 mode: 'default', ids: new Set(), from: '', to: '', showOut: false, bounds: {first: '', last: ''}};
+  const KEY = 'finances-filter';
+  function loadPrefs() {
+    try {
+      const p = JSON.parse(localStorage.getItem(KEY) || 'null');
+      if (p && typeof p === 'object') {
+        state.mode = p.mode === 'custom' ? 'custom' : 'default';
+        state.ids = new Set(Array.isArray(p.ids) ? p.ids.filter((i) => typeof i === 'string') : []);
+        state.from = /^\d{4}-\d{2}$/.test(p.from || '') ? p.from : '';
+        state.to = /^\d{4}-\d{2}$/.test(p.to || '') ? p.to : '';
+        state.showOut = !!p.showOut;
+      }
+    } catch (e) {}
+  }
+  function savePrefs() {
+    try { localStorage.setItem(KEY, JSON.stringify({mode: state.mode, ids: [...state.ids], from: state.from, to: state.to, showOut: state.showOut})); } catch (e) {}
+  }
   try { if (localStorage.getItem('finances-hide') === '1') document.body.classList.add('hide-amounts'); } catch (e) {}
 
-  async function api(path) {
-    const r = await fetch('/api/finances/' + path, {headers: {Accept: 'application/json'}});
+  async function api(path, params) {
+    const q = params && params.toString() ? '?' + params.toString() : '';
+    const r = await fetch('/api/finances/' + path + q, {headers: {Accept: 'application/json'}});
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || ('HTTP ' + r.status));
     return r.json();
   }
+  const isSelected = (a) => state.mode === 'custom' ? state.ids.has(a.id) : a.counted;
+  const displayed = () => state.all.filter(isSelected);
+  function queryParams() {
+    const p = new URLSearchParams();
+    if (state.mode === 'custom') p.set('accounts', [...state.ids].join(','));
+    if (state.from) p.set('from', state.from);
+    if (state.to) p.set('to', state.to);
+    return p;
+  }
+  const monthLabel = (m) => m ? monthName(m) : '';
 
   function renderHero() {
     const s = state.summary;
+    const sel = displayed();
+    if (!sel.length) {
+      $('hero').innerHTML = '<div class="hero-label">No accounts selected</div><div class="hero-sub">Pick accounts under Accounts and dates.</div>';
+      return;
+    }
     const chip = (label, d) => {
       if (!d) return '';
       const up = d.amount >= 0;
-      const basis = d.accounts ? `Across the ${d.accounts} accounts counted both then and now; accounts that only started reporting since are left out.` : '';
+      const basis = d.accounts ? `Across the ${d.accounts} accounts counted at both ends; accounts that started reporting in between are left out.` : '';
       return `<span class="chip ${up ? 'up' : 'down'}" title="${esc(basis)}">${up ? '▲' : '▼'} ${up ? '+' : '−'}${esc(money(Math.abs(d.amount)))} (${up ? '+' : '−'}${Math.abs(d.percent).toFixed(1)}%) ${label}</span>`;
     };
+    const custom = state.mode === 'custom';
+    const label = custom ? `Selected accounts (${sel.length} of ${state.all.length})` : 'Net worth, including cash';
+    const rangeChip = s.change.range ? chip(`${monthLabel(state.from)} → ${monthLabel(state.to || state.bounds.last)}`, s.change.range) : '';
     $('hero').innerHTML = `
       <div class="hero-top"><div>
-        <div class="hero-label">Net worth, including cash</div>
+        <div class="hero-label">${esc(label)}</div>
         <div class="hero-value money">${esc(money(s.net_worth_with_cash))}</div>
         <div class="hero-sub"><span class="money">${esc(money(s.net_worth))}</span> invested and credit · <span class="money">${esc(money(s.cash))}</span> cash · as of ${esc(dayName(s.as_of))}</div>
       </div><button class="eye" id="eye" type="button" aria-label="Hide or show amounts" title="Hide or show amounts">👁</button></div>
-      <div class="chips">${chip('1 mo', s.change.month)}${chip('3 mo', s.change.quarter)}${chip('1 yr', s.change.year)}</div>
-      <div class="hero-sub">Changes compare the same accounts over time; new accounts are not counted as growth.</div>`;
+      <div class="chips">${rangeChip}${chip('1 mo', s.change.month)}${chip('3 mo', s.change.quarter)}${chip('1 yr', s.change.year)}</div>
+      <div class="hero-sub">Changes compare the same accounts over time; new accounts are not counted as growth.${custom ? ' Chosen accounts all count, so a statement and the Plaid account that replaced it would be counted twice.' : ''}</div>`;
     $('eye').onclick = () => {
       const on = document.body.classList.toggle('hide-amounts');
       try { localStorage.setItem('finances-hide', on ? '1' : '0'); } catch (e) {}
@@ -191,19 +264,96 @@
 
   function renderNotice() {
     const el = $('notice');
-    const stale = state.accounts.filter((a) => a.stale && (a.counted || a.category === 'bank'));
-    if (!stale.length) { el.hidden = true; return; }
+    const stale = displayed().filter((a) => a.stale);
+    if (!stale.length || !state.summary) { el.hidden = true; return; }
     const worth = stale.reduce((t, a) => t + Math.abs(a.balance), 0);
     const total = Math.abs(state.summary.net_worth_with_cash) || 1;
-    const dupes = state.accounts.filter((a) => a.possible_duplicate).length;
+    const dupes = displayed().filter((a) => a.possible_duplicate).length;
     el.hidden = false;
     el.innerHTML = `⚠ <strong>${stale.length} ${stale.length === 1 ? 'balance is' : 'balances are'} older than 45 days</strong>, worth <span class="money">${esc(money(worth))}</span> (${Math.round(100 * worth / total)}% of the total). They still count at their last statement.` +
       (dupes ? ` ${dupes} ${dupes === 1 ? 'account shares' : 'accounts share'} an identical balance with another and may be counted twice.` : '');
   }
 
+  /* ---- filters ---- */
+  function renderFilters() {
+    const n = displayed().length;
+    $('filters-summary').textContent = `${n} of ${state.all.length} accounts · ${state.from ? monthLabel(state.from) : 'start'} – ${state.to ? monthLabel(state.to) : 'now'}`;
+    $('from').value = state.from; $('to').value = state.to;
+    if (state.bounds.first) { $('from').min = $('to').min = state.bounds.first; $('from').max = $('to').max = state.bounds.last; }
+    $('show-out').checked = state.showOut;
+    const groups = GROUP_ORDER.map((cat) => {
+      const list = state.all.filter((a) => a.category === cat && (state.showOut || a.counted || isSelected(a)) && (a.balance !== 0 || a.counted));
+      if (!list.length) return '';
+      const on = list.filter(isSelected).length;
+      const rows = list.map((a) => `<label class="pick-row"><input type="checkbox" data-id="${esc(a.id)}" ${isSelected(a) ? 'checked' : ''}>
+        <span class="nm">${esc(short(a.label))}${a.counted ? '' : ' <span class="badge">not in totals</span>'}${a.stale ? ' <span class="badge warn">⚠ ' + a.age_days + 'd</span>' : ''}</span>
+        <span class="bal money">${esc(money(a.balance))}</span></label>`).join('');
+      return `<div class="pick-group"><label class="pick-row head"><input type="checkbox" data-group="${cat}" ${on === list.length ? 'checked' : ''}>
+        <span>${esc(GROUP_LABELS[cat])}</span><span class="bal">${on} of ${list.length}</span></label>${rows}</div>`;
+    }).join('');
+    $('picker').innerHTML = groups;
+    document.querySelectorAll('#picker input[data-group]').forEach((el) => {
+      const list = state.all.filter((a) => a.category === el.dataset.group && (state.showOut || a.counted || isSelected(a)) && (a.balance !== 0 || a.counted));
+      const on = list.filter(isSelected).length;
+      el.indeterminate = on > 0 && on < list.length;
+    });
+  }
+  function toCustom() {
+    if (state.mode !== 'custom') { state.ids = new Set(state.all.filter((a) => a.counted).map((a) => a.id)); state.mode = 'custom'; }
+  }
+  let timer = null;
+  const changed = () => { savePrefs(); renderFilters(); clearTimeout(timer); timer = setTimeout(refresh, 200); };
+
+  function wireFilters() {
+    $('picker').addEventListener('change', (e) => {
+      const t = e.target;
+      if (t.dataset.id) { toCustom(); t.checked ? state.ids.add(t.dataset.id) : state.ids.delete(t.dataset.id); }
+      else if (t.dataset.group) {
+        toCustom();
+        state.all.filter((a) => a.category === t.dataset.group && (state.showOut || a.counted || state.ids.has(a.id)) && (a.balance !== 0 || a.counted))
+          .forEach((a) => (t.checked ? state.ids.add(a.id) : state.ids.delete(a.id)));
+      } else return;
+      changed();
+    });
+    $('tools').addEventListener('click', (e) => {
+      const act = e.target.closest('button')?.dataset.act; if (!act) return;
+      if (act === 'counted') { state.mode = 'default'; state.ids = new Set(); }
+      if (act === 'none') { state.mode = 'custom'; state.ids = new Set(); }
+      if (act === 'everything') { state.mode = 'custom'; state.showOut = true; state.ids = new Set(state.all.map((a) => a.id)); }
+      changed();
+    });
+    $('show-out').addEventListener('change', (e) => { state.showOut = e.target.checked; savePrefs(); renderFilters(); });
+    $('from').addEventListener('change', (e) => { state.from = e.target.value; changed(); });
+    $('to').addEventListener('change', (e) => { state.to = e.target.value; changed(); });
+    $('presets').addEventListener('click', (e) => {
+      const p = e.target.closest('button')?.dataset.p; if (!p || !state.bounds.last) return;
+      const last = state.bounds.last, [y, m] = last.split('-').map(Number);
+      const back = (n) => { const t = y * 12 + (m - 1) - n; return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`; };
+      state.to = '';
+      state.from = p === '1y' ? back(11) : p === '3y' ? back(35) : p === 'ytd' ? `${y}-01` : '';
+      changed();
+    });
+  }
+
+  async function refresh() {
+    const sel = displayed();
+    if (!sel.length) {
+      state.summary = {change: {}}; state.points = [];
+      renderHero(); renderNotice(); drawChart(); renderMix(); renderAccounts(); return;
+    }
+    const params = queryParams();
+    try {
+      const [summary, nw] = await Promise.all([api('summary', params), api('networth', params)]);
+      state.summary = summary; state.points = nw.points;
+      renderHero(); renderNotice(); drawChart(); renderMix(); renderAccounts();
+    } catch (e) {
+      $('hero').innerHTML = `<div class="error-card">Could not load finances: ${esc(e.message)}</div>`;
+    }
+  }
+
   /* ---- net worth chart ---- */
   const series = () => {
-    const pts = state.months ? state.points.slice(-state.months) : state.points;
+    const pts = state.points;
     return pts.map((p) => ({m: p.month, v: state.cash ? p.total_with_cash : p.total, p}));
   };
 
@@ -211,7 +361,7 @@
     const svg = $('chart'), data = series();
     const W = svg.clientWidth || 320, H = 220, L = 6, R = 6, T = 10, B = 24;
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-    if (data.length < 2) { svg.innerHTML = '<text class="axis-text" x="8" y="40">Not enough history yet.</text>'; return; }
+    if (data.length < 2) { $('table').innerHTML = ''; svg.innerHTML = '<text class="axis-text" x="8" y="40">Not enough history yet.</text>'; return; }
     let lo = Math.min(...data.map((d) => d.v)), hi = Math.max(...data.map((d) => d.v));
     if (hi === lo) { hi += 1; lo -= 1; }
     const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
@@ -255,19 +405,13 @@
     svg.addEventListener('pointerdown', move);
     svg.addEventListener('pointerleave', leave);
     svg.addEventListener('pointercancel', leave);
-    $('range').addEventListener('click', (e) => {
-      const b = e.target.closest('button'); if (!b) return;
-      state.months = Number(b.dataset.months);
-      [...$('range').children].forEach((c) => c.setAttribute('aria-pressed', String(c === b)));
-      drawChart();
-    });
     $('with-cash').addEventListener('change', (e) => { state.cash = e.target.checked; drawChart(); });
     if (window.ResizeObserver) new ResizeObserver(() => drawChart()).observe(wrap);
   }
 
   /* ---- composition ---- */
   function renderMix() {
-    const g = state.summary.groups;
+    const g = (state.summary && state.summary.groups) || {};
     const rows = [
       ['invest', 'Investments', 100], ['bank', 'Cash', 62], ['crypt', 'Crypto', 36],
     ].filter(([k]) => g[k] && g[k].balance > 0);
@@ -280,7 +424,6 @@
   }
 
   /* ---- accounts ---- */
-  const GROUP_ORDER = ['invest', 'bank', 'crypt', 'cred'];
   const flowsHtml = (a) => !a.flows ? '' : `<div class="acct-meta" style="margin:0 0 6px">
       <span>Money in <span class="money">${esc(money(a.flows.money_in || 0, true))}</span></span>
       <span>Money out <span class="money">${esc(money(a.flows.money_out || 0, true))}</span></span>
@@ -289,25 +432,25 @@
   const short = (label) => label.replace(/^[A-Z]{2,4} - /, '');
   function renderAccounts() {
     const html = GROUP_ORDER.map((cat) => {
-      const list = state.accounts.filter((a) => a.category === cat && (a.balance !== 0 || a.counted));
+      const list = displayed().filter((a) => a.category === cat && (a.balance !== 0 || a.counted));
       if (!list.length) return '';
-      const sum = list.filter((a) => a.counted || cat === 'bank').reduce((t, a) => t + a.balance, 0);
+      const sum = list.reduce((t, a) => t + a.balance, 0);
       const cards = list.map((a) => {
         const badges = [
           a.stale ? `<span class="badge warn">⚠ ${a.age_days}d old</span>` : '',
-          !a.counted && cat !== 'bank' ? '<span class="badge">not in totals</span>' : '',
+          !a.counted ? '<span class="badge">not in totals</span>' : '',
           a.possible_duplicate ? '<span class="badge warn">⚠ same balance as another</span>' : '',
         ].join('');
         const open = state.open === a.id;
-        return `<button type="button" class="acct ${a.counted || cat === 'bank' ? '' : 'uncounted'}" data-id="${esc(a.id)}" aria-expanded="${open}">
+        return `<button type="button" class="acct ${a.counted ? '' : 'uncounted'}" data-id="${esc(a.id)}" aria-expanded="${open}">
           <div class="acct-top"><span class="acct-name">${esc(short(a.label))}</span><span class="acct-bal money ${a.balance < 0 ? 'neg' : ''}">${esc(money(Math.abs(a.balance), true))}</span></div>
           <div class="acct-meta"><span>${esc(a.institution.toUpperCase())}</span><span>as of ${esc(dayName(a.as_of))}</span>${badges}</div>
           ${open ? '<div class="acct-detail">' + flowsHtml(a) + '<div id="detail-' + esc(a.id) + '"><span class="muted">Loading history…</span></div></div>' : ''}
         </button>`;
       }).join('');
-      return `<div class="group-head"><h3>${esc(state.summary.groups[cat]?.label || cat)}</h3><span class="muted money">${esc(money(sum))}</span></div>${cards}`;
+      return `<div class="group-head"><h3>${esc(GROUP_LABELS[cat] || cat)}</h3><span class="muted money">${esc(money(sum))}</span></div>${cards}`;
     }).join('');
-    $('accounts').innerHTML = html || '<span class="muted">No accounts yet.</span>';
+    $('accounts').innerHTML = html || '<span class="muted">No accounts selected.</span>';
     if (state.open) loadHistory(state.open);
   }
 
@@ -346,11 +489,16 @@
   }
 
   async function init() {
-    wireChart();
+    loadPrefs();
+    wireChart(); wireFilters();
     try {
-      const [summary, accts, nw, fresh] = await Promise.all([api('summary'), api('accounts'), api('networth'), api('freshness')]);
-      state.summary = summary; state.accounts = accts.accounts; state.points = nw.points;
-      renderHero(); renderNotice(); drawChart(); renderMix(); renderAccounts(); renderFresh(fresh.sources);
+      const [accts, fresh, every] = await Promise.all([api('accounts'), api('freshness'), api('networth')]);
+      state.all = accts.accounts;
+      state.bounds = every.points.length ? {first: every.points[0].month, last: every.points[every.points.length - 1].month} : state.bounds;
+      if (state.mode === 'custom') { const known = new Set(state.all.map((a) => a.id)); state.ids = new Set([...state.ids].filter((i) => known.has(i))); }
+      renderFresh(fresh.sources);
+      renderFilters();
+      await refresh();
     } catch (e) {
       $('hero').innerHTML = `<div class="error-card">Could not load finances: ${esc(e.message)}</div>`;
     }

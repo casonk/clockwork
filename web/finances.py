@@ -16,6 +16,7 @@ import os
 import re
 import stat
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -25,6 +26,26 @@ bp = Blueprint("finances", __name__)
 
 ALLOWED = re.compile(r"(summary|accounts|networth|freshness|accounts/[a-z0-9-]{1,120}/history)")
 TIMEOUT_SECONDS = 10
+MONTH = re.compile(r"\d{4}-\d{2}(-\d{2})?")
+ACCOUNT_IDS = re.compile(r"[a-z0-9-]{1,120}(,[a-z0-9-]{1,120}){0,299}")
+FILTERED = {"summary", "networth"}
+
+
+def forwarded_query(rest: str) -> str:
+    """The filters the service understands, each validated; anything else is dropped."""
+    if rest not in FILTERED:
+        return ""
+    pairs = []
+    for name, pattern in (
+        ("accounts", ACCOUNT_IDS),
+        ("from", MONTH),
+        ("to", MONTH),
+        ("months", re.compile(r"\d{1,3}")),
+    ):
+        value = request.args.get(name, "")
+        if value and pattern.fullmatch(value):
+            pairs.append((name, value))
+    return ("?" + urllib.parse.urlencode(pairs, safe=",-")) if pairs else ""
 
 
 def service_url() -> str:
@@ -73,9 +94,7 @@ def proxy(rest: str):
     if not key:
         return _json(503, {"error": "finance API key is not set up"})
     url = f"{service_url()}/api/{rest}"
-    months = request.args.get("months", "")
-    if rest == "networth" and months.isdigit():
-        url += f"?months={int(months)}"
+    url += forwarded_query(rest)
     req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:

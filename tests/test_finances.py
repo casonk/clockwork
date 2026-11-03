@@ -52,6 +52,24 @@ def test_only_read_routes_are_forwarded(client) -> None:
     assert client.post("/api/finances/summary").status_code in (403, 405)  # CSRF guard or no route
 
 
+def test_filters_are_forwarded_only_when_valid(client, monkeypatch) -> None:
+    urls = []
+
+    def fake_open(req, timeout=0):
+        urls.append(req.full_url)
+        return FakeResponse(b"{}")
+
+    monkeypatch.setattr(finances.urllib.request, "urlopen", fake_open)
+    client.get("/api/finances/summary?accounts=a-1,b-2&from=2026-01&to=2026-06-30&evil=1")
+    client.get("/api/finances/networth?accounts=BAD%20ID&from=2026-1&to=x")
+    client.get("/api/finances/accounts?accounts=a-1&from=2026-01")
+    assert urls[0].endswith("/api/summary?accounts=a-1%2Cb-2&from=2026-01&to=2026-06-30") or urls[
+        0
+    ].endswith("/api/summary?accounts=a-1,b-2&from=2026-01&to=2026-06-30")
+    assert urls[1].endswith("/api/networth")
+    assert urls[2].endswith("/api/accounts")  # only summary and networth take filters
+
+
 def test_months_is_forwarded_only_as_a_number(client, monkeypatch) -> None:
     urls = []
 
