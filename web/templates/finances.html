@@ -55,6 +55,8 @@
     .chart-wrap { position: relative; touch-action: pan-y; }
     svg.chart { display: block; width: 100%; height: 220px; overflow: visible; }
     .grid-line { stroke: var(--border); stroke-width: 1; opacity: .7; }
+    .grid-line.v { opacity: .35; }
+    .dot.sm { stroke-width: 1.5; }
     .axis-text { fill: var(--muted); font-size: 11px; }
     .line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
     .area { fill: color-mix(in srgb, var(--accent) 16%, transparent); stroke: none; }
@@ -106,8 +108,20 @@
     /* accounts */
     .group-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; margin: 6px 0 6px; }
     .group-head h3 { font-size: 15px; }
-    .acct { width: 100%; text-align: left; background: var(--surface2); color: var(--text); border: 1px solid var(--border);
-            border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; font: inherit; cursor: pointer; min-height: 56px; display: block; }
+    .card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+    .card-head h2 { margin: 0; }
+    #ap-title { text-transform: none; letter-spacing: 0; font-size: 16px; color: var(--text); }
+    .pop { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; min-width: 44px;
+           min-height: 44px; font-size: 18px; cursor: pointer; }
+    .pop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .acct-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; }
+    .acct-card.uncounted { opacity: .72; }
+    .chart-wrap.hist svg.chart { height: 150px; }
+    body.popout .page > *:not(.pop-target) { display: none !important; }
+    body.popout .pop { display: none; }
+    body.popout .page { max-width: none; }
+    .acct { width: 100%; text-align: left; background: transparent; color: var(--text); border: 0;
+            border-radius: 10px; padding: 10px 12px; margin-bottom: 0; font: inherit; cursor: pointer; min-height: 56px; display: block; }
     .acct:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .acct-top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
     .acct-name { font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
@@ -116,8 +130,7 @@
     .acct-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; color: var(--muted); margin-top: 3px; }
     .badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); white-space: nowrap; }
     .badge.warn { color: var(--yellow); background: var(--yellow-dim); border-color: transparent; }
-    .acct.uncounted { opacity: .72; }
-    .acct-detail { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
+    .acct-detail { margin: 0 12px 12px; border-top: 1px solid var(--border); padding-top: 8px; }
     svg.spark { display: block; width: 100%; height: 64px; }
     .spark-lbl { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
 
@@ -181,8 +194,8 @@
     </div>
   </details>
 
-  <section class="card">
-    <h2>Net worth over time</h2>
+  <section class="card" id="chart-card">
+    <div class="card-head"><h2>Net worth over time</h2><button type="button" class="pop" id="pop-chart" aria-label="Open the chart in its own window" title="Open in its own window (resizable, keeps the top bar and theme)">⧉</button></div>
     <div class="toolbar">
       <div class="seg" id="view" role="group" aria-label="Chart view">
         <button type="button" data-v="total" aria-pressed="true">Total</button>
@@ -198,6 +211,13 @@
     <div class="chart-legend" id="chart-legend"></div>
     <div class="hero-sub" id="chart-note"></div>
     <details class="table-view"><summary>Table view</summary><div class="scroll" id="table"></div></details>
+  </section>
+
+  <section class="card" id="account-pop" hidden>
+    <div class="card-head"><h2 id="ap-title">Account</h2></div>
+    <div class="hero-sub" id="ap-meta"></div>
+    <div id="ap-chart"></div>
+    <details class="table-view"><summary>Table view</summary><div class="scroll" id="ap-table"></div></details>
   </section>
 
   <section class="card"><h2>What it is made of</h2><div id="mix"></div></section>
@@ -382,6 +402,93 @@
     }
   }
 
+  /* ---- ticks ---- */
+  const NICE_STEPS = [1, 2, 2.5, 5, 10];
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  // Round values on the value axis: steps of 1, 2, 2.5, 5 times a power of ten, as many as fit.
+  function niceTicks(lo, hi, maxTicks) {
+    const span = (hi - lo) || 1, mag = Math.pow(10, Math.floor(Math.log10(span / Math.max(1, maxTicks))));
+    const steps = [...new Set([mag / 10, mag, mag * 10].flatMap((m) => NICE_STEPS.map((n) => Math.round(n * m * 1e6) / 1e6)))].sort((x, y) => x - y);
+    const at = (step) => { const out = []; for (let k = Math.ceil(lo / step - 1e-9); k * step <= hi + step * 1e-6; k++) out.push(Math.round(k * step * 100) / 100); return out; };
+    // the finest round step that still fits, but never fewer than three ticks when a finer step gives them
+    let pick = steps.find((st) => at(st).length <= maxTicks) || steps[steps.length - 1];
+    let ticks = at(pick);
+    if (ticks.length < 3) { const finer = [...steps].reverse().find((st) => st < pick && at(st).length >= 3); if (finer) { pick = finer; ticks = at(finer); } }
+    return {ticks, step: pick};
+  }
+  function tickLabel(v, step) {
+    const a = Math.abs(v), sign = v < 0 ? '−' : '';
+    if (a >= 1e6) return `${sign}$${+(a / 1e6).toFixed(step < 1e5 ? 2 : 1)}M`;
+    if (a >= 1e3) return `${sign}$${+(a / 1e3).toFixed(step % 1e3 ? 1 : 0)}K`;
+    return `${sign}$${Math.round(a)}`;
+  }
+  const ordOf = (m) => { const [y, mo] = m.split('-').map(Number); return y * 12 + mo - 1; };
+  const ordFrac = (d) => { const [y, mo, da] = d.split('-').map(Number); return y * 12 + mo - 1 + ((da || 1) - 1) / 30.5; };
+  // Calendar-aligned date ticks: every month, 2, 3, 6, 12, 24... months, whichever fits the width.
+  function monthAxis(ordFirst, ordLast, plotW) {
+    const maxTicks = Math.max(2, Math.floor(plotW / 62)), span = ordLast - ordFirst + 1;
+    const step = [1, 2, 3, 6, 12, 24, 60, 120].find((st) => Math.ceil(span / st) <= maxTicks) || 120;
+    const out = [];
+    for (let o = Math.ceil(ordFirst / step) * step; o <= ordLast; o += step) {
+      const y = Math.floor(o / 12), m = o % 12;
+      out.push({ord: o, label: step >= 12 ? String(y) : `${MONTHS[m]}${m === 0 || !out.length ? ' ’' + String(y).slice(2) : ''}`});
+    }
+    return out;
+  }
+  const xLabels = (ticks, xo, W, H) => ticks.map((t) => {
+    const x = xo(t.ord), anchor = x < 24 ? 'start' : x > W - 24 ? 'end' : 'middle';
+    return `<text class="axis-text" x="${x.toFixed(1)}" y="${H - 6}" text-anchor="${anchor}">${esc(t.label)}</text>`;
+  }).join('');
+  const xGrid = (ticks, xo, T, H, B) => ticks.map((t) => `<line class="grid-line v" x1="${xo(t.ord).toFixed(1)}" x2="${xo(t.ord).toFixed(1)}" y1="${T}" y2="${H - B}"/>`).join('');
+  const yGrid = (nt, y, L, W, R) => nt.ticks.map((t) => `<line class="grid-line" x1="${L}" x2="${W - R}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}"/><text class="axis-text" x="${L + 2}" y="${(y(t) - 4).toFixed(1)}">${esc(tickLabel(t, nt.step))}</text>`).join('');
+
+  /* ---- pop-out (the same page in its own window, like Tradility's detail) ---- */
+  const QS = new URLSearchParams(window.location.search);
+  const IS_POPOUT = QS.get('window') === '1';
+  if (IS_POPOUT) document.body.classList.add('popout');
+  const chartH = (base) => (IS_POPOUT ? Math.max(320, window.innerHeight - 300) : base);
+  const popOut = (query, name) => window.open(`${window.location.pathname}?${query}`, name, 'popup=yes,width=1240,height=900,resizable=yes,scrollbars=yes');
+
+  /* ---- one account's balance history ---- */
+  function mountHistoryChart(box, pts, height) {
+    box.innerHTML = '<div class="chart-wrap hist"><svg class="chart" role="img" aria-label="Balance history"></svg><div class="tip" hidden></div></div>';
+    const wrap = box.firstChild, svg = wrap.querySelector('svg'), tip = wrap.querySelector('.tip');
+    const t = pts.map((p) => ordFrac(p.as_of));
+    const draw = () => {
+      const W = svg.clientWidth || 300, H = height, L = 6, R = 8, T = 10, B = 24;
+      svg.style.height = H + 'px'; svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+      const vs = pts.map((p) => p.balance);
+      let lo = Math.min(...vs), hi = Math.max(...vs); if (hi === lo) { hi += 1; lo -= 1; }
+      const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+      const t0 = t[0], t1 = t[t.length - 1];
+      const xo = (o) => L + ((o - t0) * (W - L - R)) / ((t1 - t0) || 1);
+      const y = (v) => T + ((hi - v) * (H - T - B)) / (hi - lo);
+      const nt = niceTicks(lo, hi, Math.max(3, Math.floor((H - T - B) / 42)));
+      const ax = monthAxis(Math.floor(t0), Math.floor(t1), W - L - R).filter((k) => k.ord >= t0 - 0.01);
+      const d = pts.map((p, i) => `${i ? 'L' : 'M'}${xo(t[i]).toFixed(1)},${y(p.balance).toFixed(1)}`).join('');
+      const dots = pts.length <= 60 ? pts.map((p, i) => `<circle class="dot sm" cx="${xo(t[i]).toFixed(1)}" cy="${y(p.balance).toFixed(1)}" r="3"/>`).join('') : '';
+      svg.innerHTML = `${xGrid(ax, xo, T, H, B)}${yGrid(nt, y, L, W, R)}${xLabels(ax, xo, W, H)}<path class="line" d="${d}"/>${dots}<line class="cross" hidden/>`;
+      svg._geo = {xo, W};
+    };
+    const move = (ev) => {
+      const g = svg._geo, rect = svg.getBoundingClientRect(); if (!g) return;
+      const px = ((ev.clientX - rect.left) / rect.width) * g.W;
+      let best = 0, bd = Infinity;
+      pts.forEach((_, i) => { const dd = Math.abs(g.xo(t[i]) - px); if (dd < bd) { bd = dd; best = i; } });
+      const cx = g.xo(t[best]), cross = svg.querySelector('.cross');
+      cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.setAttribute('y1', 10); cross.setAttribute('y2', height - 24); cross.removeAttribute('hidden');
+      tip.innerHTML = `<b class="money">${esc(money(pts[best].balance, true))}</b><span class="muted">${esc(dayName(pts[best].as_of))}</span>`;
+      tip.hidden = false;
+      const w = tip.offsetWidth, left = (cx / g.W) * wrap.clientWidth;
+      tip.style.left = Math.max(0, Math.min(wrap.clientWidth - w, left - w / 2)) + 'px';
+    };
+    const leave = () => { tip.hidden = true; const c = svg.querySelector('.cross'); if (c) c.setAttribute('hidden', ''); };
+    svg.addEventListener('pointermove', move); svg.addEventListener('pointerdown', move);
+    svg.addEventListener('pointerleave', leave); svg.addEventListener('pointercancel', leave);
+    draw();
+    if (window.ResizeObserver) new ResizeObserver(draw).observe(wrap);
+  }
+
   /* ---- net worth chart ---- */
   const series = () => {
     const pts = state.points;
@@ -413,7 +520,7 @@
         : "Each dot is a month, colored by its growth over the same accounts (the pipeline's thresholds). Steps in the line can still be an account starting to report.";
     if (state.view !== 'total') return drawStacked();
     const svg = $('chart'), data = series();
-    const W = svg.clientWidth || 320, H = state.cats ? 260 : 220, L = 6, R = state.cats ? 58 : 8, T = 12, B = 24;
+    const W = svg.clientWidth || 320, H = chartH(state.cats ? 260 : 220), L = 6, R = state.cats ? 58 : 8, T = 12, B = 24;
     svg.style.height = H + 'px';
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
     if (data.length < 2) { $('table').innerHTML = ''; $('chart-legend').innerHTML = ''; svg.innerHTML = '<text class="axis-text" x="8" y="40">Not enough history yet.</text>'; return; }
@@ -430,13 +537,14 @@
     const path = line((d) => d.v);
     const upper = data.map((d, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(d.v + Math.abs(d.v) * band).toFixed(1)}`).join('');
     const lower = data.slice().reverse().map((d, i) => `L${x(data.length - 1 - i).toFixed(1)},${y(d.v - Math.abs(d.v) * band).toFixed(1)}`).join('');
-    const crosses = lo < 0 && hi > 0;
-    const ticks = crosses ? [0, hi / 2, hi] : [0, 0.5, 1].map((f) => lo + f * (hi - lo));
-    const grid = ticks.map((t) => `<line class="grid-line" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text class="axis-text" x="${L + 2}" y="${y(t) - 4}">${esc(compact(t))}</text>`).join('');
     const base = lo < 0 && hi > 0 ? 0 : lo;
+    const nt = niceTicks(lo, hi, Math.max(3, Math.floor((H - T - B) / 44)));
+    const grid = yGrid(nt, y, L, W, R);
     const zero = lo < 0 && hi > 0 ? `<line class="zero-line" x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}"/>` : '';
-    const xl = [0, Math.floor((data.length - 1) / 2), data.length - 1]
-      .map((i, k) => `<text class="axis-text" x="${x(i)}" y="${H - 6}" text-anchor="${k === 0 ? 'start' : k === 2 ? 'end' : 'middle'}">${esc(monthName(data[i].m))}</text>`).join('');
+    const ords = data.map((d) => ordOf(d.m));
+    const xo = (o) => L + ((o - ords[0]) * (W - L - R)) / ((ords[ords.length - 1] - ords[0]) || 1);
+    const ax = monthAxis(ords[0], ords[ords.length - 1], W - L - R);
+    const xl = xLabels(ax, xo, W, H), vgrid = xGrid(ax, xo, T, H, B);
     let cats = '', labels = [];
     if (state.cats) {
       cats = CATS.map((c) => `<path class="cat-line" stroke="${c.stroke}" stroke-dasharray="${c.dash}" d="${line((d) => d.p[c.k] || 0)}"/>`).join('');
@@ -446,7 +554,7 @@
     }
     const r = data.length > 60 ? 2.8 : data.length > 30 ? 3.4 : 4.2;
     const marks = data.map((d, i) => marker(d.p.growth_signal, x(i).toFixed(1), y(d.v).toFixed(1), r)).join('');
-    svg.innerHTML = `${grid}${zero}${xl}<path class="band" d="${upper}${lower}Z"/><path class="area" d="${path}L${x(data.length - 1)},${y(base)}L${x(0)},${y(base)}Z"/>${cats}<path class="line" d="${path}"/>${marks}
+    svg.innerHTML = `${vgrid}${grid}${zero}${xl}<path class="band" d="${upper}${lower}Z"/><path class="area" d="${path}L${x(data.length - 1)},${y(base)}L${x(0)},${y(base)}Z"/>${cats}<path class="line" d="${path}"/>${marks}
       <line class="cross" id="cross" y1="${T}" y2="${H - B}" hidden/><circle class="dot" id="dot" r="5" hidden/>`;
     svg._geo = {x, y, data, W, H, dot: true};
     const g = state.thresholds.green, rd = state.thresholds.red;
@@ -493,7 +601,7 @@
 
   function drawStacked() {
     const svg = $('chart'), {pts, series: ser} = stackModel();
-    const W = svg.clientWidth || 320, H = 240, L = 6, R = 8, T = 12, B = 24;
+    const W = svg.clientWidth || 320, H = chartH(240), L = 6, R = 8, T = 12, B = 24;
     svg.style.height = H + 'px';
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
     if (pts.length < 2 || !ser.length) { $('table').innerHTML = ''; $('chart-legend').innerHTML = ''; svg.innerHTML = '<text class="axis-text" x="8" y="40">Not enough history yet.</text>'; return; }
@@ -509,11 +617,14 @@
     const y = (v) => T + ((hi - v) * (H - T - B)) / (hi - lo);
     const area = (b) => b.hi.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('') +
       b.lo.map((v, i) => `L${x(n - 1 - i).toFixed(1)},${y(b.lo[n - 1 - i]).toFixed(1)}`).join('') + 'Z';
-    const ticks = lo < 0 ? [0, hi / 2, hi] : [0, 0.5, 1].map((f) => f * hi);
-    const grid = ticks.map((t) => `<line class="grid-line" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text class="axis-text" x="${L + 2}" y="${y(t) - 4}">${esc(compact(t))}</text>`).join('');
-    const xl = [0, Math.floor((n - 1) / 2), n - 1].map((i, k) => `<text class="axis-text" x="${x(i)}" y="${H - 6}" text-anchor="${k === 0 ? 'start' : k === 2 ? 'end' : 'middle'}">${esc(monthName(pts[i].month))}</text>`).join('');
+    const nt = niceTicks(lo, hi, Math.max(3, Math.floor((H - T - B) / 44)));
+    const grid = yGrid(nt, y, L, W, R);
+    const ords = pts.map((p) => ordOf(p.month));
+    const xo = (o) => L + ((o - ords[0]) * (W - L - R)) / ((ords[n - 1] - ords[0]) || 1);
+    const ax = monthAxis(ords[0], ords[n - 1], W - L - R);
+    const xl = xLabels(ax, xo, W, H), vgrid = xGrid(ax, xo, T, H, B);
     const zero = lo < 0 ? `<line class="zero-line" x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}"/>` : '';
-    svg.innerHTML = `${grid}${xl}${bands.map((b) => `<path class="stk" fill="${b.s.color}" d="${area(b)}"><title>${esc(b.s.label)}</title></path>`).join('')}${zero}
+    svg.innerHTML = `${vgrid}${grid}${xl}${bands.map((b) => `<path class="stk" fill="${b.s.color}" d="${area(b)}"><title>${esc(b.s.label)}</title></path>`).join('')}${zero}
       <line class="cross" id="cross" y1="${T}" y2="${H - B}" hidden/><circle class="dot" id="dot" r="5" hidden/>`;
     const html = (i) => {
       const rows = ser.map((s) => ({s, v: s.vals[i]})).filter((r) => r.v).sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
@@ -565,6 +676,10 @@
     });
     $('show-cats').addEventListener('change', (e) => { state.cats = e.target.checked; drawChart(); });
     if (window.ResizeObserver) new ResizeObserver(() => drawChart()).observe(wrap);
+    if (IS_POPOUT) window.addEventListener('resize', () => drawChart());
+    $('pop-chart').addEventListener('click', () => {
+      popOut(`window=1&card=chart&view=${state.view}&cash=${state.cash ? 1 : 0}&cats=${state.cats ? 1 : 0}`, 'finances-chart');
+    });
   }
 
   /* ---- composition ---- */
@@ -600,11 +715,12 @@
           a.possible_duplicate ? '<span class="badge warn">⚠ same balance as another</span>' : '',
         ].join('');
         const open = state.open === a.id;
-        return `<button type="button" class="acct ${a.counted ? '' : 'uncounted'}" data-id="${esc(a.id)}" aria-expanded="${open}">
+        return `<div class="acct-card ${a.counted ? '' : 'uncounted'}" data-id="${esc(a.id)}"><button type="button" class="acct" data-id="${esc(a.id)}" aria-expanded="${open}">
           <div class="acct-top"><span class="acct-name">${esc(short(a.label))}</span><span class="acct-bal money ${a.balance < 0 ? 'neg' : ''}">${esc(money(Math.abs(a.balance), true))}</span></div>
           <div class="acct-meta"><span>${esc(a.institution.toUpperCase())}</span><span>as of ${esc(dayName(a.as_of))}</span>${badges}</div>
-          ${open ? '<div class="acct-detail">' + flowsHtml(a) + '<div id="detail-' + esc(a.id) + '"><span class="muted">Loading history…</span></div></div>' : ''}
-        </button>`;
+        </button>
+        ${open ? '<div class="acct-detail">' + flowsHtml(a) + '<div id="detail-' + esc(a.id) + '"><span class="muted">Loading history…</span></div><div class="tools" style="margin-top:8px"><button type="button" class="tool" data-pop="' + esc(a.id) + '">⧉ Open in its own window</button></div></div>' : ''}
+        </div>`;
       }).join('');
       return `<div class="group-head"><h3>${esc(GROUP_LABELS[cat] || cat)}</h3><span class="muted money">${esc(money(sum))}</span></div>${cards}`;
     }).join('');
@@ -616,19 +732,15 @@
     const box = document.getElementById('detail-' + id);
     if (!box) return;
     try {
-      const pts = (await api(`accounts/${encodeURIComponent(id)}/history`)).points.slice(-36);
+      const pts = (await api(`accounts/${encodeURIComponent(id)}/history`)).points;
       if (pts.length < 2) { box.innerHTML = '<span class="muted">Only one statement so far.</span>'; return; }
-      const W = box.clientWidth || 300, H = 64;
-      const vs = pts.map((p) => p.balance);
-      let lo = Math.min(...vs), hi = Math.max(...vs); if (hi === lo) { hi += 1; lo -= 1; }
-      const x = (i) => (i * (W - 14)) / (pts.length - 1) + 4, y = (v) => 6 + ((hi - v) * (H - 12)) / (hi - lo);
-      const d = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.balance).toFixed(1)}`).join('');
-      box.innerHTML = `<svg class="spark" viewBox="0 0 ${W} ${H}" role="img" aria-label="Balance history"><path class="line" d="${d}"/><circle class="dot" cx="${x(pts.length - 1)}" cy="${y(vs[vs.length - 1])}" r="4"/></svg>
-        <div class="spark-lbl"><span>${esc(dayName(pts[0].as_of))} · <span class="money">${esc(compact(vs[0]))}</span></span><span>${esc(dayName(pts[pts.length - 1].as_of))} · <span class="money">${esc(compact(vs[vs.length - 1]))}</span></span></div>`;
+      mountHistoryChart(box, pts, 160);
     } catch (e) { box.innerHTML = `<span class="error-card">${esc(e.message)}</span>`; }
   }
 
   $('accounts').addEventListener('click', (e) => {
+    const pop = e.target.closest('[data-pop]');
+    if (pop) { popOut(`window=1&account=${encodeURIComponent(pop.dataset.pop)}`, 'finances-account-' + pop.dataset.pop); return; }
     const b = e.target.closest('.acct'); if (!b) return;
     state.open = state.open === b.dataset.id ? null : b.dataset.id;
     renderAccounts();
@@ -646,8 +758,30 @@
     $('fresh').innerHTML = rows || '<span class="muted">No download records.</span>';
   }
 
+  async function showAccountPop(id) {
+    const card = $('account-pop');
+    card.hidden = false; card.classList.add('pop-target');
+    const a = state.all.find((x) => x.id === id);
+    $('ap-title').textContent = a ? short(a.label) : 'Account';
+    $('ap-meta').textContent = a ? `${a.institution.toUpperCase()} · ${money(a.balance, true)} as of ${dayName(a.as_of)}` : '';
+    try {
+      const pts = (await api(`accounts/${encodeURIComponent(id)}/history`)).points;
+      if (pts.length < 2) { $('ap-chart').innerHTML = '<span class="muted">Only one statement so far.</span>'; return; }
+      mountHistoryChart($('ap-chart'), pts, chartH(320));
+      $('ap-table').innerHTML = '<table class="data"><tr><th>Date</th><th>Balance</th></tr>' + pts.slice().reverse().map((p) => `<tr><td>${esc(dayName(p.as_of))}</td><td class="money">${esc(money(p.balance, true))}</td></tr>`).join('') + '</table>';
+    } catch (e) { $('ap-chart').innerHTML = `<span class="error-card">${esc(e.message)}</span>`; }
+  }
+
   async function init() {
     loadPrefs();
+    if (IS_POPOUT && !QS.get('account')) {
+      const v = QS.get('view');
+      if (['total', 'category', 'account'].includes(v)) state.view = v;
+      state.cash = QS.get('cash') !== '0'; state.cats = QS.get('cats') === '1';
+      $('with-cash').checked = state.cash; $('show-cats').checked = state.cats;
+      [...$('view').children].forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.v === state.view)));
+      $('chart-card').classList.add('pop-target');
+    }
     wireChart(); wireFilters();
     try {
       const [accts, fresh, every] = await Promise.all([api('accounts'), api('freshness'), api('networth')]);
@@ -656,6 +790,7 @@
       if (state.mode === 'custom') { const known = new Set(state.all.map((a) => a.id)); state.ids = new Set([...state.ids].filter((i) => known.has(i))); }
       renderFresh(fresh.sources);
       renderFilters();
+      if (IS_POPOUT && QS.get('account')) { await showAccountPop(QS.get('account')); return; }
       await refresh();
     } catch (e) {
       $('hero').innerHTML = `<div class="error-card">Could not load finances: ${esc(e.message)}</div>`;
