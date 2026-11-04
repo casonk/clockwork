@@ -335,3 +335,5 @@ should change how future sessions work in this repo.
   names or URLs into tracked navigation code.
 - Check the open menus at narrow viewport widths as well as the closed bar;
   dropdowns need viewport bounds, scrolling, and keyboard dismissal.
+- **Commit after the last clean hook run, and re-stage first.** `pre-commit run` rewrites files after they were staged; committing without re-staging ships the unformatted versions, and CI (which runs the same hooks once) fails on a change a local "Passed" hid. Run the hooks until one run reports no change, then `git add -A`, then commit, and check `git status` is clean afterwards.
+- **Write test code in a form `ruff-format` and `black` both leave alone.** They disagree on a long `assert cond, msg  # comment` line and on `code = A + """..."""` spread over lines (ruff wraps it in parentheses, black unwraps it), so the two hooks undo each other on every run. Put the comment on its own line above the assert, and build a long string in its own statement. Keep a `# noqa` on the line ruff reports (or avoid the construct, such as a `lambda` assigned to a name).
