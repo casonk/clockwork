@@ -392,6 +392,24 @@ def test_the_form_previews_then_requires_the_typed_phrase_and_never_auto_sends()
     assert html.index("tradeCall('preview'") < html.index("tradeCall('confirm'")
 
 
+def test_a_placed_broker_order_is_shown_before_the_scheduled_export_syncs():
+    from pathlib import Path
+
+    html = (
+        Path(__file__).resolve().parents[1] / "web" / "templates" / "to-tradility.html"
+    ).read_text(encoding="utf-8")
+    for needle in (
+        "result = await tradeCall('confirm'",
+        "Placed now; awaiting broker sync",
+        "detailOrders.orders = [placed, ...detailOrders.orders.filter",
+        "The open order is shown now; the next broker sync will confirm its status.",
+        "if (detailTicker !== ticker) return;",
+        "await loadOrders(ticker);",
+    ):
+        assert needle in html, needle
+    assert html.index("await loadOrders(ticker);") < html.index("detailOrders.orders = [placed")
+
+
 def test_the_quote_route_forwards_to_the_service_and_rejects_bad_tickers(api, monkeypatch):
     c, _ = api
     seen = []

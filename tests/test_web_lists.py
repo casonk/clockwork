@@ -162,6 +162,15 @@ def test_tradility_page_uses_one_update_action_and_follows_completion(client):
     assert 'rel="noopener noreferrer"' in html
 
 
+def test_tradility_page_can_federate_to_the_standalone_application(client, monkeypatch):
+    monkeypatch.setattr(web_app, "TRADILITY_WEB_URL", "https://tradility.example/")
+
+    response = client.get("/to-tradility")
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "https://tradility.example/"
+
+
 def test_tradility_list_omits_history_and_ticker_detail_returns_it(client, list_files, monkeypatch):
     list_files["TRADILITY_ANALYSIS_FILE"].write_text(
         json.dumps(

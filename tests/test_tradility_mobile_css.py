@@ -30,3 +30,10 @@ def test_a_detail_stack_cannot_be_widened_by_its_cards():
     stack = text[text.index(".detail-stack {") :].split("}", 1)[0]
     assert "grid-template-columns: minmax(0, 1fr)" in stack and "min-width: 0" in stack
     assert ".detail-card { min-width: 0; }" in text
+
+
+def test_indicator_strength_labels_can_wrap_without_widening_the_page():
+    text = PAGE.read_text(encoding="utf-8")
+    group = text[text.index(".indicator-group {") :].split("}", 1)[0]
+    assert "flex-wrap: wrap" in group
+    assert "min-width: 0" in group and "max-width: 100%" in group

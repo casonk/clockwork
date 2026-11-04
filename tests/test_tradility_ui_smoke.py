@@ -82,6 +82,189 @@ def test_settings_panel_changes_what_the_cards_read_without_script_errors():
     assert errors == []
 
 
+def test_indicator_strength_labels_do_not_overflow_a_phone_viewport():
+    html = web_app.app.test_client().get("/to-tradility").get_data(as_text=True)
+    errors: list[str] = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+        page = browser.new_page(viewport={"width": 390, "height": 844})
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.route(
+            "**/api/**",
+            lambda r: r.fulfill(
+                json=DATA if "tradility-analysis" in r.request.url else {"ok": False}
+            ),
+        )
+        page.set_content(html.replace("</head>", "<base href='http://localhost/'></head>"))
+        page.wait_for_selector(".ticker-card")
+        for indicator in ("rsi", "vwap", "trend", "fund"):
+            button = f".ind-btn[data-ind={indicator}]"
+            page.click(button)  # normal -> strong for RSI; off -> weak for the others
+            if indicator != "rsi":
+                page.click(button)  # weak -> normal
+                page.click(button)  # normal -> strong
+        dimensions = page.evaluate(
+            "({scroll: document.documentElement.scrollWidth, width: document.documentElement.clientWidth})"
+        )
+        browser.close()
+    assert dimensions["scroll"] <= dimensions["width"]
+    assert errors == []
+
+
+def test_a_confirmed_order_appears_even_while_the_broker_export_is_stale():
+    html = web_app.app.test_client().get("/to-tradility").get_data(as_text=True)
+    errors: list[str] = []
+    order_reads = 0
+
+    def respond(route):
+        nonlocal order_reads
+        url = route.request.url
+        if "/api/tradility-analysis/AAA" in url:
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "ticker": {**record("AAA", 28.0, 15.0), "price_history": _history()},
+                }
+            )
+        elif "tradility-analysis" in url:
+            route.fulfill(json=DATA)
+        elif "/api/tradility-orders/AAA" in url:
+            order_reads += 1
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "ticker": "AAA",
+                    "position": {"quantity": 0, "avg_entry": None, "source": None},
+                    "orders": [],
+                    "synced": {"generated_at": "2026-11-02T00:00:00Z", "sources": {"schwab": True}},
+                }
+            )
+        elif "tradility-trade/status" in url:
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "available": True,
+                    "enabled": True,
+                    "brokers": ["schwab"],
+                    "tickers": ["*"],
+                    "schwab_accounts": ["1234"],
+                    "fidelity_accounts": [],
+                    "confirmation": "phrase",
+                    "per_order_usd": 1000,
+                    "daily_usd": 5000,
+                    "spent_today": 0,
+                    "defaults": {
+                        "session": "normal",
+                        "time_in_force": "gtc",
+                        "buy_offset_pct": -2.5,
+                        "sell_offset_pct": 2.5,
+                    },
+                }
+            )
+        elif "tradility-accounts" in url:
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "accounts": [
+                        {
+                            "broker": "schwab",
+                            "id": "1234",
+                            "label": "Schwab …1234",
+                            "buying_power": 5000,
+                            "cash": 5000,
+                            "spendable": 5000,
+                            "margin_eligible": False,
+                        }
+                    ],
+                    "statements": [],
+                    "sources": {},
+                }
+            )
+        elif "tradility-trade/holdings/AAA" in url:
+            route.fulfill(json={"ok": True, "symbol": "AAA", "accounts": [], "statements": []})
+        elif "tradility-trade/quote/AAA" in url:
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "ticker": "AAA",
+                    "mark": 100,
+                    "buy_price": 97.5,
+                    "sell_price": 102.5,
+                    "templates": [],
+                }
+            )
+        elif "tradility-trade/preview" in url:
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "preview_id": "preview-1",
+                    "phrase": "BUY AAA",
+                    "warnings": [],
+                    "impact": None,
+                    "confirmation": "phrase",
+                    "broker": "schwab",
+                    "notional": 97.5,
+                    "last_price": 100,
+                    "order": {
+                        "ticker": "AAA",
+                        "account": "1234",
+                        "side": "buy",
+                        "kind": "limit",
+                        "quantity": 1,
+                        "price": 97.5,
+                        "session": "normal",
+                        "tif": "gtc",
+                    },
+                }
+            )
+        elif "tradility-trade/confirm" in url:
+            route.fulfill(
+                json={
+                    "ok": True,
+                    "placed": True,
+                    "broker": "schwab",
+                    "broker_order_id": "777",
+                    "order": {
+                        "ticker": "AAA",
+                        "account": "1234",
+                        "side": "buy",
+                        "kind": "limit",
+                        "quantity": 1,
+                        "price": 97.5,
+                        "session": "normal",
+                        "tif": "gtc",
+                    },
+                }
+            )
+        else:
+            route.fulfill(json={"ok": False})
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+        page = browser.new_page(viewport={"width": 1200, "height": 900})
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.route("**/api/**", respond)
+        page.set_content(html.replace("</head>", "<base href='http://localhost/'></head>"))
+        page.wait_for_selector(".ticker-card[data-ticker=AAA]")
+        page.click(".ticker-card[data-ticker=AAA]")
+        page.wait_for_selector("#trade-form")
+        page.select_option("#trade-form select[name=account]", "1234")
+        page.fill("#trade-form input[name=quantity]", "1")
+        page.fill("#trade-form input[name=price]", "97.5")
+        page.click("#trade-submit")
+        page.wait_for_selector("#trade-go")
+        page.fill("#trade-phrase", "BUY AAA")
+        page.click("#trade-go")
+        page.wait_for_selector(".orders-table tbody tr.order-open")
+        row = page.inner_text(".orders-table tbody tr.order-open")
+        browser.close()
+
+    assert order_reads >= 2  # the post-confirm read was intentionally still stale
+    assert "buy" in row and "97.50" in row and "Schwab" in row
+    assert "Placed now; awaiting broker sync" in row
+    assert errors == []
+
+
 def test_accounts_panel_links_to_finances_for_net_worth_and_cash():
     html = web_app.app.test_client().get("/to-tradility").get_data(as_text=True)
     accounts = {

@@ -14,6 +14,17 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
+- A portfolio portal should federate application-owned UIs rather than become
+  the implementation home for every application's domain page. Give each app a
+  complete loopback UI and stable API, then let the portal link or reverse
+  proxy it and provide optional shared capabilities; retain an in-process page
+  only as a bounded migration fallback.
+- When a mutation endpoint returns the accepted object's canonical ID but a
+  collection is fed by a later scheduled export, merge the accepted object
+  into the current view immediately, label it as awaiting synchronization,
+  and de-duplicate it by that ID when the export catches up. Guard the async
+  merge with the item key that initiated it so navigating meanwhile cannot
+  attach the result to a different detail view.
 - An AI batch action that normally fills missing values must make replacement
   of user-authored values an explicit, confirmed scope. Enforce that scope both
   when building the model prompt and when applying its response; filtering only
