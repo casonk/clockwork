@@ -53,3 +53,6 @@ config/tradility-orders.json
 
 # coverage output
 coverage.xml
+
+# Portfolio site link (created by traction-control scripts/portfolio_sites.py link)
+/.portfolio

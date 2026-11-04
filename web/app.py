@@ -58,6 +58,7 @@ try:
     from web import personal_library as personal_media
     from web.library_pages import library_pages
     from web.personal_library import personal_library
+    from web.portfolio import site as portfolio_site
     from web.security import same_origin_host, validate_remote_bind
     from web.status_helpers import (
         build_cron_status,
@@ -82,6 +83,7 @@ except ModuleNotFoundError:
     import watch_log
     from library_pages import library_pages
     from personal_library import personal_library
+    from portfolio import site as portfolio_site
     from security import same_origin_host, validate_remote_bind
     from status_helpers import (
         build_cron_status,
@@ -327,6 +329,24 @@ def _return_path(default: str = "/home") -> str:
     if value.startswith("/") and not value.startswith("//"):
         return value
     return default
+
+
+def _portfolio_site():
+    """This site's portfolio settings (resolved per request so a new link or store entry is seen)."""
+    return portfolio_site.resolve(BASE_DIR, vendored=Path(__file__).parent / "portfolio")
+
+
+@app.before_request
+def _refuse_unexpected_host() -> None:
+    """DNS-rebinding guard: Host must be loopback or a name this site is registered under.
+
+    Runs first and for every method. A page on an attacker's hostname that resolves to this
+    machine sends that hostname as both Host and Origin, so the same-origin check below (which
+    trusts the request's own host) cannot tell it from a real request, and the CSRF token is
+    fetchable once it counts as same-origin.
+    """
+    if not _portfolio_site().host_allowed(request.host):
+        abort(403, description="Unexpected Host header.")
 
 
 @app.before_request
