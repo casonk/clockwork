@@ -138,6 +138,7 @@ TRADILITY_REFRESH_UNIT = os.environ.get(
     "CLOCKWORK_TRADILITY_REFRESH_UNIT", "tradility-refresh.service"
 ).strip()
 TRADILITY_STALE_HOURS = max(1, int(os.environ.get("CLOCKWORK_TRADILITY_STALE_HOURS", "72")))
+TRADILITY_WEB_URL = os.environ.get("CLOCKWORK_TRADILITY_WEB_URL", "").strip()
 _OLLAMA_BASE = os.environ.get("CREW_CHIEF_URL", "http://localhost:11434")
 _OLLAMA_MODEL = os.environ.get("CLOCKWORK_GROCERY_MODEL", "qwen2.5-coder:7b")
 _SUGGEST_MODEL = os.environ.get("CLOCKWORK_SUGGEST_MODEL", _OLLAMA_MODEL)
@@ -4775,6 +4776,8 @@ def to_invest():
 
 @app.get("/to-tradility")
 def to_tradility():
+    if TRADILITY_WEB_URL:
+        return redirect(TRADILITY_WEB_URL)
     return render_template("to-tradility.html")
 
 

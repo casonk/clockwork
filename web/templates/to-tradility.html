@@ -48,7 +48,10 @@
       font-size: 11px; font-weight: 700; text-transform: uppercase;
       letter-spacing: 0.7px; color: var(--muted-fg); white-space: nowrap;
     }
-    .indicator-group { display: flex; gap: 4px; }
+    .indicator-group {
+      display: flex; flex: 1 1 320px; flex-wrap: wrap; gap: 4px;
+      min-width: 0; max-width: 100%;
+    }
     .ind-row { display: flex; justify-content: space-between; gap: 8px; }
     .ind-btn {
       padding: 5px 14px; border-radius: 99px; border: 1px solid var(--border);
@@ -2474,19 +2477,38 @@
 
   async function sendStep() {
     const st = tradeStep;
+    const ticker = detailTicker;
+    const previousOrders = detailOrders;
     const phraseInput = document.getElementById('trade-phrase');
     const phrase = phraseInput ? phraseInput.value : '';
     tradeStep = null;   // a preview is single use; start over after any outcome
+    let result;
     try {
-      if (st.kind === 'place') await tradeCall('confirm', {preview_id: st.previewId, phrase});
-      else await tradeCall('cancel', {broker: st.broker, order_id: st.orderId, symbol: st.symbol, account: st.account, phrase});
+      if (st.kind === 'place') result = await tradeCall('confirm', {preview_id: st.previewId, phrase});
+      else result = await tradeCall('cancel', {broker: st.broker, order_id: st.orderId, symbol: st.symbol, account: st.account, phrase});
     } catch (err) {
       renderOrders();
       tradeFail(err.message);
       return;
     }
-    await loadOrders(detailTicker);   // the broker's export refreshes on its own schedule
-    tradeFail('Sent. Broker orders appear here after the next sync.');
+    await loadOrders(ticker);   // the broker's export refreshes on its own schedule
+    if (detailTicker !== ticker) return;
+    if (st.kind === 'place') {
+      const o = result.order || {};
+      const id = `${result.broker}-${result.broker_order_id}`;
+      const placed = {
+        ...o, id, source: result.broker, status: 'open',
+        date: new Date().toISOString().slice(0, 10),
+        note: 'Placed now; awaiting broker sync',
+      };
+      detailOrders = detailOrders || previousOrders || {position: {}, orders: [], synced: {sources: {}}};
+      detailOrders.orders = [placed, ...detailOrders.orders.filter(order => order.id !== id)];
+      renderOrders();
+      drawDetailChart();
+      tradeFail('Placed. The open order is shown now; the next broker sync will confirm its status.');
+    } else {
+      tradeFail('Cancellation sent. The next broker sync will confirm its status.');
+    }
   }
 
   function renderOrders() {
