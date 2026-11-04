@@ -257,3 +257,40 @@ def test_fundamental_groups_pick_which_rules_count():
         """)
     assert r["all"] == {"score": 1, "n": 6} and r["valuation"] == {"score": 2, "n": 2}
     assert r["none"] is None
+
+
+@needs_node
+def test_price_ticks_are_round_and_date_ticks_follow_the_calendar():
+    start = TEMPLATE.index("  const NICE_STEPS")
+    end = TEMPLATE.index("  function drawDetailChart()")
+    code = TEMPLATE[start:end] + """
+        const day = d => Date.parse(d + 'T00:00:00Z');
+        const out = {
+          price: niceTicks(96.81, 143.09, 5),
+          narrow: niceTicks(330000, 372000, 4),
+          penny: niceTicks(0.0412, 0.0458, 4),
+          year: timeAxis(day('2025-01-01'), day('2026-02-04'), 600).map(t => t.label),
+          fiveYears: timeAxis(day('2021-02-01'), day('2026-02-01'), 600).map(t => t.label),
+          month: timeAxis(day('2026-01-05'), day('2026-02-04'), 600).map(t => t.label),
+          threeMonths: timeAxis(day('2025-11-04'), day('2026-02-04'), 600).map(t => t.label),
+        };
+        console.log(JSON.stringify(out));
+        """
+    r = json.loads(
+        subprocess.run(["node", "-e", code], capture_output=True, text=True, check=True).stdout
+    )
+    for key in ("price", "narrow", "penny"):
+        ticks = r[key]
+        gaps = {round(b - a, 6) for a, b in zip(ticks, ticks[1:], strict=False)}
+        assert len(ticks) >= 3 and len(gaps) == 1, (key, ticks)
+    assert r["price"] == [100, 110, 120, 130, 140] and r["narrow"][0] % 5000 == 0
+    assert (
+        r["year"][0] == "Jan ’25" and r["year"][-1] == "Jan ’26"
+    )  # month ticks, with the year on the first and each January
+    assert (
+        all(x.isdigit() for x in r["fiveYears"]) and len(r["fiveYears"]) >= 3
+    )  # years on a long range
+    assert all(
+        " " in label and label.split()[1].isdigit() for label in r["month"]
+    )  # "Jan 12": days on a short range
+    assert len(r["threeMonths"]) >= 3
