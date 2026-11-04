@@ -4503,7 +4503,7 @@ def _sync_invest_classifications(
     changes = 0
     for name, field in (("Sectors", "sector"), ("Industries", "industry")):
         labels: dict[str, dict[str, float]] = {}
-        for ticker, row in classes.items():
+        for row in classes.values():
             if row[field]:
                 labels.setdefault(row[field].upper(), {})
         unclassified: dict[str, float] = {}
