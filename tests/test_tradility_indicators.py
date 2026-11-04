@@ -263,7 +263,7 @@ def test_fundamental_groups_pick_which_rules_count():
 def test_price_ticks_are_round_and_date_ticks_follow_the_calendar():
     start = TEMPLATE.index("  const NICE_STEPS")
     end = TEMPLATE.index("  function drawDetailChart()")
-    code = TEMPLATE[start:end] + """
+    body = """
         const day = d => Date.parse(d + 'T00:00:00Z');
         const out = {
           price: niceTicks(96.81, 143.09, 5),
@@ -276,6 +276,7 @@ def test_price_ticks_are_round_and_date_ticks_follow_the_calendar():
         };
         console.log(JSON.stringify(out));
         """
+    code = TEMPLATE[start:end] + body
     r = json.loads(
         subprocess.run(["node", "-e", code], capture_output=True, text=True, check=True).stdout
     )
