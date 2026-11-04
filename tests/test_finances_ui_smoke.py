@@ -136,6 +136,51 @@ FRESH = {
 SEEN: list[str] = []
 
 
+def _daily_points() -> list[dict]:
+    from datetime import date, timedelta
+
+    out, day = [], date(2026, 1, 1)
+    for n in range(60):
+        total = 320000.0 + n * 100
+        out.append(
+            {
+                "month": day.isoformat()[:7],
+                "date": day.isoformat(),
+                "total": total,
+                "cash": 20000.0,
+                "total_with_cash": total + 20000.0,
+                "invest": total,
+                "bank": 20000.0,
+                "crypt": 0.0,
+                "cred": -500.0,
+                "growth_rate": None,
+                "growth_signal": "n/a",
+                "by_account": {"fid-401k": total},
+            }
+        )
+        day += timedelta(days=1)
+    return out
+
+
+def _daily_history() -> list[dict]:
+    from datetime import date, timedelta
+
+    out, day = [], date(2026, 1, 1)
+    for n in range(40):
+        actual = n in (0, 20, 39)
+        out.append(
+            {
+                "as_of": day.isoformat(),
+                "balance": 1000.0 + n * 5,
+                "raw": 1100.0 + n * 5,
+                "adjustment": 0.0 if actual else -100.0 + n,
+                "source": "actual" if actual else "reconstructed",
+            }
+        )
+        day += timedelta(days=1)
+    return out
+
+
 def route(r):
     url = r.request.url
     SEEN.append(url)
@@ -145,7 +190,13 @@ def route(r):
     if url.endswith("/freshness"):
         return r.fulfill(json=FRESH)
     if "/networth" in url:
-        body = {"points": POINTS, "thresholds": {"green": 0.05, "red": -0.05}}
+        daily = "granularity=daily" in SEEN[-1]
+        body = {
+            "points": _daily_points() if daily else POINTS,
+            "thresholds": {"green": 0.05, "red": -0.05},
+        }
+        if daily:
+            body["granularity"] = "daily"
         if "by=account" in SEEN[-1]:
             body["accounts"] = [
                 {
@@ -158,6 +209,8 @@ def route(r):
                 if a["id"] != "hunt-mma"
             ]
         return r.fulfill(json=body)
+    if url.endswith("/history") and "granularity=daily" in SEEN[-1] and "fid-401k" in url:
+        return r.fulfill(json={"points": _daily_history(), "granularity": "daily"})
     if url.endswith("/history"):
         return r.fulfill(
             json={
@@ -413,7 +466,69 @@ def test_axis_ticks_are_round_and_evenly_spaced_and_cards_pop_out():
                 "Fidelity 401(k)" in acct.inner_text("#ap-title")
                 and not acct.locator("#hero").is_visible()
             )
-            assert acct.locator("#ap-table tr").count() == 3  # header and two balances
+            assert acct.locator("#ap-table tr").count() == 41  # the header and 40 daily balances
+            assert (
+                "Adjustment" in acct.locator("#ap-table").text_content()
+            )  # the audit columns of a rebuilt series
             browser.close()
     finally:
         srv.shutdown()
+
+
+def test_daily_mode_draws_a_line_per_day_and_marks_only_real_points_on_an_account():
+    srv = _serve()
+    base = f"http://127.0.0.1:{srv.server_port}"
+    errors: list[str] = []
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+            page = browser.new_page(viewport={"width": 390, "height": 900})
+            page.on("pageerror", lambda e: errors.append(str(e)))
+            page.route("**/api/finances/**", route)
+            page.goto(base + "/finances")
+            page.wait_for_selector(".hero-value")
+            assert page.locator("#chart .mk").count() > 0  # month-end: growth markers, as before
+
+            SEEN.clear()
+            page.click("#gran button[data-g='day']")
+            page.wait_for_function("document.querySelectorAll('#chart .mk').length === 0")
+            assert any("granularity=daily" in u for u in SEEN if "/networth" in u)
+            assert (
+                page.locator("#chart .band").count() == 0
+                and page.locator("#chart path.line").count() == 1
+            )
+            assert "or more" not in page.inner_text(
+                "#chart-legend"
+            )  # growth signals are for months
+            box = page.locator("#chart").bounding_box()
+            page.mouse.move(box["x"] + box["width"] * 0.5, box["y"] + 90)
+            page.wait_for_selector("#tip:not([hidden])")
+            tip = page.inner_text("#tip")
+            assert "Jan" in tip and "Step" not in tip  # a date, no monthly step
+
+            # the account's chart: three real points get a dot, the rest is a rebuilt line
+            page.click(".acct[data-id='fid-401k']")
+            page.wait_for_selector("#detail-fid-401k svg.chart")
+            assert page.locator("#detail-fid-401k circle.dot.sm").count() == 3
+            assert "rebuilt day by day from the order history" in page.inner_text(
+                "#detail-fid-401k"
+            )
+            hbox = page.locator("#detail-fid-401k svg.chart").bounding_box()
+            page.mouse.move(hbox["x"] + hbox["width"] * 0.3, hbox["y"] + 60)
+            page.wait_for_selector("#detail-fid-401k .tip:not([hidden])")
+            assert "Rebuilt from order history" in page.inner_text("#detail-fid-401k .tip")
+
+            # it is remembered, and the pop-out opens in the same mode
+            page.reload()
+            page.wait_for_selector(".hero-value")
+            assert (
+                page.locator("#gran button[data-g='day']").get_attribute("aria-pressed") == "true"
+            )
+            with page.expect_popup() as popup:
+                page.click("#pop-chart")
+            popup.value.wait_for_load_state()
+            assert "gran=day" in popup.value.url
+            browser.close()
+    finally:
+        srv.shutdown()
+    assert errors == []
