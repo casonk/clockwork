@@ -36,6 +36,7 @@ def list_files(tmp_path, monkeypatch):
         "INVEST_LIST_FILE": tmp_path / "to-invest.json",
         "INVEST_LIST_HISTORY_FILE": tmp_path / "to-invest-history.jsonl",
         "HOLDINGS_AGGREGATE_FILE": tmp_path / "holdings-aggregate.json",
+        "INVEST_CLASSIFICATIONS_FILE": tmp_path / "classifications.csv",
         "CODE_LIST_FILE": tmp_path / "to-code.json",
         "CODE_LIST_HISTORY_FILE": tmp_path / "to-code-history.jsonl",
         "TRADILITY_ANALYSIS_FILE": tmp_path / "tradility-analysis.json",
@@ -1329,3 +1330,102 @@ def test_to_code_items_carry_priority_and_in_person_flags(client, list_files):
     assert 'data-in-person="true"' in html
     assert 'data-ready="false"' in html
     assert client.post("/to-do/update-item", data={"csrf_token": csrf}).status_code == 404
+
+
+def _seed_industries(client, list_files):
+    list_files["INVEST_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {"name": "Stocks", "items": [{"ticker": "AAA", "holding": True}]},
+                    {
+                        "name": "Sectors",
+                        "items": [{"ticker": "ENERGY", "holding": False, "target_pct": "7"}],
+                    },
+                ]
+            }
+        )
+    )
+    list_files["HOLDINGS_AGGREGATE_FILE"].write_text(
+        json.dumps(
+            {
+                "holdings": [
+                    {"ticker": "AAA", "asset_class": "Stocks", "total_ending_value": 50},
+                    {"ticker": "BBB", "asset_class": "Stocks", "total_ending_value": 30},
+                    {"ticker": "XYZ", "asset_class": "Crypto", "total_ending_value": 20},
+                ]
+            }
+        )
+    )
+    list_files["INVEST_CLASSIFICATIONS_FILE"].write_text(
+        "symbol,cusip,sector,industry,sub_industry\n"
+        "AAA,1,Technology,Semiconductors,\n"
+        "BBB,2,Technology,Software,\n"
+        "CCC,3,Energy,Oil & Gas,\n"
+    )
+    csrf = _csrf(client, "/api/invest")
+    client.post("/to-invest/sync-holdings", data={"csrf_token": csrf})
+    return csrf
+
+
+def _cards(client, name):
+    data = client.get("/api/invest").get_json()["data"]
+    category = next(c for c in data["categories"] if c["name"] == name)
+    return {i["ticker"]: i for i in category["items"]}, [i["ticker"] for i in category["items"]]
+
+
+def test_sync_builds_sector_and_industry_cards_from_holdings(client, list_files):
+    _seed_industries(client, list_files)
+    sectors, order = _cards(client, "Sectors")
+    assert sectors["TECHNOLOGY"]["allocation_pct"] == "80"
+    assert sectors["TECHNOLOGY"]["holding"] is True
+    assert sectors["TECHNOLOGY"]["name"] == "AAA 50%, BBB 30%"
+    assert sectors["ENERGY"]["allocation_pct"] == "0"
+    assert sectors["ENERGY"]["target_pct"] == "7"  # user target survives
+    assert sectors["ENERGY"]["holding"] is False
+    assert sectors["UNCLASSIFIED"]["allocation_pct"] == "20"
+    industries, _ = _cards(client, "Industries")
+    assert industries["SEMICONDUCTORS"]["allocation_pct"] == "50"
+    assert industries["SOFTWARE"]["allocation_pct"] == "30"
+    assert "TECHNOLOGY" not in industries
+    assert order[0] == "ENERGY"  # existing card keeps its place
+
+
+def test_derived_cards_stay_out_of_page_totals(client, list_files):
+    _seed_industries(client, list_files)
+    html = client.get("/to-invest").get_data(as_text=True)
+    # Every position is already listed once; sector cards would push this past 100%.
+    assert "Listed now <strong>100.00%</strong>" in html
+    assert "Targets assigned <strong>0.00%</strong>" in html
+
+
+def test_cards_can_be_ordered_by_holding_percent(client, list_files):
+    _seed_industries(client, list_files)
+    html = client.get("/to-invest?order=holding").get_data(as_text=True)
+    sectors = html[html.index('data-invest-anchor="category:Sectors"') :]
+    assert sectors.index("TECHNOLOGY") < sectors.index("UNCLASSIFIED") < sectors.index("ENERGY")
+    assert '<button class="group-toggle"' not in html
+    assert "/to-invest/move-item" not in html  # arrows belong to rank mode only
+
+
+def test_target_rank_moves_a_card_up_and_down(client, list_files):
+    csrf = _seed_industries(client, list_files)
+    _, order = _cards(client, "Sectors")
+    assert order == ["ENERGY", "TECHNOLOGY", "UNCLASSIFIED"]
+    html = client.get("/to-invest?order=rank").get_data(as_text=True)
+    assert 'action="/to-invest/move-item"' in html and "#1" in html
+
+    def move(item, direction):
+        return client.post(
+            "/to-invest/move-item",
+            data={"csrf_token": csrf, "category": "Sectors", "item": item, "direction": direction},
+        )
+
+    assert "order=rank" in move("UNCLASSIFIED", "up").headers["Location"]
+    assert _cards(client, "Sectors")[1] == ["ENERGY", "UNCLASSIFIED", "TECHNOLOGY"]
+    move("ENERGY", "up")  # already first: unchanged
+    assert _cards(client, "Sectors")[1] == ["ENERGY", "UNCLASSIFIED", "TECHNOLOGY"]
+    move("ENERGY", "down")
+    assert _cards(client, "Sectors")[1] == ["UNCLASSIFIED", "ENERGY", "TECHNOLOGY"]
+    move("NOPE", "up")
+    assert _cards(client, "Sectors")[1] == ["UNCLASSIFIED", "ENERGY", "TECHNOLOGY"]
