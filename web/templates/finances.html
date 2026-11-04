@@ -68,6 +68,15 @@
     .chart-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 12px; color: var(--muted); align-items: center; }
     .chart-legend span { display: inline-flex; align-items: center; gap: 5px; min-height: 22px; }
     .chart-legend svg { width: 22px; height: 12px; overflow: visible; }
+    .stk { stroke: var(--surface); stroke-width: 1.5; stroke-linejoin: round; }
+    .chart-legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+    .chart-legend span { min-width: 0; }
+    .chart-legend .lg, .tip .row .lg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .tip .row > span:first-child { min-width: 0; flex: 1; }
+    .tip { max-width: 260px; }
+    .sw-box { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
+    .tip .sw-box { margin-right: 6px; }
+    .tip .row span:first-child { display: inline-flex; align-items: center; min-width: 0; }
     .cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
     .dot { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
     .tip { position: absolute; top: 0; pointer-events: none; background: var(--surface2); border: 1px solid var(--border);
@@ -175,12 +184,19 @@
   <section class="card">
     <h2>Net worth over time</h2>
     <div class="toolbar">
+      <div class="seg" id="view" role="group" aria-label="Chart view">
+        <button type="button" data-v="total" aria-pressed="true">Total</button>
+        <button type="button" data-v="category" aria-pressed="false">By category</button>
+        <button type="button" data-v="account" aria-pressed="false">By account</button>
+      </div>
+    </div>
+    <div class="toolbar">
       <label class="switch"><input type="checkbox" id="with-cash" checked> Include cash</label>
-      <label class="switch"><input type="checkbox" id="show-cats"> Show categories</label>
+      <label class="switch" id="cats-switch"><input type="checkbox" id="show-cats"> Show categories</label>
     </div>
     <div class="chart-wrap" id="chart-wrap"><svg class="chart" id="chart" role="img" aria-label="Net worth over time"></svg><div class="tip" id="tip" hidden></div></div>
     <div class="chart-legend" id="chart-legend"></div>
-    <div class="hero-sub">Each dot is a month, colored by its growth over the same accounts (the pipeline's thresholds). Steps in the line can still be an account starting to report.</div>
+    <div class="hero-sub" id="chart-note"></div>
     <details class="table-view"><summary>Table view</summary><div class="scroll" id="table"></div></details>
   </section>
 
@@ -207,7 +223,7 @@
 
   const GROUP_LABELS = {invest: 'Investments', bank: 'Cash', crypt: 'Crypto', cred: 'Credit'};
   const GROUP_ORDER = ['invest', 'bank', 'crypt', 'cred'];
-  const state = {summary: null, all: [], points: [], thresholds: {green: 0.05, red: -0.05}, cats: false, cash: true, open: null,
+  const state = {view: 'total', meta: {}, summary: null, all: [], points: [], thresholds: {green: 0.05, red: -0.05}, cats: false, cash: true, open: null,
                  mode: 'default', ids: new Set(), from: '', to: '', showOut: false, bounds: {first: '', last: ''}};
   const KEY = 'finances-filter';
   function loadPrefs() {
@@ -354,9 +370,12 @@
       renderHero(); renderNotice(); drawChart(); renderMix(); renderAccounts(); return;
     }
     const params = queryParams();
+    const nwParams = new URLSearchParams(params);
+    if (state.view === 'account') nwParams.set('by', 'account');
     try {
-      const [summary, nw] = await Promise.all([api('summary', params), api('networth', params)]);
+      const [summary, nw] = await Promise.all([api('summary', params), api('networth', nwParams)]);
       state.summary = summary; state.points = nw.points; if (nw.thresholds) state.thresholds = nw.thresholds;
+      state.meta = Object.fromEntries((nw.accounts || []).map((a) => [a.id, a]));
       renderHero(); renderNotice(); drawChart(); renderMix(); renderAccounts();
     } catch (e) {
       $('hero').innerHTML = `<div class="error-card">Could not load finances: ${esc(e.message)}</div>`;
@@ -386,6 +405,13 @@
   }
 
   function drawChart() {
+    $('cats-switch').hidden = state.view !== 'total';
+    $('chart-note').textContent = state.view === 'account'
+      ? `Each band is one account's balance, stacked; the ${MAX_ACCOUNTS} largest are shown and the rest are grouped. Steps can be an account starting to report.`
+      : state.view === 'category'
+        ? 'Each band is a type of account, stacked. Steps can be an account starting to report.'
+        : "Each dot is a month, colored by its growth over the same accounts (the pipeline's thresholds). Steps in the line can still be an account starting to report.";
+    if (state.view !== 'total') return drawStacked();
     const svg = $('chart'), data = series();
     const W = svg.clientWidth || 320, H = state.cats ? 260 : 220, L = 6, R = state.cats ? 58 : 8, T = 12, B = 24;
     svg.style.height = H + 'px';
@@ -422,7 +448,7 @@
     const marks = data.map((d, i) => marker(d.p.growth_signal, x(i).toFixed(1), y(d.v).toFixed(1), r)).join('');
     svg.innerHTML = `${grid}${zero}${xl}<path class="band" d="${upper}${lower}Z"/><path class="area" d="${path}L${x(data.length - 1)},${y(base)}L${x(0)},${y(base)}Z"/>${cats}<path class="line" d="${path}"/>${marks}
       <line class="cross" id="cross" y1="${T}" y2="${H - B}" hidden/><circle class="dot" id="dot" r="5" hidden/>`;
-    svg._geo = {x, y, data, W, H};
+    svg._geo = {x, y, data, W, H, dot: true};
     const g = state.thresholds.green, rd = state.thresholds.red;
     const sw = (inner) => `<svg viewBox="0 0 22 12" aria-hidden="true">${inner}</svg>`;
     $('chart-legend').innerHTML =
@@ -435,6 +461,74 @@
       data.slice().reverse().map((d) => `<tr><td>${esc(monthName(d.m))}</td><td class="money">${esc(money(d.v))}</td><td>${esc(pct(d.p.growth_rate))} ${esc(d.p.growth_signal)}</td><td class="money">${esc(money(d.p.invest))}</td><td class="money">${esc(money(d.p.cash))}</td><td class="money">${esc(money(d.p.cred))}</td></tr>`).join('') + '</table>';
   }
 
+  /* ---- stacked views ---- */
+  // Fixed order, never cycled: the theme's four chart hues at full then softer strength. A ninth
+  // account would need a ninth hue, so everything past the eighth folds into "smaller accounts".
+  const HUES = ['var(--accent)', 'var(--green)', 'var(--yellow)', 'var(--red)'];
+  const slotColor = (i) => `color-mix(in srgb, ${HUES[i % 4]} ${i < 4 ? 100 : 55}%, var(--surface2))`;
+  const tintColor = (cat) => slotColor(Math.max(0, GROUP_ORDER.indexOf(cat)));
+  const OTHER = 'color-mix(in srgb, var(--muted) 55%, var(--surface2))';
+  const MAX_ACCOUNTS = 8;
+
+  function stackModel() {
+    const pts = state.points;
+    if (state.view === 'category') {
+      const cats = GROUP_ORDER.filter((c) => (c !== 'bank' || state.cash) && pts.some((p) => p[c]));
+      return {pts, series: cats.map((c) => ({key: c, label: GROUP_LABELS[c], color: tintColor(c), vals: pts.map((p) => p[c] || 0)}))};
+    }
+    const ids = new Set();
+    pts.forEach((p) => Object.keys(p.by_account || {}).forEach((i) => ids.add(i)));
+    let list = [...ids].map((id) => ({id, cat: (state.meta[id] || {}).category || 'invest', label: short((state.meta[id] || {}).label || id),
+      vals: pts.map((p) => (p.by_account || {})[id] || 0)}))
+      .filter((a) => state.cash || a.cat !== 'bank');
+    const latest = (a) => Math.abs(a.vals[a.vals.length - 1]) || Math.max(...a.vals.map(Math.abs));
+    list.sort((a, b) => latest(b) - latest(a));
+    const top = list.slice(0, MAX_ACCOUNTS), rest = list.slice(MAX_ACCOUNTS);
+    top.forEach((a, rank) => { a.color = slotColor(rank); });  // the colour follows the account's rank by balance
+    top.sort((a, b) => GROUP_ORDER.indexOf(a.cat) - GROUP_ORDER.indexOf(b.cat) || latest(b) - latest(a));
+    const series = top.map((a) => ({key: a.id, label: a.label, color: a.color, vals: a.vals}));
+    if (rest.length) series.push({key: 'other', label: `${rest.length} smaller accounts`, color: OTHER, vals: pts.map((_, i) => rest.reduce((t, a) => t + a.vals[i], 0))});
+    return {pts, series};
+  }
+
+  function drawStacked() {
+    const svg = $('chart'), {pts, series: ser} = stackModel();
+    const W = svg.clientWidth || 320, H = 240, L = 6, R = 8, T = 12, B = 24;
+    svg.style.height = H + 'px';
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    if (pts.length < 2 || !ser.length) { $('table').innerHTML = ''; $('chart-legend').innerHTML = ''; svg.innerHTML = '<text class="axis-text" x="8" y="40">Not enough history yet.</text>'; return; }
+    const n = pts.length;
+    const pos = Array(n).fill(0), neg = Array(n).fill(0);
+    const bands = ser.map((s) => ({s, lo: [], hi: []}));
+    bands.forEach((b) => b.s.vals.forEach((v, i) => {
+      if (v >= 0) { b.lo[i] = pos[i]; pos[i] += v; b.hi[i] = pos[i]; } else { b.hi[i] = neg[i]; neg[i] += v; b.lo[i] = neg[i]; }
+    }));
+    let hi = Math.max(...pos, 1), lo = Math.min(...neg, 0);
+    const pad = (hi - lo) * 0.04; hi += pad; if (lo < 0) lo -= pad;
+    const x = (i) => L + (i * (W - L - R)) / (n - 1);
+    const y = (v) => T + ((hi - v) * (H - T - B)) / (hi - lo);
+    const area = (b) => b.hi.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('') +
+      b.lo.map((v, i) => `L${x(n - 1 - i).toFixed(1)},${y(b.lo[n - 1 - i]).toFixed(1)}`).join('') + 'Z';
+    const ticks = lo < 0 ? [0, hi / 2, hi] : [0, 0.5, 1].map((f) => f * hi);
+    const grid = ticks.map((t) => `<line class="grid-line" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text class="axis-text" x="${L + 2}" y="${y(t) - 4}">${esc(compact(t))}</text>`).join('');
+    const xl = [0, Math.floor((n - 1) / 2), n - 1].map((i, k) => `<text class="axis-text" x="${x(i)}" y="${H - 6}" text-anchor="${k === 0 ? 'start' : k === 2 ? 'end' : 'middle'}">${esc(monthName(pts[i].month))}</text>`).join('');
+    const zero = lo < 0 ? `<line class="zero-line" x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}"/>` : '';
+    svg.innerHTML = `${grid}${xl}${bands.map((b) => `<path class="stk" fill="${b.s.color}" d="${area(b)}"><title>${esc(b.s.label)}</title></path>`).join('')}${zero}
+      <line class="cross" id="cross" y1="${T}" y2="${H - B}" hidden/><circle class="dot" id="dot" r="5" hidden/>`;
+    const html = (i) => {
+      const rows = ser.map((s) => ({s, v: s.vals[i]})).filter((r) => r.v).sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
+      const shown = rows.slice(0, 5), more = rows.length - shown.length;
+      const total = rows.reduce((t, r) => t + r.v, 0);
+      return `<b class="money">${esc(money(total))}</b><span class="muted">${esc(monthName(pts[i].month))}</span>` +
+        shown.map((r) => `<div class="row"><span><i class="sw-box" style="background:${r.s.color}"></i><span class="lg">${esc(r.s.label)}</span></span><span class="money">${esc(money(r.v))}</span></div>`).join('') +
+        (more > 0 ? `<div class="row"><span>${more} more</span><span></span></div>` : '');
+    };
+    svg._geo = {x, y, data: pts, W, H, dot: false, html};
+    $('chart-legend').innerHTML = ser.map((s) => `<span title="${esc(s.label)}"><i class="sw-box" style="background:${s.color}"></i><span class="lg">${esc(s.label)}</span></span>`).join('');
+    $('table').innerHTML = `<table class="data"><tr><th>Month</th>${ser.map((s) => `<th>${esc(s.label)}</th>`).join('')}</tr>` +
+      pts.map((p, i) => i).reverse().map((i) => `<tr><td>${esc(monthName(pts[i].month))}</td>${ser.map((s) => `<td class="money">${esc(money(s.vals[i]))}</td>`).join('')}</tr>`).join('') + '</table>';
+  }
+
   function wireChart() {
     const svg = $('chart'), tip = $('tip'), wrap = $('chart-wrap');
     const move = (ev) => {
@@ -443,12 +537,12 @@
       const px = ((ev.clientX - rect.left) / rect.width) * g.W;
       let best = 0, bd = Infinity;
       g.data.forEach((_, i) => { const d = Math.abs(g.x(i) - px); if (d < bd) { bd = d; best = i; } });
-      const d = g.data[best], cx = g.x(best), cy = g.y(d.v);
+      const d = g.data[best], cx = g.x(best);
       const cross = $('cross'), dot = $('dot');
       cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.removeAttribute('hidden');
-      dot.setAttribute('cx', cx); dot.setAttribute('cy', cy); dot.removeAttribute('hidden');
-      const p = d.p;
-      tip.innerHTML = `<b class="money">${esc(money(d.v))}</b><span class="muted">${esc(monthName(d.m))}</span>
+      if (g.dot) { dot.setAttribute('cx', cx); dot.setAttribute('cy', g.y(d.v)); dot.removeAttribute('hidden'); }
+      const p = d.p || {};
+      tip.innerHTML = g.html ? g.html(best) : `<b class="money">${esc(money(d.v))}</b><span class="muted">${esc(monthName(d.m))}</span>
         <div class="row"><span>Step</span><span>${esc(pct(p.growth_rate))} · ${esc(SIGNAL_WORD[p.growth_signal] || '')}</span></div>
         <div class="row"><span>Investments</span><span class="money">${esc(money(p.invest))}</span></div>
         <div class="row"><span>Cash</span><span class="money">${esc(money(p.cash))}</span></div>
@@ -463,6 +557,12 @@
     svg.addEventListener('pointerleave', leave);
     svg.addEventListener('pointercancel', leave);
     $('with-cash').addEventListener('change', (e) => { state.cash = e.target.checked; drawChart(); });
+    $('view').addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b || b.dataset.v === state.view) return;
+      state.view = b.dataset.v;
+      [...$('view').children].forEach((c) => c.setAttribute('aria-pressed', String(c === b)));
+      if (state.view === 'account') refresh(); else drawChart();
+    });
     $('show-cats').addEventListener('change', (e) => { state.cats = e.target.checked; drawChart(); });
     if (window.ResizeObserver) new ResizeObserver(() => drawChart()).observe(wrap);
   }

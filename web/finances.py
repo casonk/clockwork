@@ -41,6 +41,7 @@ def forwarded_query(rest: str) -> str:
         ("from", MONTH),
         ("to", MONTH),
         ("months", re.compile(r"\d{1,3}")),
+        ("by", re.compile(r"account")),
     ):
         value = request.args.get(name, "")
         if value and pattern.fullmatch(value):
