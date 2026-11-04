@@ -161,9 +161,11 @@ def test_detail_and_chart_offer_full_screen_and_pop_out_as_separate_options():
             page.click(".ticker-card[data-ticker='AAA']")
             page.wait_for_selector("#detail-chart-card")
             windows = len(page.context.pages)
-            top = lambda: page.evaluate(
-                "document.getElementById('detail-overlay').getBoundingClientRect().top"
-            )  # noqa: E731
+
+            def top() -> float:
+                return page.evaluate(
+                    "document.getElementById('detail-overlay').getBoundingClientRect().top"
+                )
 
             # the whole detail: full screen covers the top bar, Esc leaves it but keeps the detail open
             assert top() > 0

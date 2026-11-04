@@ -336,9 +336,8 @@ def test_axis_ticks_are_round_and_evenly_spaced_and_cards_pop_out():
                 for t in page.locator("#chart text.axis-text").all_text_contents()
                 if not t.startswith(("$", "−$"))
             ]
-            assert len(x) >= 3 and any(
-                "’26" in t for t in x
-            ), x  # calendar-aligned, with the year shown
+            # calendar-aligned, with the year shown
+            assert len(x) >= 3 and any("’26" in t for t in x)
 
             # full screen is in place (no new window); pop out is the one that opens a window
             windows = len(page.context.pages)
