@@ -215,6 +215,12 @@
       </div>
     </div>
     <div class="toolbar">
+      <div class="seg" id="gran" role="group" aria-label="Detail level">
+        <button type="button" data-g="month" aria-pressed="true" title="One point per month, from statements">Month-end</button>
+        <button type="button" data-g="day" aria-pressed="false" title="One point per day; Schwab accounts are rebuilt daily from their order history">Daily</button>
+      </div>
+    </div>
+    <div class="toolbar">
       <label class="switch"><input type="checkbox" id="with-cash" checked> Include cash</label>
       <label class="switch" id="cats-switch"><input type="checkbox" id="show-cats"> Show categories</label>
     </div>
@@ -254,7 +260,7 @@
 
   const GROUP_LABELS = {invest: 'Investments', bank: 'Cash', crypt: 'Crypto', cred: 'Credit'};
   const GROUP_ORDER = ['invest', 'bank', 'crypt', 'cred'];
-  const state = {view: 'total', meta: {}, summary: null, all: [], points: [], thresholds: {green: 0.05, red: -0.05}, cats: false, cash: true, open: null,
+  const state = {gran: 'month', view: 'total', meta: {}, summary: null, all: [], points: [], thresholds: {green: 0.05, red: -0.05}, cats: false, cash: true, open: null,
                  mode: 'default', ids: new Set(), from: '', to: '', showOut: false, bounds: {first: '', last: ''}};
   const KEY = 'finances-filter';
   function loadPrefs() {
@@ -403,6 +409,7 @@
     const params = queryParams();
     const nwParams = new URLSearchParams(params);
     if (state.view === 'account') nwParams.set('by', 'account');
+    if (state.gran === 'day') nwParams.set('granularity', 'daily');
     try {
       const [summary, nw] = await Promise.all([api('summary', params), api('networth', nwParams)]);
       state.summary = summary; state.points = nw.points; if (nw.thresholds) state.thresholds = nw.thresholds;
@@ -500,7 +507,10 @@
       const nt = niceTicks(lo, hi, Math.max(3, Math.floor((H - T - B) / 42)));
       const ax = monthAxis(Math.floor(t0), Math.floor(t1), W - L - R).filter((k) => k.ord >= t0 - 0.01);
       const d = pts.map((p, i) => `${i ? 'L' : 'M'}${xo(t[i]).toFixed(1)},${y(p.balance).toFixed(1)}`).join('');
-      const dots = pts.length <= 60 ? pts.map((p, i) => `<circle class="dot sm" cx="${xo(t[i]).toFixed(1)}" cy="${y(p.balance).toFixed(1)}" r="3"/>`).join('') : '';
+      // statements (and API snapshots) get a dot; between them a daily line is rebuilt from orders
+      const hasSource = pts.some((p) => p.source);
+      const dots = pts.map((p, i) => ((hasSource ? p.source === 'actual' : pts.length <= 60)
+        ? `<circle class="dot sm" cx="${xo(t[i]).toFixed(1)}" cy="${y(p.balance).toFixed(1)}" r="3"/>` : '')).join('');
       svg.innerHTML = `${xGrid(ax, xo, T, H, B)}${yGrid(nt, y, L, W, R)}${xLabels(ax, xo, W, H)}<path class="line" d="${d}"/>${dots}<line class="cross" hidden/>`;
       svg._geo = {xo, W};
     };
@@ -511,7 +521,10 @@
       pts.forEach((_, i) => { const dd = Math.abs(g.xo(t[i]) - px); if (dd < bd) { bd = dd; best = i; } });
       const cx = g.xo(t[best]), cross = svg.querySelector('.cross');
       cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.setAttribute('y1', 10); cross.setAttribute('y2', height - 24); cross.removeAttribute('hidden');
-      tip.innerHTML = `<b class="money">${esc(money(pts[best].balance, true))}</b><span class="muted">${esc(dayName(pts[best].as_of))}</span>`;
+      const pt = pts[best];
+      const how = !pt.source ? '' : pt.source === 'actual' ? '<div class="muted">Statement or snapshot</div>'
+        : `<div class="muted">Rebuilt from order history${pt.adjustment ? ' (' + (pt.adjustment < 0 ? '−' : '+') + esc(money(Math.abs(pt.adjustment), true)) + ' to meet statements)' : ''}</div>`;
+      tip.innerHTML = `<b class="money">${esc(money(pt.balance, true))}</b><span class="muted">${esc(dayName(pt.as_of))}</span>${how}`;
       tip.hidden = false;
       const w = tip.offsetWidth, left = (cx / g.W) * wrap.clientWidth;
       tip.style.left = Math.max(0, Math.min(wrap.clientWidth - w, left - w / 2)) + 'px';
@@ -521,12 +534,20 @@
     svg.addEventListener('pointerleave', leave); svg.addEventListener('pointercancel', leave);
     draw();
     if (window.ResizeObserver) new ResizeObserver(draw).observe(wrap);
+    if (pts.some((p) => p.source === 'reconstructed')) {
+      box.insertAdjacentHTML('beforeend', '<div class="hero-sub hist-note">● Statements and API snapshots. The line between them is rebuilt day by day from the order history and adjusted to meet them.</div>');
+    }
   }
 
   /* ---- net worth chart ---- */
+  // A point is a month ("2026-02") or, in daily mode, a day ("2026-02-03").
+  const isDaily = () => state.gran === 'day';
+  const pKey = (p) => (isDaily() && p.date ? p.date : p.month);
+  const pLabel = (key) => (key.length > 7 ? dayName(key) : monthName(key));
+  const pOrd = (key) => (key.length > 7 ? ordFrac(key) : ordOf(key));
   const series = () => {
     const pts = state.points;
-    return pts.map((p) => ({m: p.month, v: state.cash ? p.total_with_cash : p.total, p}));
+    return pts.map((p) => ({m: pKey(p), v: state.cash ? p.total_with_cash : p.total, p}));
   };
 
   const CATS = [
@@ -558,7 +579,8 @@
     svg.style.height = H + 'px';
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
     if (data.length < 2) { $('table').innerHTML = ''; $('chart-legend').innerHTML = ''; svg.innerHTML = '<text class="axis-text" x="8" y="40">Not enough history yet.</text>'; return; }
-    const band = Math.max(Math.abs(state.thresholds.green), Math.abs(state.thresholds.red));
+    const daily = isDaily();
+    const band = daily ? 0 : Math.max(Math.abs(state.thresholds.green), Math.abs(state.thresholds.red));
     const vals = data.flatMap((d) => [d.v, d.v - Math.abs(d.v) * band, d.v + Math.abs(d.v) * band]);
     if (state.cats) CATS.forEach((c) => data.forEach((d) => vals.push(d.p[c.k] || 0)));
     let lo = Math.min(...vals), hi = Math.max(...vals);
@@ -575,7 +597,7 @@
     const nt = niceTicks(lo, hi, Math.max(3, Math.floor((H - T - B) / 44)));
     const grid = yGrid(nt, y, L, W, R);
     const zero = lo < 0 && hi > 0 ? `<line class="zero-line" x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}"/>` : '';
-    const ords = data.map((d) => ordOf(d.m));
+    const ords = data.map((d) => pOrd(d.m));
     const xo = (o) => L + ((o - ords[0]) * (W - L - R)) / ((ords[ords.length - 1] - ords[0]) || 1);
     const ax = monthAxis(ords[0], ords[ords.length - 1], W - L - R);
     const xl = xLabels(ax, xo, W, H), vgrid = xGrid(ax, xo, T, H, B);
@@ -587,20 +609,21 @@
       cats += labels.map((l) => `<text class="cat-label" x="${W - R + 4}" y="${l.y + 4}">${esc(l.c.label)}</text>`).join('');
     }
     const r = data.length > 60 ? 2.8 : data.length > 30 ? 3.4 : 4.2;
-    const marks = data.map((d, i) => marker(d.p.growth_signal, x(i).toFixed(1), y(d.v).toFixed(1), r)).join('');
-    svg.innerHTML = `${vgrid}${grid}${zero}${xl}<path class="band" d="${upper}${lower}Z"/><path class="area" d="${path}L${x(data.length - 1)},${y(base)}L${x(0)},${y(base)}Z"/>${cats}<path class="line" d="${path}"/>${marks}
+    // the growth signals describe a month's step, so a daily line carries none
+    const marks = daily ? '' : data.map((d, i) => marker(d.p.growth_signal, x(i).toFixed(1), y(d.v).toFixed(1), r)).join('');
+    svg.innerHTML = `${vgrid}${grid}${zero}${xl}${daily ? '' : `<path class="band" d="${upper}${lower}Z"/>`}<path class="area" d="${path}L${x(data.length - 1)},${y(base)}L${x(0)},${y(base)}Z"/>${cats}<path class="line" d="${path}"/>${marks}
       <line class="cross" id="cross" y1="${T}" y2="${H - B}" hidden/><circle class="dot" id="dot" r="5" hidden/>`;
     svg._geo = {x, y, data, W, H, dot: true};
     const g = state.thresholds.green, rd = state.thresholds.red;
     const sw = (inner) => `<svg viewBox="0 0 22 12" aria-hidden="true">${inner}</svg>`;
     $('chart-legend').innerHTML =
-      `<span>${sw(marker('green', 11, 6, 4))} ${esc(pct(g))} or more</span>` +
+      (daily ? '' : `<span>${sw(marker('green', 11, 6, 4))} ${esc(pct(g))} or more</span>` +
       `<span>${sw(marker('yellow', 11, 6, 4))} within ${esc((Math.abs(g) * 100).toFixed(0))}%</span>` +
-      `<span>${sw(marker('red', 11, 6, 4))} ${esc(pct(rd))} or less</span>` +
+      `<span>${sw(marker('red', 11, 6, 4))} ${esc(pct(rd))} or less</span>`) +
       `<span>${sw('<line x1="0" x2="22" y1="6" y2="6" stroke="var(--accent)" stroke-width="2"/>')} Total</span>` +
       (state.cats ? CATS.map((c) => `<span>${sw(`<line x1="0" x2="22" y1="6" y2="6" stroke="${c.stroke}" stroke-width="1.5" stroke-dasharray="${c.dash}"/>`)} ${esc(c.label)}</span>`).join('') : '');
-    $('table').innerHTML = `<table class="data"><tr><th>Month</th><th>Total</th><th>Step</th><th>Invest</th><th>Cash</th><th>Credit</th></tr>` +
-      data.slice().reverse().map((d) => `<tr><td>${esc(monthName(d.m))}</td><td class="money">${esc(money(d.v))}</td><td>${esc(pct(d.p.growth_rate))} ${esc(d.p.growth_signal)}</td><td class="money">${esc(money(d.p.invest))}</td><td class="money">${esc(money(d.p.cash))}</td><td class="money">${esc(money(d.p.cred))}</td></tr>`).join('') + '</table>';
+    $('table').innerHTML = `<table class="data"><tr><th>${daily ? 'Date' : 'Month'}</th><th>Total</th><th>Step</th><th>Invest</th><th>Cash</th><th>Credit</th></tr>` +
+      data.slice().reverse().map((d) => `<tr><td>${esc(pLabel(d.m))}</td><td class="money">${esc(money(d.v))}</td><td>${daily ? '' : esc(pct(d.p.growth_rate)) + ' ' + esc(d.p.growth_signal)}</td><td class="money">${esc(money(d.p.invest))}</td><td class="money">${esc(money(d.p.cash))}</td><td class="money">${esc(money(d.p.cred))}</td></tr>`).join('') + '</table>';
   }
 
   /* ---- stacked views ---- */
@@ -653,7 +676,7 @@
       b.lo.map((v, i) => `L${x(n - 1 - i).toFixed(1)},${y(b.lo[n - 1 - i]).toFixed(1)}`).join('') + 'Z';
     const nt = niceTicks(lo, hi, Math.max(3, Math.floor((H - T - B) / 44)));
     const grid = yGrid(nt, y, L, W, R);
-    const ords = pts.map((p) => ordOf(p.month));
+    const ords = pts.map((p) => pOrd(pKey(p)));
     const xo = (o) => L + ((o - ords[0]) * (W - L - R)) / ((ords[n - 1] - ords[0]) || 1);
     const ax = monthAxis(ords[0], ords[n - 1], W - L - R);
     const xl = xLabels(ax, xo, W, H), vgrid = xGrid(ax, xo, T, H, B);
@@ -664,14 +687,14 @@
       const rows = ser.map((s) => ({s, v: s.vals[i]})).filter((r) => r.v).sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
       const shown = rows.slice(0, 5), more = rows.length - shown.length;
       const total = rows.reduce((t, r) => t + r.v, 0);
-      return `<b class="money">${esc(money(total))}</b><span class="muted">${esc(monthName(pts[i].month))}</span>` +
+      return `<b class="money">${esc(money(total))}</b><span class="muted">${esc(pLabel(pKey(pts[i])))}</span>` +
         shown.map((r) => `<div class="row"><span><i class="sw-box" style="background:${r.s.color}"></i><span class="lg">${esc(r.s.label)}</span></span><span class="money">${esc(money(r.v))}</span></div>`).join('') +
         (more > 0 ? `<div class="row"><span>${more} more</span><span></span></div>` : '');
     };
     svg._geo = {x, y, data: pts, W, H, dot: false, html};
     $('chart-legend').innerHTML = ser.map((s) => `<span title="${esc(s.label)}"><i class="sw-box" style="background:${s.color}"></i><span class="lg">${esc(s.label)}</span></span>`).join('');
-    $('table').innerHTML = `<table class="data"><tr><th>Month</th>${ser.map((s) => `<th>${esc(s.label)}</th>`).join('')}</tr>` +
-      pts.map((p, i) => i).reverse().map((i) => `<tr><td>${esc(monthName(pts[i].month))}</td>${ser.map((s) => `<td class="money">${esc(money(s.vals[i]))}</td>`).join('')}</tr>`).join('') + '</table>';
+    $('table').innerHTML = `<table class="data"><tr><th>${isDaily() ? 'Date' : 'Month'}</th>${ser.map((s) => `<th>${esc(s.label)}</th>`).join('')}</tr>` +
+      pts.map((p, i) => i).reverse().map((i) => `<tr><td>${esc(pLabel(pKey(pts[i])))}</td>${ser.map((s) => `<td class="money">${esc(money(s.vals[i]))}</td>`).join('')}</tr>`).join('') + '</table>';
   }
 
   function wireChart() {
@@ -687,8 +710,8 @@
       cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.removeAttribute('hidden');
       if (g.dot) { dot.setAttribute('cx', cx); dot.setAttribute('cy', g.y(d.v)); dot.removeAttribute('hidden'); }
       const p = d.p || {};
-      tip.innerHTML = g.html ? g.html(best) : `<b class="money">${esc(money(d.v))}</b><span class="muted">${esc(monthName(d.m))}</span>
-        <div class="row"><span>Step</span><span>${esc(pct(p.growth_rate))} · ${esc(SIGNAL_WORD[p.growth_signal] || '')}</span></div>
+      tip.innerHTML = g.html ? g.html(best) : `<b class="money">${esc(money(d.v))}</b><span class="muted">${esc(pLabel(d.m))}</span>
+        ${isDaily() ? '' : `<div class="row"><span>Step</span><span>${esc(pct(p.growth_rate))} · ${esc(SIGNAL_WORD[p.growth_signal] || '')}</span></div>`}
         <div class="row"><span>Investments</span><span class="money">${esc(money(p.invest))}</span></div>
         <div class="row"><span>Cash</span><span class="money">${esc(money(p.cash))}</span></div>
         <div class="row"><span>Credit</span><span class="money">${esc(money(p.cred))}</span></div>`;
@@ -702,6 +725,13 @@
     svg.addEventListener('pointerleave', leave);
     svg.addEventListener('pointercancel', leave);
     $('with-cash').addEventListener('change', (e) => { state.cash = e.target.checked; drawChart(); });
+    $('gran').addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b || b.dataset.g === state.gran) return;
+      state.gran = b.dataset.g;
+      try { localStorage.setItem('finances-gran', state.gran); } catch (err) {}
+      [...$('gran').children].forEach((c) => c.setAttribute('aria-pressed', String(c === b)));
+      refresh();
+    });
     $('view').addEventListener('click', (e) => {
       const b = e.target.closest('button'); if (!b || b.dataset.v === state.view) return;
       state.view = b.dataset.v;
@@ -715,7 +745,7 @@
     $('fs-close').addEventListener('click', closeFs);
     $('ap-close').addEventListener('click', closeFs);
     $('pop-chart').addEventListener('click', () => {
-      popOut(`window=1&card=chart&view=${state.view}&cash=${state.cash ? 1 : 0}&cats=${state.cats ? 1 : 0}`, 'finances-chart');
+      popOut(`window=1&card=chart&view=${state.view}&gran=${state.gran}&cash=${state.cash ? 1 : 0}&cats=${state.cats ? 1 : 0}`, 'finances-chart');
     });
   }
 
@@ -769,7 +799,7 @@
     const box = document.getElementById('detail-' + id);
     if (!box) return;
     try {
-      const pts = (await api(`accounts/${encodeURIComponent(id)}/history`)).points;
+      const pts = (await api(`accounts/${encodeURIComponent(id)}/history`, new URLSearchParams({granularity: 'daily'}))).points;
       if (pts.length < 2) { box.innerHTML = '<span class="muted">Only one statement so far.</span>'; return; }
       mountHistoryChart(box, pts, 160);
     } catch (e) { box.innerHTML = `<span class="error-card">${esc(e.message)}</span>`; }
@@ -804,16 +834,19 @@
     $('ap-title').textContent = a ? short(a.label) : 'Account';
     $('ap-meta').textContent = a ? `${a.institution.toUpperCase()} · ${money(a.balance, true)} as of ${dayName(a.as_of)}` : '';
     try {
-      const pts = (await api(`accounts/${encodeURIComponent(id)}/history`)).points;
+      const pts = (await api(`accounts/${encodeURIComponent(id)}/history`, new URLSearchParams({granularity: 'daily'}))).points;
       if (pts.length < 2) { $('ap-chart').innerHTML = '<span class="muted">Only one statement so far.</span>'; return; }
       mountHistoryChart($('ap-chart'), pts, chartH(320));
-      $('ap-table').innerHTML = '<table class="data"><tr><th>Date</th><th>Balance</th></tr>' + pts.slice().reverse().map((p) => `<tr><td>${esc(dayName(p.as_of))}</td><td class="money">${esc(money(p.balance, true))}</td></tr>`).join('') + '</table>';
+      const audit = pts.some((p) => p.source);
+      $('ap-table').innerHTML = `<table class="data"><tr><th>Date</th><th>Balance</th>${audit ? '<th>Source</th><th>Rebuilt</th><th>Adjustment</th>' : ''}</tr>` + pts.slice().reverse().map((p) => `<tr><td>${esc(dayName(p.as_of))}</td><td class="money">${esc(money(p.balance, true))}</td>${audit ? `<td>${esc(p.source === 'actual' ? 'statement/snapshot' : 'rebuilt')}</td><td class="money">${esc(money(p.raw, true))}</td><td class="money">${esc(money(p.adjustment, true))}</td>` : ''}</tr>`).join('') + '</table>';
     } catch (e) { $('ap-chart').innerHTML = `<span class="error-card">${esc(e.message)}</span>`; }
   }
 
   async function init() {
     loadPrefs();
+    try { if (localStorage.getItem('finances-gran') === 'day') state.gran = 'day'; } catch (err) {}
     if (IS_POPOUT && !QS.get('account')) {
+      if (['month', 'day'].includes(QS.get('gran'))) state.gran = QS.get('gran');
       const v = QS.get('view');
       if (['total', 'category', 'account'].includes(v)) state.view = v;
       state.cash = QS.get('cash') !== '0'; state.cats = QS.get('cats') === '1';
@@ -821,6 +854,7 @@
       [...$('view').children].forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.v === state.view)));
       $('chart-card').classList.add('pop-target');
     }
+    [...$('gran').children].forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.g === state.gran)));
     wireChart(); wireFilters();
     try {
       const [accts, fresh, every] = await Promise.all([api('accounts'), api('freshness'), api('networth')]);
