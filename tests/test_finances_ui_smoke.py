@@ -340,6 +340,33 @@ def test_axis_ticks_are_round_and_evenly_spaced_and_cards_pop_out():
                 "’26" in t for t in x
             ), x  # calendar-aligned, with the year shown
 
+            # full screen is in place (no new window); pop out is the one that opens a window
+            windows = len(page.context.pages)
+            page.click("#fs-chart")
+            page.wait_for_selector("#chart-card.fs-card")
+            assert len(page.context.pages) == windows
+            assert (
+                page.evaluate("document.getElementById('chart').getBoundingClientRect().height")
+                >= 320
+            )
+            assert (
+                page.locator("#fs-close").is_visible()
+                and not page.locator("#pop-chart").is_visible()
+            )
+            page.keyboard.press("Escape")
+            page.wait_for_function(
+                "!document.getElementById('chart-card').classList.contains('fs-card')"
+            )
+            assert (
+                page.locator("#pop-chart").is_visible()
+                and not page.locator("#fs-close").is_visible()
+            )
+            page.click("#fs-chart")
+            page.click("#fs-close")
+            page.wait_for_function(
+                "!document.getElementById('chart-card').classList.contains('fs-card')"
+            )
+
             # the chart card and a card's history pop out into their own window
             with page.expect_popup() as popup:
                 page.click("#pop-chart")
@@ -347,6 +374,16 @@ def test_axis_ticks_are_round_and_evenly_spaced_and_cards_pop_out():
             assert "window=1" in popup.value.url and "card=chart" in popup.value.url
             page.click(".acct[data-id='fid-401k']")
             page.wait_for_selector("#detail-fid-401k svg.chart")
+            windows = len(page.context.pages)
+            page.click("[data-fs='fid-401k']")
+            page.wait_for_selector("#account-pop.fs-card #ap-chart svg.chart")
+            assert (
+                "Fidelity 401(k)" in page.inner_text("#ap-title")
+                and page.locator("#ap-close").is_visible()
+            )
+            assert len(page.context.pages) == windows
+            page.click("#ap-close")
+            page.wait_for_selector("#account-pop", state="hidden")
             with page.expect_popup() as popup:
                 page.click("[data-pop='fid-401k']")
             popup.value.wait_for_load_state()
