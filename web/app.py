@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import csv
 import datetime
 import importlib
 import json
@@ -126,6 +127,18 @@ HOLDINGS_AGGREGATE_FILE = Path(
         / "exports"
         / "invest"
         / "holdings-aggregate.json",
+    )
+)
+# Sector/industry per ticker (symbol, sector, industry columns). Defaults to the
+# classification export beside the holdings export; override per machine.
+INVEST_CLASSIFICATIONS_FILE = Path(
+    os.environ.get(
+        "CLOCKWORK_CLASSIFICATIONS_FILE",
+        HOLDINGS_AGGREGATE_FILE.parents[2]
+        / "scripts"
+        / "invest"
+        / "cs"
+        / "security_classifications.local.csv",
     )
 )
 TRADILITY_ANALYSIS_FILE = Path(
@@ -4430,20 +4443,8 @@ def _invest_market_value(holding: dict) -> float | None:
     return value if math.isfinite(value) else None
 
 
-def _merge_invest_holdings(data: dict, holdings: list) -> tuple[int, int, int, int, int]:
-    """Mark current tickers held, add new ones, and refresh allocation percentages.
-
-    The denominator includes every valued aggregate position, including Core
-    Account cash that is intentionally omitted from the visible investment
-    list. This keeps each displayed percentage tied to the full portfolio.
-    """
-
-    known: dict[str, dict] = {}
-    for category in data["categories"]:
-        for item in category["items"]:
-            ticker = str(item.get("ticker") or "").upper().strip()
-            if ticker and ticker not in known:
-                known[ticker] = item
+def _invest_ticker_values(holdings: list) -> tuple[float, dict[str, float]]:
+    """Return the full valued portfolio total and each ticker's market value."""
 
     portfolio_value = 0.0
     ticker_values: dict[str, float] = {}
@@ -4457,6 +4458,119 @@ def _merge_invest_holdings(data: dict, holdings: list) -> tuple[int, int, int, i
         ticker = str(holding.get("ticker") or "").upper().strip()
         if ticker:
             ticker_values[ticker] = ticker_values.get(ticker, 0.0) + value
+    return portfolio_value, ticker_values
+
+
+# Categories computed from holdings and the classification export. Their
+# cards share the page but not its totals, or every position would count twice.
+INVEST_DERIVED_CATEGORIES = {"sectors": "sector", "industries": "industry"}
+INVEST_UNCLASSIFIED = "UNCLASSIFIED"
+
+
+def _is_invest_derived(category: dict) -> bool:
+    return str(category.get("name", "")).strip().casefold() in INVEST_DERIVED_CATEGORIES
+
+
+def _load_invest_classifications() -> dict[str, dict[str, str]]:
+    """Read ticker -> {sector, industry}; a missing file means no classification."""
+
+    if not INVEST_CLASSIFICATIONS_FILE.exists():
+        return {}
+    classes: dict[str, dict[str, str]] = {}
+    with INVEST_CLASSIFICATIONS_FILE.open(encoding="utf-8", newline="") as handle:
+        for row in csv.DictReader(handle):
+            ticker = str(row.get("symbol") or "").upper().strip()
+            if ticker and ticker not in classes:
+                classes[ticker] = {
+                    "sector": str(row.get("sector") or "").strip(),
+                    "industry": str(row.get("industry") or "").strip(),
+                }
+    return classes
+
+
+def _sync_invest_classifications(
+    data: dict, holdings: list, classes: dict[str, dict[str, str]]
+) -> int:
+    """Rebuild the Sectors and Industries cards from the classification export.
+
+    Each card's current percentage is the share of the whole portfolio held in
+    tickers carrying that sector or industry, so it can be checked against the
+    positions listed on the card. Existing targets and card order are kept; new
+    cards start in order of current weight.
+    """
+
+    portfolio_value, ticker_values = _invest_ticker_values(holdings)
+    changes = 0
+    for name, field in (("Sectors", "sector"), ("Industries", "industry")):
+        labels: dict[str, dict[str, float]] = {}
+        for ticker, row in classes.items():
+            if row[field]:
+                labels.setdefault(row[field].upper(), {})
+        unclassified: dict[str, float] = {}
+        for ticker, value in ticker_values.items():
+            label = (classes.get(ticker) or {}).get(field, "").upper()
+            target = labels[label] if label else unclassified
+            target[ticker] = target.get(ticker, 0.0) + value
+        if not labels:
+            continue
+        category = _find_simple_category(data, name)
+        if category is None:
+            category = {"name": name, "items": []}
+            data["categories"].append(category)
+        category["target_mode"] = category.get("target_mode", "global")
+        wanted = dict(labels)
+        wanted[INVEST_UNCLASSIFIED] = unclassified
+        by_label = {str(i.get("ticker") or "").upper(): i for i in category["items"]}
+        for label in sorted(wanted, key=lambda k: -sum(wanted[k].values())):
+            members = wanted[label]
+            total = sum(members.values())
+            percent = (
+                _format_invest_percentage(total / portfolio_value * 100)
+                if portfolio_value > 0
+                else "0"
+            )
+            top = sorted(members.items(), key=lambda kv: -kv[1])[:5]
+            detail = ", ".join(
+                f"{t} {_format_invest_percentage(v / portfolio_value * 100)}%"
+                for t, v in top
+                if portfolio_value > 0
+            )
+            item = by_label.get(label)
+            if item is None:
+                if label == INVEST_UNCLASSIFIED and not members:
+                    continue
+                item = {"ticker": label, "holding": False}
+                category["items"].append(item)
+                by_label[label] = item
+                changes += 1
+            held = total > 0
+            for key, value in (("allocation_pct", percent), ("name", detail), ("holding", held)):
+                if item.get(key) != value and (value or key in item):
+                    item[key] = value
+                    changes += 1
+            if not detail:
+                item.pop("name", None)
+    return changes
+
+
+def _merge_invest_holdings(data: dict, holdings: list) -> tuple[int, int, int, int, int]:
+    """Mark current tickers held, add new ones, and refresh allocation percentages.
+
+    The denominator includes every valued aggregate position, including Core
+    Account cash that is intentionally omitted from the visible investment
+    list. This keeps each displayed percentage tied to the full portfolio.
+    """
+
+    known: dict[str, dict] = {}
+    for category in data["categories"]:
+        if _is_invest_derived(category):
+            continue
+        for item in category["items"]:
+            ticker = str(item.get("ticker") or "").upper().strip()
+            if ticker and ticker not in known:
+                known[ticker] = item
+
+    portfolio_value, ticker_values = _invest_ticker_values(holdings)
     allocations = (
         {
             ticker: _format_invest_percentage(value / portfolio_value * 100)
@@ -4525,6 +4639,7 @@ def _invest_allocation_summary(data: dict) -> tuple[dict, dict[str, dict]]:
     category_totals: dict[str, dict] = {}
     has_current = False
     for category in data["categories"]:
+        derived = _is_invest_derived(category)
         target_mode = "basket" if category.get("target_mode") == "basket" else "global"
         basket_target = 0.0
         with contextlib.suppress(TypeError, ValueError):
@@ -4550,8 +4665,9 @@ def _invest_allocation_summary(data: dict) -> tuple[dict, dict[str, dict]]:
                         "input": target_input,
                         "global": global_target,
                     }
-        current_total += category_current
-        target_total += category_target
+        if not derived:
+            current_total += category_current
+            target_total += category_target
         category_totals[category["name"]] = {
             "current": category_current,
             "target": category_target,
@@ -4680,10 +4796,21 @@ def _render_simple_list(key: str):
                 row = stats.get(watch_log.normalize_title(str(item.get("title", ""))))
                 if row:
                     watch_badges[str(item["title"])] = watch_log.badge(row)
+    invest_order = ""
+    if key == "invest":
+        invest_order = request.args.get("order", "")
+        invest_order = invest_order if invest_order in INVEST_ORDERS else ""
+        if invest_order == "holding":
+            for category in data["categories"]:
+                category["items"] = sorted(
+                    category["items"],
+                    key=lambda i: -float(i.get("allocation_pct") or 0),
+                )
     return render_template(
         "to-list.html",
         cfg=cfg,
         data=data,
+        invest_order=invest_order,
         watch_badges=watch_badges,
         total=total,
         done_count=done_count,
@@ -5127,14 +5254,20 @@ def sync_invest_holdings():
 
     data = load_simple_list("invest")
     marked, added, named, skipped, allocations = _merge_invest_holdings(data, payload["holdings"])
-    if marked or added or named or allocations:
+    try:
+        classes = _load_invest_classifications()
+    except (OSError, csv.Error, UnicodeDecodeError) as exc:
+        classes = {}
+        flash(f"Classification file unreadable: {exc}", "error")
+    grouped = _sync_invest_classifications(data, payload["holdings"], classes) if classes else 0
+    if marked or added or named or allocations or grouped:
         save_simple_list("invest", data)
     _log_event(
         cfg["history_file"],
         "sync-holdings",
         detail=(
             f"marked={marked}, added={added}, named={named}, skipped={skipped}, "
-            f"allocations={allocations}"
+            f"allocations={allocations}, grouped={grouped}"
         ),
     )
 
@@ -5147,10 +5280,45 @@ def sync_invest_holdings():
         changes.append(f"{named} names filled")
     if allocations:
         changes.append(f"{allocations} allocations refreshed")
+    if grouped:
+        changes.append(f"{grouped} sector and industry values refreshed")
     if skipped:
         changes.append(f"{skipped} cash or invalid positions skipped")
     flash(f"Synced: {', '.join(changes)}." if changes else "Holdings are already up to date.")
     return redirect(url_for("to_invest"))
+
+
+INVEST_ORDERS = {"holding", "rank"}
+
+
+@app.post("/to-invest/move-item")
+def move_invest_item():
+    """Move one card a step up or down; list order is the target ranking."""
+
+    cfg = _simple_list_config("invest")
+    category = request.form.get("category", "").strip()
+    value = request.form.get("item", "").strip()
+    direction = request.form.get("direction", "")
+    data = load_simple_list("invest")
+    cat = _find_simple_category(data, category)
+    item = _find_simple_item(cat, value, cfg) if cat else None
+    if item is None or direction not in {"up", "down"}:
+        flash("Could not move that card.", "error")
+        return redirect(url_for("to_invest", order="rank"))
+    items = cat["items"]
+    index = items.index(item)
+    swap = index - 1 if direction == "up" else index + 1
+    if 0 <= swap < len(items):
+        items[index], items[swap] = items[swap], items[index]
+        save_simple_list("invest", data)
+        _log_event(
+            cfg["history_file"],
+            f"rank-{direction}",
+            item=value,
+            category=cat["name"],
+            detail=f"rank {index + 1} -> {swap + 1}",
+        )
+    return redirect(url_for("to_invest", order="rank") + f"#{_slug(cat['name'])}")
 
 
 @app.post("/to-invest/update-targets")

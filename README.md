@@ -782,3 +782,13 @@ See `CONTRIBUTING.md`.
 ## License
 
 MIT. See `LICENSE`.
+
+If a classification CSV (`symbol`, `sector`, `industry` columns) is available,
+sync also builds **Sectors** and **Industries** cards whose holding % is the
+share of the whole portfolio in matching tickers, with the largest positions
+listed on each card as a cross-check. `CLOCKWORK_CLASSIFICATIONS_FILE` selects
+the file (default: `scripts/invest/cs/security_classifications.local.csv` beside
+the holdings export). These cards keep their own targets and are left out of the
+page-wide totals. The **Order** links switch between grouped, holding %, and
+target rank; in target rank the list order is the ranking and the arrows move a
+card one step.
