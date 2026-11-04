@@ -344,6 +344,23 @@
       border: 1px solid var(--border); background: var(--surface2); color: var(--text);
       border-radius: 8px; width: 34px; height: 34px; cursor: pointer; font-size: 18px;
     }
+    /* Full screen (in place) and Pop out (its own window) are separate options on the detail and on its chart */
+    body.detail-fs .detail-overlay { top: 0; z-index: 400; }
+    .detail-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+    .chart-actions { display: flex; gap: 6px; margin-bottom: 9px; }
+    .chart-actions .detail-step { width: 30px; height: 30px; font-size: 15px; }
+    .chart-fs-close { display: none; }
+    .detail-card.chart-fs { position: fixed; left: 0; right: 0; bottom: 0; top: var(--detail-top, 0px); z-index: 450; margin: 0;
+      border-radius: 0; overflow: auto; padding: 16px clamp(12px, 3vw, 40px); background: var(--surface); }
+    body.detail-fs .detail-card.chart-fs { top: 0; }
+    .detail-card.chart-fs .chart-fs-close { display: inline-flex; align-items: center; justify-content: center; }
+    .detail-card.chart-fs .chart-open { display: none; }
+    .detail-card.chart-fs .detail-chart-wrap { height: calc(100vh - var(--detail-top, 0px) - 170px); min-height: 260px; }
+    body.popout .chart-actions, body.popout #detail-fs { display: none; }
+    /* a chart opened in its own window shows only that chart (under the ticker header) */
+    body.popout-chart #detail-content .detail-card:not(#detail-chart-card) { display: none; }
+    body.popout-chart .detail-layout { grid-template-columns: minmax(0, 1fr); }
+    body.popout-chart .detail-chart-wrap { height: calc(100vh - 250px); min-height: 280px; }
     .detail-layout { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(240px, 1fr); gap: 16px; }
     .detail-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 11px; padding: 14px; }
     .detail-card-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--muted-fg); font-weight: 750; margin-bottom: 9px; }
@@ -498,6 +515,7 @@
       <span class="detail-pos" id="detail-pos"></span>
       <button class="detail-step" id="detail-prev" type="button" onclick="stepTickerDetail(-1)" aria-label="Previous ticker" title="Previous (←)">‹</button>
       <button class="detail-step" id="detail-next" type="button" onclick="stepTickerDetail(1)" aria-label="Next ticker" title="Next (→)">›</button>
+      <button class="detail-step" id="detail-fs" type="button" onclick="toggleDetailFullScreen()" aria-label="Full screen" title="Full screen (Esc to leave)">⛶</button>
       <button class="detail-step" id="detail-popout" type="button" onclick="popOutDetail()" aria-label="Open in its own window" title="Open in its own window (resizable, keeps the top bar and theme)">⧉</button>
       <button class="detail-close" type="button" onclick="closeTickerDetail()" aria-label="Close details">×</button>
     </div>
@@ -1241,6 +1259,7 @@
   // is there and follows the theme: the choice lives in localStorage, which windows of this site share.
   const IS_POPOUT = new URLSearchParams(window.location.search).get('window') === '1';
   if (IS_POPOUT) document.body.classList.add('popout');
+  if (IS_POPOUT && new URLSearchParams(window.location.search).get('card') === 'chart') document.body.classList.add('popout-chart');
 
   function popOutDetail() {
     if (!detailTicker) return;
@@ -1248,6 +1267,61 @@
     const opened = window.open(url, `tradility-${detailTicker}`, 'popup=yes,width=1240,height=900,resizable=yes,scrollbars=yes');
     if (opened) closeTickerDetail();
   }
+
+  // Full screen: the chart fills the window in place (browser full screen where it exists); the detail can
+  // also cover the top bar. Esc or the button leaves it. Pop out is the option that opens a window.
+  const asFullScreen = el => { try { const r = el.requestFullscreen && el.requestFullscreen(); if (r && r.catch) r.catch(() => {}); } catch (e) {} };
+  const leaveBrowserFullScreen = () => { try { if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {}); } catch (e) {} };
+
+  function openChartFullScreen() {
+    const card = document.getElementById('detail-chart-card');
+    if (!card) return;
+    placeDetailOverlay();
+    card.classList.add('chart-fs');
+    asFullScreen(card);
+    requestAnimationFrame(drawDetailChart);
+  }
+
+  function closeChartFullScreen() {
+    const card = document.getElementById('detail-chart-card');
+    if (!card || !card.classList.contains('chart-fs')) return false;
+    card.classList.remove('chart-fs');
+    leaveBrowserFullScreen();
+    requestAnimationFrame(drawDetailChart);
+    return true;
+  }
+
+  function toggleDetailFullScreen() {
+    const overlay = document.getElementById('detail-overlay');
+    const on = !document.body.classList.contains('detail-fs');
+    document.body.classList.toggle('detail-fs', on);
+    document.getElementById('detail-fs').title = on ? 'Leave full screen (Esc)' : 'Full screen (Esc to leave)';
+    if (on) asFullScreen(overlay); else leaveBrowserFullScreen();
+    requestAnimationFrame(() => { if (detailRecord) drawDetailChart(); });
+  }
+
+  function leaveFullScreen() {
+    const had = closeChartFullScreen();
+    if (document.body.classList.contains('detail-fs')) { toggleDetailFullScreen(); return true; }
+    return had;
+  }
+
+  function popOutChart() {
+    if (!detailTicker) return;
+    const url = `${window.location.pathname}?ticker=${encodeURIComponent(detailTicker)}&window=1&card=chart&range=${encodeURIComponent(detailRange)}`;
+    window.open(url, `tradility-chart-${detailTicker}`, 'popup=yes,width=1240,height=900,resizable=yes,scrollbars=yes');
+  }
+
+  document.addEventListener('fullscreenchange', () => {
+    if (document.fullscreenElement) return;
+    const card = document.getElementById('detail-chart-card');
+    if (card) card.classList.remove('chart-fs');
+    if (document.body.classList.contains('detail-fs')) {
+      document.body.classList.remove('detail-fs');
+      document.getElementById('detail-fs').title = 'Full screen (Esc to leave)';
+    }
+    requestAnimationFrame(() => { if (detailRecord) drawDetailChart(); });
+  });
 
   function paintDetailSteps() {
     const at = shownOrder.indexOf(detailTicker);
@@ -1304,6 +1378,7 @@
 
   function closeTickerDetail() {
     if (IS_POPOUT) { window.close(); return; }
+    leaveFullScreen();
     document.getElementById('detail-overlay').hidden = true;
     document.body.classList.remove('detail-open');
     detailRecord = null;
@@ -1417,8 +1492,13 @@
             <div class="detail-card-title">Position and orders</div>
             <div id="detail-orders"><div class="detail-loading">Loading position…</div></div>
           </section>
-          <section class="detail-card">
-            <div class="detail-card-title">Historical close</div>
+          <section class="detail-card" id="detail-chart-card">
+            <div class="detail-card-head"><div class="detail-card-title">Historical close</div>
+              <div class="chart-actions">
+                <button type="button" class="detail-step chart-open" onclick="openChartFullScreen()" aria-label="Full screen chart" title="Full screen (Esc to leave)">⛶</button>
+                <button type="button" class="detail-step chart-open" onclick="popOutChart()" aria-label="Open the chart in its own window" title="Open in its own window (resizable, keeps the top bar and theme)">⧉</button>
+                <button type="button" class="detail-step chart-fs-close" onclick="closeChartFullScreen()" aria-label="Leave full screen" title="Leave full screen (Esc)">✕</button>
+              </div></div>
             <div class="detail-range-buttons">
               ${returnLabels.map(([key, label]) =>
                 `<button type="button" class="detail-range-btn ${key === detailRange ? 'active' : ''}" data-range="${key}" onclick="setDetailRange('${key}')">${label}</button>`
@@ -2523,6 +2603,40 @@
     return levels;
   }
 
+  // Round values on the price axis (1, 2, 2.5, 5 times a power of ten, at least three when a finer step
+  // gives them) and calendar-aligned dates: days or weeks on a short range, months or years on a long one.
+  const NICE_STEPS = [1, 2, 2.5, 5, 10];
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function niceTicks(lo, hi, maxTicks) {
+    const span = (hi - lo) || 1, mag = Math.pow(10, Math.floor(Math.log10(span / Math.max(1, maxTicks))));
+    const steps = [...new Set([mag / 10, mag, mag * 10].flatMap(m => NICE_STEPS.map(n => Math.round(n * m * 1e9) / 1e9)))].sort((a, b) => a - b);
+    const at = step => { const out = []; for (let k = Math.ceil(lo / step - 1e-9); k * step <= hi + step * 1e-6; k++) out.push(Math.round(k * step * 1e6) / 1e6); return out; };
+    let pick = steps.find(st => at(st).length <= maxTicks) || steps[steps.length - 1];
+    let ticks = at(pick);
+    if (ticks.length < 3) { const finer = [...steps].reverse().find(st => st < pick && at(st).length >= 3); if (finer) { pick = finer; ticks = at(finer); } }
+    return ticks;
+  }
+  function timeAxis(t0, t1, plotW) {
+    const maxTicks = Math.max(2, Math.floor(plotW / 72)), days = (t1 - t0) / 864e5, out = [];
+    if (days <= 120) {
+      const step = [1, 2, 7, 14, 30].find(st => Math.ceil(days / st) <= maxTicks) || 30;
+      for (let d = Math.ceil(t0 / 864e5 / step) * step; d * 864e5 <= t1; d += step) {
+        const dt = new Date(d * 864e5);
+        out.push({t: d * 864e5, label: `${MON[dt.getUTCMonth()]} ${dt.getUTCDate()}`});
+      }
+      return out;
+    }
+    const a = new Date(t0), b = new Date(t1);
+    const o0 = a.getUTCFullYear() * 12 + a.getUTCMonth(), o1 = b.getUTCFullYear() * 12 + b.getUTCMonth();
+    const step = [1, 2, 3, 6, 12, 24, 60, 120].find(st => Math.ceil((o1 - o0 + 1) / st) <= maxTicks) || 120;
+    for (let o = Math.ceil(o0 / step) * step; o <= o1; o += step) {
+      const y = Math.floor(o / 12), m = o % 12, t = Date.UTC(y, m, 1);
+      if (t < t0 || t > t1) continue;
+      out.push({t, label: step >= 12 ? String(y) : `${MON[m]}${m === 0 || !out.length ? ' ’' + String(y).slice(2) : ''}`});
+    }
+    return out;
+  }
+
   function drawDetailChart() {
     const canvas = document.getElementById('detail-chart');
     if (!canvas || !detailRecord) return;
@@ -2563,9 +2677,15 @@
     ctx.font = '10px ui-monospace, monospace';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
-    for (let i = 0; i <= 4; i++) {
-      const yy = pad.top + plotH * i / 4;
-      const value = max - (max - min) * i / 4;
+    const xTicks = timeAxis(t0, t1, plotW);
+    ctx.strokeStyle = border; ctx.lineWidth = 1; ctx.globalAlpha = 0.3;
+    for (const tick of xTicks) {
+      const xx = pad.left + (tick.t - t0) / Math.max(1, t1 - t0) * plotW;
+      ctx.beginPath(); ctx.moveTo(xx, pad.top); ctx.lineTo(xx, pad.top + plotH); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    for (const value of niceTicks(min, max, Math.max(3, Math.floor(plotH / 46)))) {
+      const yy = pad.top + (max - value) / Math.max(0.000001, max - min) * plotH;
       ctx.strokeStyle = border; ctx.globalAlpha = 0.65; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(pad.left, yy); ctx.lineTo(width - pad.right, yy); ctx.stroke();
       ctx.globalAlpha = 1; ctx.fillStyle = muted;
@@ -2595,12 +2715,15 @@
       ctx.restore();
     }
     ctx.fillStyle = muted; ctx.textBaseline = 'bottom';
-    ctx.textAlign = 'left'; ctx.fillText(formatChartDate(points[0].date), pad.left, height - 3);
-    ctx.textAlign = 'right'; ctx.fillText(formatChartDate(points[points.length - 1].date), width - pad.right, height - 3);
+    for (const tick of xTicks) {
+      const xx = pad.left + (tick.t - t0) / Math.max(1, t1 - t0) * plotW;
+      ctx.textAlign = xx < pad.left + 22 ? 'left' : xx > width - pad.right - 22 ? 'right' : 'center';
+      ctx.fillText(tick.label, xx, height - 3);
+    }
     const change = (points[points.length - 1].close - points[0].close) / points[0].close * 100;
     const calendarReturn = detailRecord.returns && detailRecord.returns[detailRange];
     const displayedReturn = calendarReturn == null ? change : Number(calendarReturn);
-    summary.innerHTML = `<span>${points.length.toLocaleString()} observations</span><strong class="${returnClass(displayedReturn)}">${formatReturn(displayedReturn)}</strong>`;
+    summary.innerHTML = `<span>${points.length.toLocaleString()} observations · ${formatChartDate(points[0].date)} → ${formatChartDate(points[points.length - 1].date)}</span><strong class="${returnClass(displayedReturn)}">${formatReturn(displayedReturn)}</strong>`;
   }
 
   function fmtPrice(v) {
@@ -2706,7 +2829,7 @@
   document.addEventListener('keydown', event => {
     if (document.getElementById('detail-overlay').hidden) return;
     if (event.key === 'Escape') {
-      closeTickerDetail();
+      if (!leaveFullScreen()) closeTickerDetail();
     } else if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !event.altKey
                && !event.ctrlKey && !event.metaKey && !/^(INPUT|SELECT|TEXTAREA)$/.test(event.target.tagName)) {
       stepTickerDetail(event.key === 'ArrowLeft' ? -1 : 1);
@@ -2714,6 +2837,8 @@
   });
 
   loadData().then(() => {
+    const requestedRange = new URLSearchParams(window.location.search).get('range');
+    if (IS_POPOUT && RANGES.includes(requestedRange)) detailRange = requestedRange;
     const requestedTicker = new URLSearchParams(window.location.search).get('ticker');
     if (!requestedTicker) return;
     const normalized = requestedTicker.toUpperCase();
