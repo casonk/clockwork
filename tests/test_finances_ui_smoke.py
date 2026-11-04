@@ -188,8 +188,8 @@ def test_the_page_renders_on_a_phone_without_overflow_or_script_errors():
         assert not page.locator("#cross").is_visible() and not page.locator("#dot").is_visible()
         assert page.locator(".acct").count() == 3  # the uncounted bank account is hidden by default
         page.click(".acct[data-id='fid-401k']")
-        page.wait_for_selector("#detail-fid-401k svg.spark")
-        assert "Money in $309.13" in page.inner_text(".acct[data-id='fid-401k']")
+        page.wait_for_selector("#detail-fid-401k svg.chart")
+        assert "Money in $309.13" in page.inner_text(".acct-card[data-id='fid-401k']")
         page.locator("#chart").scroll_into_view_if_needed()
         box = page.locator("#chart").bounding_box()
         page.mouse.move(box["x"] + box["width"] * 0.5, box["y"] + 80)
@@ -289,3 +289,95 @@ def test_the_page_renders_on_a_phone_without_overflow_or_script_errors():
         assert page.evaluate("document.documentElement.scrollWidth <= 390")
         browser.close()
     assert errors == []
+
+
+def _serve():
+    import threading
+
+    from werkzeug.serving import make_server
+
+    srv = make_server("127.0.0.1", 0, web_app.app, threaded=True)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def test_axis_ticks_are_round_and_evenly_spaced_and_cards_pop_out():
+    import re
+
+    srv = _serve()
+    base = f"http://127.0.0.1:{srv.server_port}"
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+            page = browser.new_page(viewport={"width": 390, "height": 800})
+            page.route("**/api/finances/**", route)
+            page.goto(base + "/finances")
+            page.wait_for_selector(".hero-value")
+
+            def number(label):
+                m = re.fullmatch(r"(−?)\$(\d+(?:\.\d+)?)([KM]?)", label)
+                assert m, label
+                return (
+                    float(m.group(2))
+                    * {"": 1, "K": 1e3, "M": 1e6}[m.group(3)]
+                    * (-1 if m.group(1) else 1)
+                )
+
+            y = [
+                number(t)
+                for t in page.locator("#chart text.axis-text").all_text_contents()
+                if t.startswith(("$", "−$"))
+            ]
+            assert len(y) >= 3
+            steps = {round(b - a, 2) for a, b in zip(sorted(y), sorted(y)[1:], strict=False)}
+            assert len(steps) == 1 and next(iter(steps)) in {5000, 10000, 20000, 25000, 50000}, y
+            x = [
+                t
+                for t in page.locator("#chart text.axis-text").all_text_contents()
+                if not t.startswith(("$", "−$"))
+            ]
+            assert len(x) >= 3 and any(
+                "’26" in t for t in x
+            ), x  # calendar-aligned, with the year shown
+
+            # the chart card and a card's history pop out into their own window
+            with page.expect_popup() as popup:
+                page.click("#pop-chart")
+            popup.value.wait_for_load_state()
+            assert "window=1" in popup.value.url and "card=chart" in popup.value.url
+            page.click(".acct[data-id='fid-401k']")
+            page.wait_for_selector("#detail-fid-401k svg.chart")
+            with page.expect_popup() as popup:
+                page.click("[data-pop='fid-401k']")
+            popup.value.wait_for_load_state()
+            assert "window=1" in popup.value.url and "account=fid-401k" in popup.value.url
+
+            # the pop-out of the chart shows only the chart, in the view it was opened with
+            win = browser.new_page(viewport={"width": 1100, "height": 800})
+            win.route("**/api/finances/**", route)
+            win.goto(base + "/finances?window=1&card=chart&view=category&cash=0")
+            win.wait_for_selector("#chart path.stk")
+            assert (
+                not win.locator("#hero").is_visible() and not win.locator("#pop-chart").is_visible()
+            )
+            assert win.locator("#chart-card").is_visible() and "Cash" not in win.inner_text(
+                "#chart-legend"
+            )
+            assert (
+                win.evaluate("document.getElementById('chart').getBoundingClientRect().height")
+                >= 320
+            )
+
+            # an account's pop-out shows its balance chart and table
+            acct = browser.new_page(viewport={"width": 1100, "height": 800})
+            acct.route("**/api/finances/**", route)
+            acct.goto(base + "/finances?window=1&account=fid-401k")
+            acct.wait_for_selector("#ap-chart svg.chart")
+            assert (
+                "Fidelity 401(k)" in acct.inner_text("#ap-title")
+                and not acct.locator("#hero").is_visible()
+            )
+            assert acct.locator("#ap-table tr").count() == 3  # header and two balances
+            browser.close()
+    finally:
+        srv.shutdown()
