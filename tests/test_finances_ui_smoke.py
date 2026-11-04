@@ -26,6 +26,7 @@ POINTS = [
         "bank": 20000.0,
         "crypt": 0.0,
         "cred": -500.0,
+        "by_account": {"fid-401k": 90000.0 + m * 1000, "cs-old": 121000.0, "co-card": -500.0},
         "growth_rate": None if m == 1 else (0.06 if m % 3 == 0 else -0.06 if m % 4 == 0 else 0.01),
         "growth_signal": (
             "n/a" if m == 1 else ("green" if m % 3 == 0 else "red" if m % 4 == 0 else "yellow")
@@ -144,7 +145,19 @@ def route(r):
     if url.endswith("/freshness"):
         return r.fulfill(json=FRESH)
     if "/networth" in url:
-        return r.fulfill(json={"points": POINTS, "thresholds": {"green": 0.05, "red": -0.05}})
+        body = {"points": POINTS, "thresholds": {"green": 0.05, "red": -0.05}}
+        if "by=account" in SEEN[-1]:
+            body["accounts"] = [
+                {
+                    "id": a["id"],
+                    "label": a["label"],
+                    "category": a["category"],
+                    "balance": a["balance"],
+                }
+                for a in ACCOUNTS
+                if a["id"] != "hunt-mma"
+            ]
+        return r.fulfill(json=body)
     if url.endswith("/history"):
         return r.fulfill(
             json={
@@ -205,6 +218,38 @@ def test_the_page_renders_on_a_phone_without_overflow_or_script_errors():
         )
         assert page.evaluate("document.documentElement.scrollWidth <= 390")
         page.uncheck("#show-cats")
+
+        # stacked views: by category, then by account
+        page.click("#view button[data-v='category']")
+        assert (
+            page.locator("#chart path.stk").count() >= 2
+            and not page.locator("#cats-switch").is_visible()
+        )
+        assert (
+            "Investments" in page.inner_text("#chart-legend")
+            and page.locator("#chart .mk").count() == 0
+        )
+        SEEN.clear()
+        page.click("#view button[data-v='account']")
+        page.wait_for_selector("#chart path.stk")
+        assert any("by=account" in u for u in SEEN if "/networth" in u)
+        assert page.locator("#chart path.stk").count() == 3
+        assert "Each band is one account" in page.inner_text("#chart-note")
+        legend = page.inner_text("#chart-legend")
+        assert (
+            "Fidelity 401(k)" in legend
+            and "Schwab One Brokerage" in legend
+            and "VentureOne" in legend
+        )
+        box = page.locator("#chart").bounding_box()
+        page.mouse.move(box["x"] + box["width"] * 0.5, box["y"] + 100)
+        page.wait_for_selector("#tip:not([hidden])")
+        assert (
+            "Fidelity 401(k)" in page.inner_text("#tip") and not page.locator("#dot").is_visible()
+        )
+        assert page.evaluate("document.documentElement.scrollWidth <= 390")
+        page.click("#view button[data-v='total']")
+        assert page.locator("#chart .mk").count() > 0 and page.locator("#cats-switch").is_visible()
         page.uncheck("#with-cash")
         assert page.evaluate("document.documentElement.scrollWidth <= 390")
 
