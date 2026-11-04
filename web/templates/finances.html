@@ -119,6 +119,13 @@
     .chart-wrap.hist svg.chart { height: 150px; }
     body.popout .page > *:not(.pop-target) { display: none !important; }
     body.popout .pop { display: none; }
+    .fs-close { display: none; }
+    .fs-card { position: fixed; left: 0; right: 0; bottom: 0; top: var(--fs-top, 0px); z-index: 150; margin: 0; border-radius: 0;
+               overflow: auto; max-width: none; padding: 14px clamp(12px, 3vw, 40px); }
+    .fs-card .fs-close { display: inline-flex; align-items: center; justify-content: center; }
+    .fs-card .pop:not(.fs-close) { display: none; }
+    body.fs-lock { overflow: hidden; }
+    .head-actions { display: flex; gap: 8px; }
     body.popout .page { max-width: none; }
     .acct { width: 100%; text-align: left; background: transparent; color: var(--text); border: 0;
             border-radius: 10px; padding: 10px 12px; margin-bottom: 0; font: inherit; cursor: pointer; min-height: 56px; display: block; }
@@ -195,7 +202,11 @@
   </details>
 
   <section class="card" id="chart-card">
-    <div class="card-head"><h2>Net worth over time</h2><button type="button" class="pop" id="pop-chart" aria-label="Open the chart in its own window" title="Open in its own window (resizable, keeps the top bar and theme)">⧉</button></div>
+    <div class="card-head"><h2>Net worth over time</h2><div class="head-actions">
+      <button type="button" class="pop" id="fs-chart" aria-label="Full screen" title="Full screen (Esc to close)">⛶</button>
+      <button type="button" class="pop" id="pop-chart" aria-label="Open the chart in its own window" title="Open in its own window (resizable, keeps the top bar and theme)">⧉</button>
+      <button type="button" class="pop fs-close" id="fs-close" aria-label="Close full screen" title="Close (Esc)">✕</button>
+    </div></div>
     <div class="toolbar">
       <div class="seg" id="view" role="group" aria-label="Chart view">
         <button type="button" data-v="total" aria-pressed="true">Total</button>
@@ -214,7 +225,7 @@
   </section>
 
   <section class="card" id="account-pop" hidden>
-    <div class="card-head"><h2 id="ap-title">Account</h2></div>
+    <div class="card-head"><h2 id="ap-title">Account</h2><div class="head-actions"><button type="button" class="pop fs-close" id="ap-close" aria-label="Close full screen" title="Close (Esc)">✕</button></div></div>
     <div class="hero-sub" id="ap-meta"></div>
     <div id="ap-chart"></div>
     <details class="table-view"><summary>Table view</summary><div class="scroll" id="ap-table"></div></details>
@@ -446,7 +457,30 @@
   const QS = new URLSearchParams(window.location.search);
   const IS_POPOUT = QS.get('window') === '1';
   if (IS_POPOUT) document.body.classList.add('popout');
-  const chartH = (base) => (IS_POPOUT ? Math.max(320, window.innerHeight - 300) : base);
+  let FS = null; // the card currently shown full screen
+  const chartH = (base) => (IS_POPOUT || FS ? Math.max(320, window.innerHeight - 300) : base);
+  function placeFs() {
+    const nav = document.querySelector('.cw-site-nav');
+    document.documentElement.style.setProperty('--fs-top', (nav ? Math.max(0, Math.round(nav.getBoundingClientRect().bottom)) : 0) + 'px');
+  }
+  function openFs(el) {
+    closeFs();
+    FS = el; placeFs();
+    el.hidden = false; el.classList.add('fs-card'); document.body.classList.add('fs-lock');
+    try { const r = el.requestFullscreen && el.requestFullscreen(); if (r && r.catch) r.catch(() => {}); } catch (e) {}
+    window.scrollTo(0, 0); el.scrollTop = 0;
+  }
+  function closeFs() {
+    if (!FS) return;
+    const el = FS; FS = null;
+    el.classList.remove('fs-card'); document.body.classList.remove('fs-lock');
+    if (el.id === 'account-pop' && !IS_POPOUT) { el.hidden = true; $('ap-chart').innerHTML = ''; }
+    try { if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {}); } catch (e) {}
+    if (el.id === 'chart-card') requestAnimationFrame(() => drawChart());
+  }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeFs(); });
+  document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement) closeFs(); });
+  window.addEventListener('resize', () => { if (FS) { placeFs(); if (FS.id === 'chart-card') drawChart(); } });
   const popOut = (query, name) => window.open(`${window.location.pathname}?${query}`, name, 'popup=yes,width=1240,height=900,resizable=yes,scrollbars=yes');
 
   /* ---- one account's balance history ---- */
@@ -677,6 +711,9 @@
     $('show-cats').addEventListener('change', (e) => { state.cats = e.target.checked; drawChart(); });
     if (window.ResizeObserver) new ResizeObserver(() => drawChart()).observe(wrap);
     if (IS_POPOUT) window.addEventListener('resize', () => drawChart());
+    $('fs-chart').addEventListener('click', () => { openFs($('chart-card')); requestAnimationFrame(() => drawChart()); });
+    $('fs-close').addEventListener('click', closeFs);
+    $('ap-close').addEventListener('click', closeFs);
     $('pop-chart').addEventListener('click', () => {
       popOut(`window=1&card=chart&view=${state.view}&cash=${state.cash ? 1 : 0}&cats=${state.cats ? 1 : 0}`, 'finances-chart');
     });
@@ -719,7 +756,7 @@
           <div class="acct-top"><span class="acct-name">${esc(short(a.label))}</span><span class="acct-bal money ${a.balance < 0 ? 'neg' : ''}">${esc(money(Math.abs(a.balance), true))}</span></div>
           <div class="acct-meta"><span>${esc(a.institution.toUpperCase())}</span><span>as of ${esc(dayName(a.as_of))}</span>${badges}</div>
         </button>
-        ${open ? '<div class="acct-detail">' + flowsHtml(a) + '<div id="detail-' + esc(a.id) + '"><span class="muted">Loading history…</span></div><div class="tools" style="margin-top:8px"><button type="button" class="tool" data-pop="' + esc(a.id) + '">⧉ Open in its own window</button></div></div>' : ''}
+        ${open ? '<div class="acct-detail">' + flowsHtml(a) + '<div id="detail-' + esc(a.id) + '"><span class="muted">Loading history…</span></div><div class="tools" style="margin-top:8px"><button type="button" class="tool" data-fs="' + esc(a.id) + '">⛶ Full screen</button><button type="button" class="tool" data-pop="' + esc(a.id) + '">⧉ Open in its own window</button></div></div>' : ''}
         </div>`;
       }).join('');
       return `<div class="group-head"><h3>${esc(GROUP_LABELS[cat] || cat)}</h3><span class="muted money">${esc(money(sum))}</span></div>${cards}`;
@@ -739,6 +776,8 @@
   }
 
   $('accounts').addEventListener('click', (e) => {
+    const fsb = e.target.closest('[data-fs]');
+    if (fsb) { showAccountPop(fsb.dataset.fs, true); return; }
     const pop = e.target.closest('[data-pop]');
     if (pop) { popOut(`window=1&account=${encodeURIComponent(pop.dataset.pop)}`, 'finances-account-' + pop.dataset.pop); return; }
     const b = e.target.closest('.acct'); if (!b) return;
@@ -758,9 +797,9 @@
     $('fresh').innerHTML = rows || '<span class="muted">No download records.</span>';
   }
 
-  async function showAccountPop(id) {
+  async function showAccountPop(id, fullScreen) {
     const card = $('account-pop');
-    card.hidden = false; card.classList.add('pop-target');
+    if (fullScreen) openFs(card); else { card.hidden = false; card.classList.add('pop-target'); }
     const a = state.all.find((x) => x.id === id);
     $('ap-title').textContent = a ? short(a.label) : 'Account';
     $('ap-meta').textContent = a ? `${a.institution.toUpperCase()} · ${money(a.balance, true)} as of ${dayName(a.as_of)}` : '';
