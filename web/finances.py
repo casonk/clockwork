@@ -29,11 +29,12 @@ TIMEOUT_SECONDS = 10
 MONTH = re.compile(r"\d{4}-\d{2}(-\d{2})?")
 ACCOUNT_IDS = re.compile(r"[a-z0-9-]{1,120}(,[a-z0-9-]{1,120}){0,299}")
 FILTERED = {"summary", "networth"}
+HISTORY = re.compile(r"accounts/[a-z0-9-]{1,120}/history")
 
 
 def forwarded_query(rest: str) -> str:
     """The filters the service understands, each validated; anything else is dropped."""
-    if rest not in FILTERED:
+    if rest not in FILTERED and not HISTORY.fullmatch(rest):
         return ""
     pairs = []
     for name, pattern in (
@@ -42,6 +43,7 @@ def forwarded_query(rest: str) -> str:
         ("to", MONTH),
         ("months", re.compile(r"\d{1,3}")),
         ("by", re.compile(r"account")),
+        ("granularity", re.compile(r"daily")),
     ):
         value = request.args.get(name, "")
         if value and pattern.fullmatch(value):
