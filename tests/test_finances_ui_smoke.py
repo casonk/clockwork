@@ -26,6 +26,10 @@ POINTS = [
         "bank": 20000.0,
         "crypt": 0.0,
         "cred": -500.0,
+        "growth_rate": None if m == 1 else (0.06 if m % 3 == 0 else -0.06 if m % 4 == 0 else 0.01),
+        "growth_signal": (
+            "n/a" if m == 1 else ("green" if m % 3 == 0 else "red" if m % 4 == 0 else "yellow")
+        ),
     }
     for m in range(1, 11)
 ]
@@ -140,7 +144,7 @@ def route(r):
     if url.endswith("/freshness"):
         return r.fulfill(json=FRESH)
     if "/networth" in url:
-        return r.fulfill(json={"points": POINTS})
+        return r.fulfill(json={"points": POINTS, "thresholds": {"green": 0.05, "red": -0.05}})
     if url.endswith("/history"):
         return r.fulfill(
             json={
@@ -177,7 +181,30 @@ def test_the_page_renders_on_a_phone_without_overflow_or_script_errors():
         box = page.locator("#chart").bounding_box()
         page.mouse.move(box["x"] + box["width"] * 0.5, box["y"] + 80)
         page.wait_for_selector("#tip:not([hidden])")
-        assert "Investments" in page.inner_text("#tip")
+        assert "Investments" in page.inner_text("#tip") and "Step" in page.inner_text("#tip")
+
+        # trend rendering follows the pipeline's: signal-colored dots, a band, categories on request
+        assert (
+            page.locator("#chart .mk-green").count() >= 1
+            and page.locator("#chart .mk-red").count() >= 1
+        )
+        assert (
+            page.locator("#chart .mk-yellow").count() >= 1
+            and page.locator("#chart .band").count() == 1
+        )
+        # every marker path is well formed and small (a string-concatenation bug once drew huge ones)
+        assert page.evaluate(
+            "[...document.querySelectorAll('#chart path.mk')].every(p => /^M[\\d.]+,[\\d.]+L[\\d.]+,[\\d.]+L[\\d.]+,[\\d.]+Z$/.test(p.getAttribute('d')))"
+        )
+        assert page.locator("#chart .cat-line").count() == 0
+        legend = page.inner_text("#chart-legend")
+        assert "+5.0% or more" in legend and "−5.0% or less" in legend
+        page.check("#show-cats")
+        assert page.locator("#chart .cat-line").count() == 4 and "Investments" in page.inner_text(
+            "#chart-legend"
+        )
+        assert page.evaluate("document.documentElement.scrollWidth <= 390")
+        page.uncheck("#show-cats")
         page.uncheck("#with-cash")
         assert page.evaluate("document.documentElement.scrollWidth <= 390")
 
