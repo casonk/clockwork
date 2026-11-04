@@ -80,6 +80,14 @@
     .allocation-target-control input:focus { border-color:var(--accent); outline:none; }
     .allocation-target-control input.dirty { border-color:var(--yellow); }
     .allocation-bulk-form { margin-left:auto; }
+    .invest-order { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:0 0 10px; color:var(--muted); font-size:12px; }
+    .invest-order a { padding:4px 10px; border:1px solid var(--border); border-radius:6px; color:var(--muted); text-decoration:none; }
+    .invest-order a.on { color:var(--text); background:var(--surface2); border-color:var(--accent); }
+    .rank-badge { min-width:28px; color:var(--muted); font-size:11px; text-align:right; }
+    .rank-move { display:flex; flex-direction:column; flex-shrink:0; }
+    .rank-move button { padding:0 7px; line-height:1.15; background:none; border:1px solid var(--border); border-radius:4px; color:var(--muted); cursor:pointer; font-size:10px; }
+    .rank-move button:hover:not(:disabled) { color:var(--text); border-color:var(--accent); }
+    .rank-move button:disabled { opacity:.3; cursor:default; }
     .allocation-bulk-save:disabled { opacity:.45; cursor:not-allowed; }
     .allocation-summary { display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding:11px 14px; border:1px solid var(--border); border-radius:8px; background:var(--surface); margin:0 0 14px; }
     .allocation-stat { color:var(--muted); font-size:12px; }
@@ -220,6 +228,12 @@
   </div>
 
   {% if cfg.key == "invest" %}
+  <nav class="invest-order" aria-label="Card order">
+    <span>Order</span>
+    <a href="/to-invest" {% if not invest_order %}class="on" aria-current="true"{% endif %}>Grouped</a>
+    <a href="/to-invest?order=holding" {% if invest_order == "holding" %}class="on" aria-current="true"{% endif %}>Holding %</a>
+    <a href="/to-invest?order=rank" {% if invest_order == "rank" %}class="on" aria-current="true"{% endif %} title="List order is your target ranking; use the arrows to move a card">Target rank</a>
+  </nav>
   <div class="allocation-summary">
     {% if invest_summary.has_current %}
       <span class="allocation-stat">Listed now <strong>{{ "%.2f"|format(invest_summary.current) }}%</strong></span>
@@ -282,10 +296,12 @@
         </form>
       </div>
       <div class="items">
-        {% for item in active + completed %}
+        {% set flat = cfg.key == "invest" and invest_order %}
+        {% set cat_items = cat["items"] if flat else active + completed %}
+        {% for item in cat_items %}
           {% set value = item[cfg.primary] %}
           {% set grp = "done" if item[cfg.status] else "open" %}
-          {% if loop.first or loop.previtem[cfg.status] != item[cfg.status] %}
+          {% if not flat and (loop.first or loop.previtem[cfg.status] != item[cfg.status]) %}
           <button class="group-toggle" type="button" data-group-toggle="{{ grp }}" aria-expanded="true">{{ "Completed" if grp == "done" else "Open" }} ({{ (completed if grp == "done" else active)|length }})</button>
           {% endif %}
           {% set find_torrent = cfg.key == "watch" %}
@@ -297,6 +313,20 @@
               <input type="hidden" name="item" value="{{ value }}">
               <button class="check-btn {% if item[cfg.status] %}done{% endif %}" type="submit" title="Toggle">✓</button>
             </form>
+            {% if flat and invest_order == "rank" %}
+              <span class="rank-badge" title="Target rank">#{{ loop.index }}</span>
+              <div class="rank-move">
+                {% for way, glyph, off in (("up", "▲", loop.first), ("down", "▼", loop.last)) %}
+                  <form method="post" action="/to-invest/move-item" data-rank-move>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="category" value="{{ cat.name }}">
+                    <input type="hidden" name="item" value="{{ value }}">
+                    <input type="hidden" name="direction" value="{{ way }}">
+                    <button type="submit" {% if off %}disabled{% endif %} title="Move {{ way }}" aria-label="Move {{ value }} {{ way }}">{{ glyph }}</button>
+                  </form>
+                {% endfor %}
+              </div>
+            {% endif %}
             <div class="item-body">
               <span class="item-title {% if item[cfg.status] %}done{% endif %}">{{ value }}</span>
               {% if item.year %}<span class="item-meta">{{ item.year }}</span>{% endif %}
@@ -480,6 +510,10 @@
       applyMode(select);
       markDirty(select);
     });
+  }
+
+  for (const move of document.querySelectorAll('form[data-rank-move]')) {
+    move.addEventListener('submit', rememberView);
   }
 
   form.addEventListener('submit', () => {
