@@ -1556,3 +1556,21 @@ def test_typed_targets_that_cannot_all_hold_are_refused(client, list_files):
     )
     assert "No targets were saved." in over.get_data(as_text=True)
     assert _targets(client, "Stocks") == before
+
+
+def test_tradility_analysis_with_bare_nan_is_served_as_strict_json_without_live_bars(
+    client, list_files
+):
+    list_files["TRADILITY_ANALYSIS_FILE"].write_text(
+        '{"generated_at": "2026-11-05T16:00:00Z", "tickers": [{"ticker": "AAPL", '
+        '"price_history": [{"date": "2026-11-04", "close": 1}], '
+        '"live_bars": {"high": [NaN, 2.0], "close": [1.0, 2.0]}, "rsi_14": NaN}]}'
+    )
+
+    def strict(text):
+        return json.loads(text, parse_constant=lambda name: (_ for _ in ()).throw(ValueError(name)))
+
+    listing = strict(client.get("/api/tradility-analysis").get_data(as_text=True))
+    assert "live_bars" not in listing["tickers"][0] and listing["tickers"][0]["rsi_14"] is None
+    detail = strict(client.get("/api/tradility-analysis/aapl").get_data(as_text=True))
+    assert "live_bars" not in detail["ticker"]
