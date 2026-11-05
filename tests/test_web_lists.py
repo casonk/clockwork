@@ -1499,3 +1499,60 @@ def test_an_edit_with_nothing_beneath_it_is_refused(client, list_files):
     )
     assert "No targets were saved." in response.get_data(as_text=True)
     assert _targets(client, "Stocks") == before
+
+
+def test_typed_tiers_hold_and_nested_edits_fit_inside_them(client, list_files):
+    csrf = _seed_tree(client, list_files)
+    _save(
+        client,
+        csrf,
+        [
+            {"category": "Sectors", "ticker": "TECHNOLOGY", "target_pct": "50"},
+            {"category": "Stocks", "ticker": "AAA", "target_pct": "10"},
+        ],
+    )
+    stocks = _targets(client, "Stocks")
+    assert stocks["AAA"] == 10 and stocks["DDD"] == 50
+    assert _targets(client, "Sectors")["TECHNOLOGY"] == 50  # typed value kept
+    # BBB and EEE fill the rest of Technology in their old 30:20 ratio.
+    assert stocks["BBB"] == 24 and _targets(client, "ETFs")["EEE"] == 16
+
+
+def test_an_unrelated_edit_does_not_move_a_typed_sector(client, list_files):
+    csrf = _seed_tree(client, list_files)
+    _save(
+        client,
+        csrf,
+        [
+            {"category": "Sectors", "ticker": "TECHNOLOGY", "target_pct": "30"},
+            {"category": "Industries", "ticker": "OIL & GAS", "target_pct": "40"},
+        ],
+    )
+    sectors = _targets(client, "Sectors")
+    assert sectors["TECHNOLOGY"] == 30 and sectors["ENERGY"] == 40
+    assert round(sum(sectors.values()), 3) == 100
+
+
+def test_typed_targets_that_cannot_all_hold_are_refused(client, list_files):
+    csrf = _seed_tree(client, list_files)
+    before = _targets(client, "Stocks")
+    too_big = _save(
+        client,
+        csrf,
+        [
+            {"category": "Sectors", "ticker": "TECHNOLOGY", "target_pct": "30"},
+            {"category": "Stocks", "ticker": "AAA", "target_pct": "40"},
+        ],
+    )
+    html = too_big.get_data(as_text=True)
+    assert "No targets were saved." in html and "under Technology" in html
+    over = _save(
+        client,
+        csrf,
+        [
+            {"category": "Sectors", "ticker": "TECHNOLOGY", "target_pct": "70"},
+            {"category": "Sectors", "ticker": "ENERGY", "target_pct": "50"},
+        ],
+    )
+    assert "No targets were saved." in over.get_data(as_text=True)
+    assert _targets(client, "Stocks") == before

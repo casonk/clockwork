@@ -4612,9 +4612,11 @@ def _rebalance_invest_targets(
     ticker edit rolls up; an industry or sector edit is spread over the tickers
     beneath it in proportion to their current targets (or current holdings when
     they have none) and everything else is scaled to keep the total at 100%.
-    ``edits`` holds (category, label, percent) and is applied sectors first,
-    then industries, then tickers (edits of one level are applied together), so
-    the most specific edit wins. Returns the
+    ``edits`` holds (category, label, percent). Every typed value is fixed: an
+    edit nested under another typed card is fitted inside it, and cards nobody
+    typed share what is left in proportion to their current targets. Typed
+    values that cannot all hold (a ticker above its sector, siblings over 100%)
+    are refused. Returns the
     problems found; on any problem nothing is changed.
     """
 
@@ -4653,31 +4655,6 @@ def _rebalance_invest_targets(
     def total() -> float:
         return sum(leaf["w"] for leaf in leaves)
 
-    def set_groups(groups: list[tuple[list[dict], float]]) -> str:
-        """Set each group to its value together; scale everything else to fit."""
-
-        taken = {id(m) for members, _value in groups for m in members}
-        wanted = sum(value for _members, value in groups)
-        if wanted > 100.0001:
-            return f"the edited targets add up to {_format_invest_percentage(wanted)}%, over 100%"
-        for members, value in groups:
-            current = sum(m["w"] for m in members)
-            if current > 0:
-                for m in members:
-                    m["w"] = m["w"] * value / current
-                continue
-            basis = [m["held"] for m in members]
-            if sum(basis) <= 0:
-                basis = [1.0] * len(members)
-            for m, share in zip(members, basis, strict=True):
-                m["w"] = value * share / sum(basis)
-        others = [leaf for leaf in leaves if id(leaf) not in taken]
-        old_rest = sum(leaf["w"] for leaf in others)
-        if old_rest > 0:
-            for leaf in others:
-                leaf["w"] = leaf["w"] * (100 - wanted) / old_rest
-        return ""
-
     if edits and total() <= 0:
         basis = sum(leaf["held"] for leaf in leaves)
         if basis > 0:
@@ -4688,8 +4665,8 @@ def _rebalance_invest_targets(
         for leaf in leaves:
             leaf["w"] *= scale
 
-    levels: dict[int, list[tuple[list[dict], float]]] = {0: [], 1: [], 2: []}
     cleared: set[int] = set()
+    nodes: list[dict] = []
     for category, label, value in edits:
         key = category.strip().casefold()
         label = label.upper()
@@ -4703,12 +4680,69 @@ def _rebalance_invest_targets(
             return [f"no listed tickers fall under {label.title()}"]
         if value is None:
             cleared.update(id(m) for m in members)
-        levels[level].append((members, value or 0.0))
-    for level in (0, 1, 2):
-        if levels[level]:
-            problem = set_groups(levels[level])
-            if problem:
-                return [problem]
+        nodes.append(
+            {
+                "level": level,
+                "ids": frozenset(id(m) for m in members),
+                "members": members,
+                "value": value or 0.0,
+                "label": label.title(),
+            }
+        )
+
+    def distribute(members: list[dict], amount: float, inside: list[dict], name: str | None):
+        """Split ``amount`` over ``members``, honouring every typed value inside.
+
+        A typed node keeps exactly its value; edits nested under it are fitted
+        within it. What no edit claims shares the remainder in proportion to its
+        current targets, so unrelated edits never move a value you typed.
+        """
+
+        top = [
+            n
+            for n in inside
+            if not any(
+                o is not n and o["level"] < n["level"] and n["ids"] <= o["ids"] for o in inside
+            )
+        ]
+        fixed = sum(n["value"] for n in top)
+        where = f" under {name}" if name else ""
+        if fixed > amount + 1e-6:
+            raise ValueError(
+                f"the targets typed{where} add up to {_format_invest_percentage(fixed)}%, "
+                f"over the {_format_invest_percentage(amount)}% available"
+            )
+        taken: set[int] = set()
+        for node in top:
+            nested = [
+                o
+                for o in inside
+                if o is not node and node["level"] < o["level"] and o["ids"] <= node["ids"]
+            ]
+            distribute(node["members"], node["value"], nested, node["label"])
+            taken |= node["ids"]
+        rest = [m for m in members if id(m) not in taken]
+        left = amount - fixed
+        if not rest:
+            if left > 1e-6 and name:
+                raise ValueError(
+                    f"the targets typed under {name} add up to "
+                    f"{_format_invest_percentage(fixed)}%, short of {_format_invest_percentage(amount)}%"
+                )
+            return
+        basis = [m["w"] for m in rest]
+        if sum(basis) <= 0:
+            basis = [m["held"] for m in rest]
+        if sum(basis) <= 0:
+            basis = [1.0] * len(rest)
+        for m, share in zip(rest, basis, strict=True):
+            m["w"] = left * share / sum(basis)
+
+    if nodes:
+        try:
+            distribute(leaves, 100.0, nodes, None)
+        except ValueError as exc:
+            return [str(exc)]
 
     if total() > 0:  # nothing outside an edit to absorb the change: rescale it all
         scale = 100 / total()
