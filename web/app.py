@@ -4488,38 +4488,84 @@ def _load_invest_classifications() -> dict[str, dict[str, str]]:
     return classes
 
 
+INVEST_CRYPTO_LABELS = ("FINANCIALS", "CRYPTO")  # (sector, industry): rolls up once
+
+
+def _invest_crypto_tickers(data: dict, holdings: list) -> set[str]:
+    """Tickers that are crypto, by list category or holdings asset class."""
+
+    found = {
+        str(h.get("ticker") or "").upper().strip()
+        for h in holdings
+        if isinstance(h, dict) and str(h.get("asset_class") or "").strip() == "Crypto"
+    }
+    for category in data["categories"]:
+        if str(category.get("name", "")).strip().casefold() == "crypto":
+            found.update(str(i.get("ticker") or "").upper().strip() for i in category["items"])
+    found.discard("")
+    return found
+
+
+def _invest_industry_sectors(classes: dict[str, dict[str, str]]) -> dict[str, str]:
+    """Pin each industry to one sector (its most common) so a ticker rolls up once."""
+
+    votes: dict[str, dict[str, int]] = {}
+    for row in classes.values():
+        if row["industry"] and row["sector"]:
+            tally = votes.setdefault(row["industry"].upper(), {})
+            tally[row["sector"].upper()] = tally.get(row["sector"].upper(), 0) + 1
+    result = {industry: max(t, key=lambda k: (t[k], k)) for industry, t in votes.items()}
+    result[INVEST_CRYPTO_LABELS[1]] = INVEST_CRYPTO_LABELS[0]
+    return result
+
+
+def _invest_labels(
+    ticker: str,
+    classes: dict[str, dict[str, str]],
+    industry_sectors: dict[str, str],
+    crypto: set[str],
+) -> tuple[str, str]:
+    """Return the one (sector, industry) a ticker belongs to."""
+
+    if ticker in crypto:
+        return INVEST_CRYPTO_LABELS
+    industry = (classes.get(ticker) or {}).get("industry", "").upper()
+    sector = industry_sectors.get(industry, "")
+    if industry and sector:
+        return sector, industry
+    return INVEST_UNCLASSIFIED, INVEST_UNCLASSIFIED
+
+
 def _sync_invest_classifications(
     data: dict, holdings: list, classes: dict[str, dict[str, str]]
 ) -> int:
     """Rebuild the Sectors and Industries cards from the classification export.
 
-    Each card's current percentage is the share of the whole portfolio held in
-    tickers carrying that sector or industry, so it can be checked against the
-    positions listed on the card. Existing targets and card order are kept; new
-    cards start in order of current weight.
+    Each ticker belongs to exactly one industry and that industry to exactly one
+    sector, so a position counts once at every level. A card's current
+    percentage is the share of the whole portfolio held in its tickers. Existing
+    targets and card order are kept; new cards start in order of current weight.
     """
 
     portfolio_value, ticker_values = _invest_ticker_values(holdings)
+    crypto = _invest_crypto_tickers(data, holdings)
+    industry_sectors = _invest_industry_sectors(classes)
     changes = 0
-    for name, field in (("Sectors", "sector"), ("Industries", "industry")):
-        labels: dict[str, dict[str, float]] = {}
-        for row in classes.values():
-            if row[field]:
-                labels.setdefault(row[field].upper(), {})
-        unclassified: dict[str, float] = {}
+    for name, level in (("Sectors", 0), ("Industries", 1)):
+        wanted: dict[str, dict[str, float]] = {}
+        for industry, sector in industry_sectors.items():
+            wanted.setdefault((sector, industry)[level], {})
         for ticker, value in ticker_values.items():
-            label = (classes.get(ticker) or {}).get(field, "").upper()
-            target = labels[label] if label else unclassified
-            target[ticker] = target.get(ticker, 0.0) + value
-        if not labels:
+            label = _invest_labels(ticker, classes, industry_sectors, crypto)[level]
+            bucket = wanted.setdefault(label, {})
+            bucket[ticker] = bucket.get(ticker, 0.0) + value
+        if not industry_sectors:
             continue
         category = _find_simple_category(data, name)
         if category is None:
             category = {"name": name, "items": []}
             data["categories"].append(category)
         category["target_mode"] = category.get("target_mode", "global")
-        wanted = dict(labels)
-        wanted[INVEST_UNCLASSIFIED] = unclassified
         by_label = {str(i.get("ticker") or "").upper(): i for i in category["items"]}
         for label in sorted(wanted, key=lambda k: -sum(wanted[k].values())):
             members = wanted[label]
@@ -4551,6 +4597,151 @@ def _sync_invest_classifications(
             if not detail:
                 item.pop("name", None)
     return changes
+
+
+def _rebalance_invest_targets(
+    data: dict,
+    edits: list[tuple[str, str, float | None]],
+    classes: dict[str, dict[str, str]],
+    holdings: list | None = None,
+) -> list[str]:
+    """Apply target edits so sectors, industries and tickers always agree.
+
+    Every ticker target is a share of the whole portfolio and all of them sum to
+    100%. An industry or sector target is the sum of the tickers under it, so a
+    ticker edit rolls up; an industry or sector edit is spread over the tickers
+    beneath it in proportion to their current targets (or current holdings when
+    they have none) and everything else is scaled to keep the total at 100%.
+    ``edits`` holds (category, label, percent) and is applied sectors first,
+    then industries, then tickers (edits of one level are applied together), so
+    the most specific edit wins. Returns the
+    problems found; on any problem nothing is changed.
+    """
+
+    crypto = _invest_crypto_tickers(data, holdings or [])
+    industry_sectors = _invest_industry_sectors(classes)
+    _summary, totals = _invest_allocation_summary(data)
+
+    leaves: list[dict] = []
+    seen: set[str] = set()
+    for category in data["categories"]:
+        if _is_invest_derived(category):
+            continue
+        info = totals.get(category["name"], {}).get("item_targets", {})
+        for item in category["items"]:
+            ticker = str(item.get("ticker") or "").upper().strip()
+            if not ticker or ticker in seen:
+                continue
+            seen.add(ticker)
+            sector, industry = _invest_labels(ticker, classes, industry_sectors, crypto)
+            try:
+                current = float(item.get("allocation_pct") or 0)
+            except (TypeError, ValueError):
+                current = 0.0
+            leaves.append(
+                {
+                    "item": item,
+                    "ticker": ticker,
+                    "sector": sector,
+                    "industry": industry,
+                    "had": "target_pct" in item,
+                    "w": float((info.get(item["ticker"]) or {}).get("global", 0.0)),
+                    "held": current,
+                }
+            )
+
+    def total() -> float:
+        return sum(leaf["w"] for leaf in leaves)
+
+    def set_groups(groups: list[tuple[list[dict], float]]) -> str:
+        """Set each group to its value together; scale everything else to fit."""
+
+        taken = {id(m) for members, _value in groups for m in members}
+        wanted = sum(value for _members, value in groups)
+        if wanted > 100.0001:
+            return f"the edited targets add up to {_format_invest_percentage(wanted)}%, over 100%"
+        for members, value in groups:
+            current = sum(m["w"] for m in members)
+            if current > 0:
+                for m in members:
+                    m["w"] = m["w"] * value / current
+                continue
+            basis = [m["held"] for m in members]
+            if sum(basis) <= 0:
+                basis = [1.0] * len(members)
+            for m, share in zip(members, basis, strict=True):
+                m["w"] = value * share / sum(basis)
+        others = [leaf for leaf in leaves if id(leaf) not in taken]
+        old_rest = sum(leaf["w"] for leaf in others)
+        if old_rest > 0:
+            for leaf in others:
+                leaf["w"] = leaf["w"] * (100 - wanted) / old_rest
+        return ""
+
+    if edits and total() <= 0:
+        basis = sum(leaf["held"] for leaf in leaves)
+        if basis > 0:
+            for leaf in leaves:
+                leaf["w"] = leaf["held"] * 100 / basis
+    elif total() > 0:
+        scale = 100 / total()
+        for leaf in leaves:
+            leaf["w"] *= scale
+
+    levels: dict[int, list[tuple[list[dict], float]]] = {0: [], 1: [], 2: []}
+    cleared: set[int] = set()
+    for category, label, value in edits:
+        key = category.strip().casefold()
+        label = label.upper()
+        if key == "sectors":
+            level, members = 0, [leaf for leaf in leaves if leaf["sector"] == label]
+        elif key == "industries":
+            level, members = 1, [leaf for leaf in leaves if leaf["industry"] == label]
+        else:
+            level, members = 2, [leaf for leaf in leaves if leaf["ticker"] == label]
+        if not members:
+            return [f"no listed tickers fall under {label.title()}"]
+        if value is None:
+            cleared.update(id(m) for m in members)
+        levels[level].append((members, value or 0.0))
+    for level in (0, 1, 2):
+        if levels[level]:
+            problem = set_groups(levels[level])
+            if problem:
+                return [problem]
+
+    if total() > 0:  # nothing outside an edit to absorb the change: rescale it all
+        scale = 100 / total()
+        for leaf in leaves:
+            leaf["w"] *= scale
+    rounded = {id(leaf): float(_format_invest_percentage(max(leaf["w"], 0.0))) for leaf in leaves}
+    for category in data["categories"]:
+        category.pop("basket_target_pct", None)
+        category.pop("target_mode", None)
+    for leaf in leaves:
+        share = rounded[id(leaf)]
+        if share > 0 or (leaf["had"] and id(leaf) not in cleared):
+            leaf["item"]["target_pct"] = _format_invest_percentage(share)
+        else:
+            leaf["item"].pop("target_pct", None)
+
+    sector_sums: dict[str, float] = {}
+    industry_sums: dict[str, float] = {}
+    for leaf in leaves:
+        share = rounded[id(leaf)]
+        sector_sums[leaf["sector"]] = sector_sums.get(leaf["sector"], 0.0) + share
+        industry_sums[leaf["industry"]] = industry_sums.get(leaf["industry"], 0.0) + share
+    for category in data["categories"]:
+        sums = {"sectors": sector_sums, "industries": industry_sums}.get(
+            str(category.get("name", "")).strip().casefold()
+        )
+        if sums is None:
+            continue
+        for item in category["items"]:
+            amount = sums.get(str(item.get("ticker") or "").upper(), 0.0)
+            if amount > 0 or "target_pct" in item:
+                item["target_pct"] = _format_invest_percentage(amount)
+    return []
 
 
 def _merge_invest_holdings(data: dict, holdings: list) -> tuple[int, int, int, int, int]:
@@ -5260,6 +5451,8 @@ def sync_invest_holdings():
         classes = {}
         flash(f"Classification file unreadable: {exc}", "error")
     grouped = _sync_invest_classifications(data, payload["holdings"], classes) if classes else 0
+    if classes:
+        _rebalance_invest_targets(data, [], classes, payload["holdings"])
     if marked or added or named or allocations or grouped:
         save_simple_list("invest", data)
     _log_event(
@@ -5405,42 +5598,38 @@ def update_invest_targets():
             return redirect(url_for("to_invest"))
         resolved.append((item, category, ticker, target))
 
-    changed = 0
-    for cat, _category, target_mode, basket_target in resolved_categories:
-        current_mode = "basket" if cat.get("target_mode") == "basket" else "global"
-        if current_mode != target_mode:
-            if target_mode == "basket":
-                cat["target_mode"] = "basket"
-            else:
-                cat.pop("target_mode", None)
-            changed += 1
-        current_basket_target = str(cat.get("basket_target_pct") or "")
-        if basket_target:
-            if current_basket_target != basket_target:
-                cat["basket_target_pct"] = basket_target
-                changed += 1
-        elif "basket_target_pct" in cat:
-            cat.pop("basket_target_pct", None)
-            changed += 1
-
-    for item, _category, _ticker, target in resolved:
-        current = str(item.get("target_pct") or "")
-        if target:
-            if current != target:
-                item["target_pct"] = target
-                changed += 1
-        elif "target_pct" in item:
-            item.pop("target_pct", None)
-            changed += 1
+    # Targets are one tree now: every card is a global share and they sum to 100%,
+    # so category basket modes no longer apply and are ignored.
+    before = json.dumps(data, sort_keys=True)
+    edits = []
+    for item, category, ticker, target in resolved:
+        if target != str(item.get("target_pct") or ""):
+            edits.append((category, ticker, float(target) if target else None))
+    try:
+        classes = _load_invest_classifications()
+    except (OSError, csv.Error, UnicodeDecodeError):
+        classes = {}
+    try:
+        holdings = _load_invest_holdings_payload()["holdings"]
+    except (OSError, json.JSONDecodeError, ValueError):
+        holdings = []
+    problems = _rebalance_invest_targets(data, edits, classes, holdings)
+    if problems:
+        flash(problems[0][:1].upper() + problems[0][1:] + ". No targets were saved.", "error")
+        return redirect(url_for("to_invest"))
+    changed = sum(
+        1
+        for cat in data["categories"]
+        for item in cat["items"]
+        if json.dumps(item, sort_keys=True) not in before
+    )
 
     if changed:
         save_simple_list("invest", data)
     _log_event(
         cfg["history_file"],
         "targets",
-        detail=(
-            f"changed={changed}, submitted={len(resolved)}, categories={len(resolved_categories)}"
-        ),
+        detail=(f"changed={changed}, submitted={len(resolved)}, edited={len(edits)}"),
     )
     if changed:
         flash(f"Saved {changed} target change{'s' if changed != 1 else ''}.", "success")
@@ -5458,6 +5647,8 @@ def _invest_target_rows(data: dict) -> tuple[dict[str, dict], dict]:
     summary, categories = _invest_allocation_summary(data)
     rows: dict[str, dict] = {}
     for category in data["categories"]:
+        if _is_invest_derived(category):
+            continue
         info = categories.get(category["name"], {})
         for item in category["items"]:
             ticker = str(item.get("ticker", "")).upper()

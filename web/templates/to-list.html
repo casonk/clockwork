@@ -246,7 +246,7 @@
     {% else %}
       <span class="allocation-stat">Over target total <strong>{{ "%.2f"|format(-invest_summary.target_remaining) }}%</strong></span>
     {% endif %}
-    <span class="allocation-note">Current percentages use the latest aggregate market value, including cash in the denominator. Global inputs are portfolio percentages; basket inputs are shares within a category and use its basket total to derive global targets. Delta colors fade from green when underweight through neutral at target to red when overweight. Targets are local and remain unchanged by sync.</span>
+    <span class="allocation-note">Current percentages use the latest aggregate market value, including cash in the denominator. Every target is a share of the whole portfolio and the tickers add up to 100%. A sector is the sum of its industries and an industry the sum of its tickers: change a ticker and it rolls up; change an industry or sector and the tickers under it are rescaled and the rest rebalance to keep 100%. Delta colors fade from green when underweight through neutral at target to red when overweight. Targets are local; sync only refreshes holdings and the rolled-up totals.</span>
   </div>
   {% endif %}
 
@@ -262,20 +262,6 @@
           {% set cat_delta_abs = cat_delta|abs %}
           {% set cat_delta_strength = cat_delta_abs / 5 if cat_delta_abs < 5 else 1 %}
           <span class="category-allocation" aria-label="{{ cat.name }} allocation summary">
-            <span class="category-target-settings">
-              <label>Input
-                <select class="allocation-target-mode" data-category="{{ cat.name }}" aria-label="Target input mode for {{ cat.name }}">
-                  <option value="global" {% if cat_allocation.mode == "global" %}selected{% endif %}>Global %</option>
-                  <option value="basket" {% if cat_allocation.mode == "basket" %}selected{% endif %}>Basket %</option>
-                </select>
-              </label>
-              <label class="basket-target-control" {% if cat_allocation.mode != "basket" %}hidden{% endif %}>Basket total
-                <input class="allocation-basket-target-input" type="number" min="0" max="100" step="0.01"
-                       value="{{ cat.basket_target_pct or '' }}" placeholder="Target %"
-                       aria-label="Basket total target for {{ cat.name }}" data-category="{{ cat.name }}">
-                <span>% global</span>
-              </label>
-            </span>
             <span class="category-allocation-stat">Now <strong>{{ "%.2f"|format(cat_allocation.current) }}%</strong></span>
             <span class="category-allocation-stat">Global target <strong>{{ "%.2f"|format(cat_allocation.target) }}%</strong></span>
             {% if cat_allocation.mode == "basket" %}<span class="category-allocation-stat">Basket assigned <strong>{{ "%.2f"|format(cat_allocation.input_total) }}%</strong></span>{% endif %}
