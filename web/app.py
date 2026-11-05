@@ -6047,6 +6047,13 @@ def _tradility_refresh_active() -> bool:
     return active_output.strip() in {"active", "activating"}
 
 
+def _read_tradility_analysis() -> dict:
+    """The analysis file with any bare NaN read as null: NaN is not JSON and Safari rejects it."""
+    return json.loads(
+        TRADILITY_ANALYSIS_FILE.read_text(encoding="utf-8"), parse_constant=lambda _name: None
+    )
+
+
 @app.get("/api/tradility-analysis")
 def api_tradility_analysis():
     """Return the latest tradility technical analysis JSON.
@@ -6065,12 +6072,13 @@ def api_tradility_analysis():
             404,
         )
     try:
-        data = json.loads(TRADILITY_ANALYSIS_FILE.read_text(encoding="utf-8"))
+        data = _read_tradility_analysis()
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
     for ticker in data.get("tickers", []):
         if not isinstance(ticker, dict):
             continue
+        ticker.pop("live_bars", None)  # input for live indicators; large and not for the browser
         history = ticker.pop("price_history", [])
         profile = ticker.pop("company_profile", {})
         ticker["detail_available"] = bool(history)
@@ -6109,7 +6117,7 @@ def api_tradility_ticker_detail(ticker: str):
     if not TRADILITY_ANALYSIS_FILE.exists():
         return jsonify({"ok": False, "error": "Tradility analysis file not found"}), 404
     try:
-        data = json.loads(TRADILITY_ANALYSIS_FILE.read_text(encoding="utf-8"))
+        data = _read_tradility_analysis()
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
     normalized = ticker.strip().upper()
@@ -6123,6 +6131,7 @@ def api_tradility_ticker_detail(ticker: str):
     )
     if record is None:
         return jsonify({"ok": False, "error": "Ticker not found"}), 404
+    record = {k: v for k, v in record.items() if k != "live_bars"}
     return jsonify(
         {
             "ok": True,
