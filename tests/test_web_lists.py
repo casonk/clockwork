@@ -392,79 +392,101 @@ def test_to_invest_targets_are_saved_as_one_validated_batch(client, list_files):
     )
     csrf = _csrf(client, "/api/invest")
 
-    response = client.post(
-        "/to-invest/update-targets",
-        data={
-            "csrf_token": csrf,
-            "targets_json": json.dumps(
-                [
-                    {"category": "Stocks", "ticker": "AMD", "target_pct": "15.25"},
-                    {"category": "Stocks", "ticker": "NVDA", "target_pct": "10"},
-                ]
-            ),
-        },
-        follow_redirects=True,
-    )
-    html = response.get_data(as_text=True)
-    assert response.status_code == 200
+    def post(rows):
+        return client.post(
+            "/to-invest/update-targets",
+            data={"csrf_token": csrf, "targets_json": json.dumps(rows)},
+            follow_redirects=True,
+        )
+
+    def targets():
+        items = client.get("/api/invest").get_json()["data"]["categories"][0]["items"]
+        return {i["ticker"]: i.get("target_pct") for i in items}
+
+    html = post(
+        [
+            {"category": "Stocks", "ticker": "AMD", "target_pct": "15"},
+            {"category": "Stocks", "ticker": "NVDA", "target_pct": "10"},
+        ]
+    ).get_data(as_text=True)
     assert "Saved 2 target changes." in html
-    assert "Global target 15.250%" in html
-    assert "Δ -2.750% underweight" in html
-    data = client.get("/api/invest").get_json()["data"]
-    assert data["categories"][0]["items"][0]["target_pct"] == "15.25"
-    assert data["categories"][0]["items"][1]["target_pct"] == "10"
-    invalid = client.post(
-        "/to-invest/update-targets",
-        data={
-            "csrf_token": csrf,
-            "targets_json": json.dumps(
-                [
-                    {"category": "Stocks", "ticker": "AMD", "target_pct": "20"},
-                    {"category": "Stocks", "ticker": "NVDA", "target_pct": "101"},
-                ]
-            ),
-        },
-        follow_redirects=True,
+    # Tickers are shares of the whole portfolio, so they are rescaled to add to 100%.
+    assert targets() == {"AMD": "60", "NVDA": "40"}
+
+    invalid = post(
+        [
+            {"category": "Stocks", "ticker": "AMD", "target_pct": "20"},
+            {"category": "Stocks", "ticker": "NVDA", "target_pct": "101"},
+        ]
     )
     assert "Target must be a number from 0 to 100." in invalid.get_data(as_text=True)
-    data = client.get("/api/invest").get_json()["data"]
-    assert data["categories"][0]["items"][0]["target_pct"] == "15.25"
-    assert data["categories"][0]["items"][1]["target_pct"] == "10"
+    assert targets() == {"AMD": "60", "NVDA": "40"}
 
-    missing = client.post(
-        "/to-invest/update-targets",
-        data={
-            "csrf_token": csrf,
-            "targets_json": json.dumps(
-                [
-                    {"category": "Stocks", "ticker": "AMD", "target_pct": "20"},
-                    {"category": "Stocks", "ticker": "MISSING", "target_pct": "5"},
-                ]
-            ),
-        },
-        follow_redirects=True,
+    missing = post(
+        [
+            {"category": "Stocks", "ticker": "AMD", "target_pct": "20"},
+            {"category": "Stocks", "ticker": "MISSING", "target_pct": "5"},
+        ]
     )
     assert "No targets were saved." in missing.get_data(as_text=True)
-    data = client.get("/api/invest").get_json()["data"]
-    assert data["categories"][0]["items"][0]["target_pct"] == "15.25"
+    assert targets() == {"AMD": "60", "NVDA": "40"}
 
-    cleared = client.post(
-        "/to-invest/update-targets",
-        data={
-            "csrf_token": csrf,
-            "targets_json": json.dumps(
-                [
-                    {"category": "Stocks", "ticker": "AMD", "target_pct": ""},
-                    {"category": "Stocks", "ticker": "NVDA", "target_pct": "10"},
+    # Raising one ticker shrinks the other so the total stays 100%.
+    post(
+        [
+            {"category": "Stocks", "ticker": "AMD", "target_pct": "70"},
+            {"category": "Stocks", "ticker": "NVDA", "target_pct": "40"},
+        ]
+    )
+    assert targets() == {"AMD": "70", "NVDA": "30"}
+
+    cleared = post(
+        [
+            {"category": "Stocks", "ticker": "AMD", "target_pct": ""},
+            {"category": "Stocks", "ticker": "NVDA", "target_pct": "30"},
+        ]
+    )
+    assert "Saved 2 target changes." in cleared.get_data(as_text=True)
+    assert targets() == {"AMD": None, "NVDA": "100"}
+
+
+def test_to_invest_basket_targets_fold_into_one_hundred_percent(client, list_files):
+    list_files["INVEST_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {
+                        "name": "Stocks",
+                        "target_mode": "basket",
+                        "basket_target_pct": "25",
+                        "items": [
+                            {"ticker": "AMD", "holding": True, "target_pct": "60"},
+                            {"ticker": "NVDA", "holding": True, "target_pct": "40"},
+                        ],
+                    },
+                    {
+                        "name": "Crypto",
+                        "items": [{"ticker": "BTC", "holding": True, "target_pct": "25"}],
+                    },
                 ]
-            ),
-        },
+            }
+        )
+    )
+    csrf = _csrf(client, "/api/invest")
+    response = client.post(
+        "/to-invest/update-targets",
+        data={"csrf_token": csrf, "targets_json": json.dumps({"categories": [], "items": []})},
         follow_redirects=True,
     )
-    assert "Saved 1 target change." in cleared.get_data(as_text=True)
-    data = client.get("/api/invest").get_json()["data"]
-    assert "target_pct" not in data["categories"][0]["items"][0]
-    assert data["categories"][0]["items"][1]["target_pct"] == "10"
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "Basket total" not in html
+    assert "Targets assigned <strong>100.00%</strong>" in html
+    categories = client.get("/api/invest").get_json()["data"]["categories"]
+    assert all("target_mode" not in c and "basket_target_pct" not in c for c in categories)
+    by_ticker = {i["ticker"]: float(i["target_pct"]) for c in categories for i in c["items"]}
+    # Basket Stocks counted as 25% x (60%, 40%) before: 15, 10, plus 25 crypto.
+    assert by_ticker == {"AMD": 30, "NVDA": 20, "BTC": 50}
 
 
 def test_to_invest_renders_delta_spectrum_and_enter_batch_submit(client, list_files):
@@ -529,94 +551,6 @@ def test_to_invest_renders_delta_spectrum_and_enter_batch_submit(client, list_fi
     assert "Global target <strong>20.00%</strong>" in html
     assert 'data-delta-scope="category" data-delta="1.5040"' in html
     assert "Δ +1.50% overweight" in html
-
-
-def test_to_invest_basket_targets_compute_global_targets_transactionally(client, list_files):
-    list_files["INVEST_LIST_FILE"].write_text(
-        json.dumps(
-            {
-                "categories": [
-                    {
-                        "name": "Stocks",
-                        "items": [
-                            {
-                                "ticker": "AMD",
-                                "holding": True,
-                                "allocation_pct": "12",
-                                "target_pct": "60",
-                            },
-                            {
-                                "ticker": "NVDA",
-                                "holding": True,
-                                "allocation_pct": "8",
-                                "target_pct": "40",
-                            },
-                        ],
-                    }
-                ]
-            }
-        )
-    )
-    csrf = _csrf(client, "/api/invest")
-    payload = {
-        "categories": [
-            {
-                "category": "Stocks",
-                "target_mode": "basket",
-                "basket_target_pct": "25",
-            }
-        ],
-        "items": [
-            {"category": "Stocks", "ticker": "AMD", "target_pct": "60"},
-            {"category": "Stocks", "ticker": "NVDA", "target_pct": "40"},
-        ],
-    }
-
-    response = client.post(
-        "/to-invest/update-targets",
-        data={"csrf_token": csrf, "targets_json": json.dumps(payload)},
-        follow_redirects=True,
-    )
-    html = response.get_data(as_text=True)
-
-    assert response.status_code == 200
-    assert "Saved 2 target changes." in html
-    assert "Targets assigned <strong>25.00%</strong>" in html
-    assert "Global target <strong>25.00%</strong>" in html
-    assert "Basket assigned <strong>100.00%</strong>" in html
-    assert "Basket 60.000% → Global 15.000%" in html
-    assert "Basket 40.000% → Global 10.000%" in html
-    assert 'aria-label="Basket percentage for AMD"' in html
-    assert 'aria-label="Basket total target for Stocks"' in html
-
-    data = client.get("/api/invest").get_json()["data"]
-    category = data["categories"][0]
-    assert category["target_mode"] == "basket"
-    assert category["basket_target_pct"] == "25"
-    assert [item["target_pct"] for item in category["items"]] == ["60", "40"]
-
-    invalid_payload = {
-        "categories": [
-            {
-                "category": "Stocks",
-                "target_mode": "basket",
-                "basket_target_pct": "",
-            }
-        ],
-        "items": [
-            {"category": "Stocks", "ticker": "AMD", "target_pct": "70"},
-            {"category": "Stocks", "ticker": "NVDA", "target_pct": "30"},
-        ],
-    }
-    invalid = client.post(
-        "/to-invest/update-targets",
-        data={"csrf_token": csrf, "targets_json": json.dumps(invalid_payload)},
-        follow_redirects=True,
-    )
-    assert "Basket target for &#34;Stocks&#34; is required." in invalid.get_data(as_text=True)
-    unchanged = client.get("/api/invest").get_json()["data"]["categories"][0]
-    assert unchanged["basket_target_pct"] == "25"
-    assert [item["target_pct"] for item in unchanged["items"]] == ["60", "40"]
 
 
 def test_to_invest_sync_reports_missing_holdings_file_without_mutating_list(client, list_files):
@@ -1381,12 +1315,15 @@ def test_sync_builds_sector_and_industry_cards_from_holdings(client, list_files)
     assert sectors["TECHNOLOGY"]["holding"] is True
     assert sectors["TECHNOLOGY"]["name"] == "AAA 50%, BBB 30%"
     assert sectors["ENERGY"]["allocation_pct"] == "0"
-    assert sectors["ENERGY"]["target_pct"] == "7"  # user target survives
     assert sectors["ENERGY"]["holding"] is False
-    assert sectors["UNCLASSIFIED"]["allocation_pct"] == "20"
+    # Crypto is its own industry and rolls up once, into Financials.
+    assert sectors["FINANCIALS"]["allocation_pct"] == "20"
+    assert sectors["FINANCIALS"]["name"] == "XYZ 20%"
+    assert "UNCLASSIFIED" not in sectors
     industries, _ = _cards(client, "Industries")
     assert industries["SEMICONDUCTORS"]["allocation_pct"] == "50"
     assert industries["SOFTWARE"]["allocation_pct"] == "30"
+    assert industries["CRYPTO"]["allocation_pct"] == "20"
     assert "TECHNOLOGY" not in industries
     assert order[0] == "ENERGY"  # existing card keeps its place
 
@@ -1403,7 +1340,7 @@ def test_cards_can_be_ordered_by_holding_percent(client, list_files):
     _seed_industries(client, list_files)
     html = client.get("/to-invest?order=holding").get_data(as_text=True)
     sectors = html[html.index('data-invest-anchor="category:Sectors"') :]
-    assert sectors.index("TECHNOLOGY") < sectors.index("UNCLASSIFIED") < sectors.index("ENERGY")
+    assert sectors.index("TECHNOLOGY") < sectors.index("FINANCIALS") < sectors.index("ENERGY")
     assert '<button class="group-toggle"' not in html
     assert "/to-invest/move-item" not in html  # arrows belong to rank mode only
 
@@ -1411,7 +1348,7 @@ def test_cards_can_be_ordered_by_holding_percent(client, list_files):
 def test_target_rank_moves_a_card_up_and_down(client, list_files):
     csrf = _seed_industries(client, list_files)
     _, order = _cards(client, "Sectors")
-    assert order == ["ENERGY", "TECHNOLOGY", "UNCLASSIFIED"]
+    assert order == ["ENERGY", "TECHNOLOGY", "FINANCIALS"]
     html = client.get("/to-invest?order=rank").get_data(as_text=True)
     assert 'action="/to-invest/move-item"' in html and "#1" in html
 
@@ -1421,11 +1358,144 @@ def test_target_rank_moves_a_card_up_and_down(client, list_files):
             data={"csrf_token": csrf, "category": "Sectors", "item": item, "direction": direction},
         )
 
-    assert "order=rank" in move("UNCLASSIFIED", "up").headers["Location"]
-    assert _cards(client, "Sectors")[1] == ["ENERGY", "UNCLASSIFIED", "TECHNOLOGY"]
+    assert "order=rank" in move("FINANCIALS", "up").headers["Location"]
+    assert _cards(client, "Sectors")[1] == ["ENERGY", "FINANCIALS", "TECHNOLOGY"]
     move("ENERGY", "up")  # already first: unchanged
-    assert _cards(client, "Sectors")[1] == ["ENERGY", "UNCLASSIFIED", "TECHNOLOGY"]
+    assert _cards(client, "Sectors")[1] == ["ENERGY", "FINANCIALS", "TECHNOLOGY"]
     move("ENERGY", "down")
-    assert _cards(client, "Sectors")[1] == ["UNCLASSIFIED", "ENERGY", "TECHNOLOGY"]
+    assert _cards(client, "Sectors")[1] == ["FINANCIALS", "ENERGY", "TECHNOLOGY"]
     move("NOPE", "up")
-    assert _cards(client, "Sectors")[1] == ["UNCLASSIFIED", "ENERGY", "TECHNOLOGY"]
+    assert _cards(client, "Sectors")[1] == ["FINANCIALS", "ENERGY", "TECHNOLOGY"]
+
+
+def _targets(client, name):
+    cards, _ = _cards(client, name)
+    return {k: float(v.get("target_pct") or 0) for k, v in cards.items()}
+
+
+def _save(client, csrf, rows):
+    return client.post(
+        "/to-invest/update-targets",
+        data={"csrf_token": csrf, "targets_json": json.dumps({"categories": [], "items": rows})},
+        follow_redirects=True,
+    )
+
+
+def _seed_tree(client, list_files):
+    """Three tickers: two semiconductor stocks and one software ETF, all Technology."""
+
+    list_files["INVEST_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {
+                        "name": "Stocks",
+                        "items": [
+                            {"ticker": "AAA", "holding": True, "target_pct": "30"},
+                            {"ticker": "BBB", "holding": True, "target_pct": "30"},
+                            {"ticker": "DDD", "holding": True, "target_pct": "20"},
+                        ],
+                    },
+                    {
+                        "name": "ETFs",
+                        "items": [{"ticker": "EEE", "holding": True, "target_pct": "20"}],
+                    },
+                    {"name": "Crypto", "items": [{"ticker": "BTC", "holding": True}]},
+                ]
+            }
+        )
+    )
+    list_files["HOLDINGS_AGGREGATE_FILE"].write_text(
+        json.dumps(
+            {
+                "holdings": [
+                    {"ticker": t, "asset_class": c, "total_ending_value": 10}
+                    for t, c in (
+                        ("AAA", "Stocks"),
+                        ("BBB", "Stocks"),
+                        ("DDD", "Stocks"),
+                        ("EEE", "ETFs"),
+                        ("BTC", "Crypto"),
+                    )
+                ]
+            }
+        )
+    )
+    list_files["INVEST_CLASSIFICATIONS_FILE"].write_text(
+        "symbol,cusip,sector,industry,sub_industry\n"
+        "AAA,1,Technology,Semiconductors,\n"
+        "BBB,2,Technology,Semiconductors,\n"
+        "EEE,3,Technology,Software,\n"
+        "DDD,4,Energy,Oil & Gas,\n"
+        "BTC,5,Financials,Asset Management,\n"
+    )
+    csrf = _csrf(client, "/api/invest")
+    client.post("/to-invest/sync-holdings", data={"csrf_token": csrf})
+    return csrf
+
+
+def test_sync_rolls_targets_up_and_counts_crypto_once(client, list_files):
+    _seed_tree(client, list_files)
+    sectors = _targets(client, "Sectors")
+    industries = _targets(client, "Industries")
+    assert sectors["TECHNOLOGY"] == 80 and sectors["ENERGY"] == 20
+    assert industries["SEMICONDUCTORS"] == 60 and industries["SOFTWARE"] == 20
+    # BTC sits in its own Crypto industry, under Financials, and nowhere else.
+    assert "ASSET MANAGEMENT" not in {k for k, v in industries.items() if v}
+    cards, _ = _cards(client, "Industries")
+    assert cards["CRYPTO"]["allocation_pct"] == "20"
+    assert cards["ASSET MANAGEMENT"]["allocation_pct"] == "0"
+    assert (
+        sum(float(v.get("allocation_pct") or 0) for v in _cards(client, "Sectors")[0].values())
+        == 100
+    )
+    assert sum(sectors.values()) == sum(industries.values()) == 100
+
+
+def test_editing_a_ticker_rolls_up_to_industry_and_sector(client, list_files):
+    csrf = _seed_tree(client, list_files)
+    _save(client, csrf, [{"category": "Stocks", "ticker": "AAA", "target_pct": "50"}])
+    stocks = _targets(client, "Stocks")
+    assert stocks["AAA"] == 50
+    assert round(sum(stocks.values()) + _targets(client, "ETFs")["EEE"], 3) == 100
+    assert _targets(client, "Industries")["SEMICONDUCTORS"] == round(
+        stocks["AAA"] + stocks["BBB"], 4
+    )
+    assert round(_targets(client, "Sectors")["TECHNOLOGY"], 3) == round(
+        stocks["AAA"] + stocks["BBB"] + _targets(client, "ETFs")["EEE"], 3
+    )
+
+
+def test_editing_an_industry_or_sector_cascades_down_and_rebalances(client, list_files):
+    csrf = _seed_tree(client, list_files)
+    _save(
+        client, csrf, [{"category": "Industries", "ticker": "SEMICONDUCTORS", "target_pct": "30"}]
+    )
+    stocks = _targets(client, "Stocks")
+    assert stocks["AAA"] == stocks["BBB"] == 15  # split in their old 1:1 ratio
+    assert _targets(client, "Industries")["SEMICONDUCTORS"] == 30
+    assert round(sum(_targets(client, "Sectors").values()), 3) == 100
+    assert (
+        round(
+            stocks["DDD"] + _targets(client, "ETFs")["EEE"] + _targets(client, "Crypto")["BTC"], 3
+        )
+        == 70
+    )
+
+    _save(client, csrf, [{"category": "Sectors", "ticker": "ENERGY", "target_pct": "50"}])
+    assert _targets(client, "Stocks")["DDD"] == 50
+    assert _targets(client, "Sectors")["ENERGY"] == 50
+    assert round(sum(_targets(client, "Sectors").values()), 3) == 100
+    # Technology shrank in proportion: its industries keep their 30:35 ratio.
+    industries = _targets(client, "Industries")
+    assert round(industries["SEMICONDUCTORS"] / industries["SOFTWARE"], 3) == round(30 / 35, 3)
+
+
+def test_an_edit_with_nothing_beneath_it_is_refused(client, list_files):
+    csrf = _seed_tree(client, list_files)
+    before = _targets(client, "Stocks")
+    response = _save(
+        client, csrf, [{"category": "Industries", "ticker": "BIOTECHNOLOGY", "target_pct": "10"}]
+    )
+    assert "No targets were saved." in response.get_data(as_text=True)
+    assert _targets(client, "Stocks") == before
