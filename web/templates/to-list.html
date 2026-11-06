@@ -256,6 +256,7 @@
   </div>
   {% endif %}
 
+  {% set anchored = namespace(seen=[]) %}
   {% for cat in data.categories %}
     {% set active = cat["items"] | rejectattr(cfg.status) | list %}
     {% set completed = cat["items"] | selectattr(cfg.status) | list %}
@@ -298,7 +299,7 @@
           {% endif %}
           {% set find_torrent = cfg.key == "watch" %}
           {% set find_media = cfg.key in ("read", "listen") and not item[cfg.status] %}
-          <div class="item" data-group="{{ grp }}"{% if cfg.key == "invest" and cat.name|lower not in ("sectors", "industries") %} id="invest-item-{{ value }}"{% endif %}{% if cfg.key in ("watch", "read", "listen") %} data-title="{{ value }}" data-year="{{ item.year or '' }}" data-category="{{ cat.name }}"{% elif cfg.key == "invest" %} data-invest-anchor="item:{{ cat.name }}:{{ value }}"{% endif %}>
+          <div class="item" data-group="{{ grp }}"{% if cfg.key == "invest" and cat.name|lower not in ("sectors", "industries") and value not in anchored.seen %} id="invest-item-{{ value }}"{% set _ = anchored.seen.append(value) %}{% endif %}{% if cfg.key in ("watch", "read", "listen") %} data-title="{{ value }}" data-year="{{ item.year or '' }}" data-category="{{ cat.name }}"{% elif cfg.key == "invest" %} data-invest-anchor="item:{{ cat.name }}:{{ value }}"{% endif %}>
             <form method="post" action="/{{ cfg.page }}/toggle-item">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <input type="hidden" name="category" value="{{ cat.name }}">
