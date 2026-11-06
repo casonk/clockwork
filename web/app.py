@@ -7761,9 +7761,28 @@ def _load_portal_groups(apply_labels: bool = True) -> list[tuple[str, list[dict]
     return [(g, cards) for g in ordered if (cards := groups.get(g))]
 
 
+def _home_hidden_services() -> set[str]:
+    """Services whose card is left off the Home page because Clockwork has its own card for the app.
+
+    The standalone Tradility service (``tradility-web``) is also reached through Clockwork's own
+    Tradility page, so showing both gives two Tradility cards. The service stays in the Services
+    menu. Set CLOCKWORK_HOME_HIDE_SERVICES (comma separated; empty shows every card) to change it.
+    """
+    raw = os.environ.get("CLOCKWORK_HOME_HIDE_SERVICES", "tradility-web")
+    return {name.strip() for name in raw.split(",") if name.strip()}
+
+
+def _home_groups(
+    groups: list[tuple[str, list[dict]]], hidden: set[str]
+) -> list[tuple[str, list[dict]]]:
+    """The Home page's cards: the portal groups without the hidden services (and any group left empty)."""
+    kept = [(group, [c for c in cards if c.get("name") not in hidden]) for group, cards in groups]
+    return [(group, cards) for group, cards in kept if cards]
+
+
 @app.get("/home")
 def home():
-    groups = _load_portal_groups()
+    groups = _home_groups(_load_portal_groups(), _home_hidden_services())
     return render_template("home.html", groups=groups)
 
 
