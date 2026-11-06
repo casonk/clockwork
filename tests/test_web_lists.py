@@ -1813,3 +1813,90 @@ def test_adding_a_ticker_to_a_second_category_says_it_is_a_duplicate(client, lis
     html = reply.get_data(as_text=True)
     assert "&#34;AAA&#34; is also in Stocks" in html or '"AAA" is also in Stocks' in html
     assert [i["ticker"] for i in _cards(client, "ETFs")[0].values()] == ["AAA"]
+
+
+def _sync_holdings(client, list_files, categories, holdings):
+    list_files["INVEST_LIST_FILE"].write_text(json.dumps({"categories": categories}))
+    list_files["HOLDINGS_AGGREGATE_FILE"].write_text(json.dumps({"holdings": holdings}))
+    csrf = _csrf(client, "/api/invest")
+    return client.post(
+        "/to-invest/sync-holdings", data={"csrf_token": csrf}, follow_redirects=True
+    ).get_data(as_text=True)
+
+
+def test_a_fund_labelled_differently_by_two_custodians_is_not_duplicated(client, list_files):
+    # VOO is ETFs at Schwab and Stocks at Fidelity: one fund, so one row (the real-data regression).
+    html = _sync_holdings(
+        client,
+        list_files,
+        [
+            {"name": "ETFs", "items": [{"ticker": "VOO", "holding": True}]},
+            {"name": "Stocks", "items": []},
+        ],
+        [
+            {
+                "ticker": "VOO",
+                "asset_class": "ETFs",
+                "total_ending_value": 1000,
+                "accounts": [
+                    {"asset_class": "ETFs", "ending_value": 600},
+                    {"asset_class": "Stocks", "ending_value": 400},
+                ],
+            }
+        ],
+    )
+    assert "new tickers added" not in html
+    assert _cards(client, "Stocks")[1] == [] and list(_cards(client, "ETFs")[0]) == ["VOO"]
+    assert _cards(client, "ETFs")[0]["VOO"]["allocation_pct"] == "100"  # the whole holding, once
+
+
+def test_the_same_symbol_as_a_stock_and_a_coin_gets_a_row_for_each(client, list_files):
+    # T is AT&T at Schwab and a small Binance coin.
+    html = _sync_holdings(
+        client,
+        list_files,
+        [
+            {"name": "Stocks", "items": [{"ticker": "T", "holding": True}]},
+            {"name": "Crypto", "items": []},
+        ],
+        [
+            {
+                "ticker": "T",
+                "asset_class": "Stocks",
+                "total_ending_value": 1000,
+                "accounts": [
+                    {"asset_class": "Stocks", "ending_value": 990},
+                    {"asset_class": "Crypto", "ending_value": 10},
+                ],
+            }
+        ],
+    )
+    assert "1 new tickers added" in html
+    assert _cards(client, "Crypto")[0]["T"]["allocation_pct"] == "1"
+    assert _cards(client, "Stocks")[0]["T"]["allocation_pct"] == "99"
+
+
+def test_another_custodians_label_goes_to_the_stock_or_fund_row_not_nowhere(client, list_files):
+    # BTC the ETF is held at Schwab (ETFs) and Fidelity (Stocks); the coin is at Binance.
+    _sync_holdings(
+        client,
+        list_files,
+        [
+            {"name": "ETFs", "items": [{"ticker": "BTC", "holding": True}]},
+            {"name": "Crypto", "items": [{"ticker": "BTC", "holding": True}]},
+        ],
+        [
+            {
+                "ticker": "BTC",
+                "asset_class": "ETFs",
+                "total_ending_value": 1000,
+                "accounts": [
+                    {"asset_class": "ETFs", "ending_value": 100},
+                    {"asset_class": "Stocks", "ending_value": 100},
+                    {"asset_class": "Crypto", "ending_value": 800},
+                ],
+            }
+        ],
+    )
+    assert _cards(client, "ETFs")[0]["BTC"]["allocation_pct"] == "20"
+    assert _cards(client, "Crypto")[0]["BTC"]["allocation_pct"] == "80"

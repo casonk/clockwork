@@ -4793,12 +4793,13 @@ def _add_missing_duplicate_rows(
     homes: dict[str, list[tuple[str, dict]]],
     known: dict[str, dict],
 ) -> int:
-    """Give a ticker held in two categories a row in each.
+    """Give a symbol that is two different assets a row for each.
 
-    A ticker the export merges from several accounts (BTC: a Schwab ETF and a Binance coin) keeps
-    each account's asset class; when those classes map to different categories every one of them
-    gets a row, so the sync can split the value between them. Only categories the export says hold
-    value are added, and nothing is ever moved or removed."""
+    The export merges a ticker's accounts into one row but keeps each account's asset class. The same
+    symbol can be two instruments (BTC is a Schwab ETF and a Binance coin; T is AT&T and a coin), and
+    then Crypto and the stock or fund category each get a row so the sync can split the value. A fund
+    that merely sits under different labels at different custodians (VOO is ETFs at Schwab and
+    Stocks at Fidelity) is one instrument and gets no extra row. Nothing is moved or removed."""
     created = 0
     for holding in holdings:
         if not isinstance(holding, dict) or str(holding.get("asset_class") or "") == "Core Account":
@@ -4817,10 +4818,13 @@ def _add_missing_duplicate_rows(
                 continue
             if category_name and math.isfinite(value) and value > 0:
                 held_in.add(category_name)
-        if len(held_in) < 2:
-            continue
+        others = held_in - {"Crypto"}
+        if "Crypto" not in held_in or not others:
+            continue  # one instrument, however many custodians or labels
+        own = INVEST_ASSET_CLASS_CATEGORIES.get(str(holding.get("asset_class") or "").strip())
+        wanted = {"Crypto", own if own in others else sorted(others)[0]}
         description = str(holding.get("description") or "").strip()
-        for category_name in sorted(held_in):
+        for category_name in sorted(wanted):
             if any(
                 name.casefold() == category_name.casefold() for name, _ in homes.get(ticker, [])
             ):
@@ -4870,6 +4874,8 @@ def _merge_invest_holdings(data: dict, holdings: list) -> tuple[int, int, int, i
         name = str(holding.get("ticker") or "").upper().strip()
         if len(homes.get(name, [])) < 2:
             continue
+        row_categories = {category_name for category_name, _item in homes[name]}
+        stock_like = [c for c in row_categories if c.casefold() != "crypto"]
         for account in holding.get("accounts") or []:
             try:
                 value = float(account.get("ending_value"))
@@ -4878,6 +4884,8 @@ def _merge_invest_holdings(data: dict, holdings: list) -> tuple[int, int, int, i
             category = INVEST_ASSET_CLASS_CATEGORIES.get(
                 str(account.get("asset_class") or "").strip(), "Stocks"
             )
+            if category not in row_categories and category != "Crypto" and len(stock_like) == 1:
+                category = stock_like[0]  # another custodian's label for the same fund or stock
             if math.isfinite(value):
                 class_values[(name, category)] = class_values.get((name, category), 0.0) + value
     allocations = (
