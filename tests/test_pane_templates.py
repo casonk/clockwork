@@ -13,7 +13,12 @@ class PaneTemplatesTest(unittest.TestCase):
         self.html = PAGE.read_text()
 
     def test_ticket_has_a_ladder_container_and_template_loading(self):
-        for needle in ('id="trade-ladder"', "ensureTemplates().then(paintTemplates)", "startPaneLadder", "paneItems"):
+        for needle in (
+            'id="trade-ladder"',
+            "ensureTemplates().then(paintTemplates)",
+            "startPaneLadder",
+            "paneItems",
+        ):
             self.assertIn(needle, self.html)
 
     def test_tab_and_pane_share_one_preview_and_confirm(self):
@@ -22,7 +27,9 @@ class PaneTemplatesTest(unittest.TestCase):
         self.assertEqual(self.html.count("async function confirmLadder"), 1)
 
     def test_inline_script_parses(self):
-        script = [x for x in re.findall(r"<script>(.*?)</script>", self.html, re.S) if "paneItems" in x][0]
+        script = [
+            x for x in re.findall(r"<script>(.*?)</script>", self.html, re.S) if "paneItems" in x
+        ][0]
         script = re.sub(r"\{\{.*?\}\}|\{%.*?%\}", "0", script, flags=re.S)
         path = Path(self._testMethodName + ".js")
         try:
