@@ -102,6 +102,9 @@
     .group-toggle::before { content:"\25BE "; }
     .group-toggle[aria-expanded="false"]::before { content:"\25B8 "; }
     .group-collapsed { display:none !important; }
+    .item.row-flash { animation:row-flash 2.4s ease-out; }
+    @keyframes row-flash { 0%, 40% { box-shadow:inset 0 0 0 2px var(--accent); background:var(--surface3); } 100% { box-shadow:inset 0 0 0 2px transparent; } }
+    @media (prefers-reduced-motion: reduce) { .item.row-flash { animation:none; box-shadow:inset 0 0 0 2px var(--accent); } }
     .add-item-row, .add-category { display:flex; gap:8px; padding:10px 14px; background:var(--surface3); border-top:1px solid var(--border); }
     .add-category { border:1px solid var(--border); border-radius:8px; background:var(--surface); margin-top:16px; }
     input[type="text"] { flex:1; min-width:0; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px; color:var(--text); outline:none; }
@@ -294,7 +297,7 @@
           {% endif %}
           {% set find_torrent = cfg.key == "watch" %}
           {% set find_media = cfg.key in ("read", "listen") and not item[cfg.status] %}
-          <div class="item" data-group="{{ grp }}"{% if cfg.key in ("watch", "read", "listen") %} data-title="{{ value }}" data-year="{{ item.year or '' }}" data-category="{{ cat.name }}"{% elif cfg.key == "invest" %} data-invest-anchor="item:{{ cat.name }}:{{ value }}"{% endif %}>
+          <div class="item" data-group="{{ grp }}"{% if cfg.key == "invest" and cat.name|lower not in ("sectors", "industries") %} id="invest-item-{{ value }}"{% endif %}{% if cfg.key in ("watch", "read", "listen") %} data-title="{{ value }}" data-year="{{ item.year or '' }}" data-category="{{ cat.name }}"{% elif cfg.key == "invest" %} data-invest-anchor="item:{{ cat.name }}:{{ value }}"{% endif %}>
             <form method="post" action="/{{ cfg.page }}/toggle-item">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <input type="hidden" name="category" value="{{ cat.name }}">
@@ -467,6 +470,28 @@
   };
 
   restoreView();
+
+  // A link such as /to-invest#invest-item-AAPL (from a Tradility card) lands on that row: open its
+  // group if collapsed, scroll it to the middle of the window and flash it.
+  const revealLinkedRow = () => {
+    let id = '';
+    try { id = decodeURIComponent(location.hash.slice(1)); } catch (_) { return; }
+    if (!id.startsWith('invest-item-')) return;
+    const row = document.getElementById(id);
+    if (!row) return;
+    if (row.classList.contains('group-collapsed')) {
+      const toggle = row.closest('.items')?.querySelector('[data-group-toggle="' + row.dataset.group + '"]');
+      if (toggle) toggle.click();
+    }
+    requestAnimationFrame(() => {
+      row.scrollIntoView({block: 'center'});
+      row.classList.remove('row-flash');
+      void row.offsetWidth;  // restart the animation when the same row is linked twice
+      row.classList.add('row-flash');
+    });
+  };
+  revealLinkedRow();
+  window.addEventListener('hashchange', revealLinkedRow);
 
   const markDirty = control => {
     dirty = true;

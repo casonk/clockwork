@@ -1624,3 +1624,20 @@ def test_to_invest_card_links_follow_a_configured_tradility_url(client, list_fil
     )
     monkeypatch.setenv("CLOCKWORK_TRADILITY_CARD_URL", "https://tradility.example/no-placeholder")
     assert 'href="/to-tradility?ticker=AAA"' in client.get("/to-invest").get_data(as_text=True)
+
+
+def test_to_invest_rows_have_anchors_for_real_tickers_only_and_a_reveal_script(client, list_files):
+    list_files["INVEST_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {"name": "Stocks", "items": [{"ticker": "AAA", "holding": True}]},
+                    {"name": "Sectors", "items": [{"ticker": "TECHNOLOGY", "holding": False}]},
+                ]
+            }
+        )
+    )
+    html = client.get("/to-invest").get_data(as_text=True)
+    assert 'id="invest-item-AAA"' in html
+    assert "invest-item-TECHNOLOGY" not in html  # derived cards are not tickers
+    assert "revealLinkedRow" in html and "hashchange" in html and "group-collapsed" in html
