@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1, user-scalable=yes">
+  <title>Listening — Clockwork</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: var(--font-size); min-height: 100vh; }
+    main { max-width: 1000px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+    h1 { font-size: 18px; }
+    h2 { font-size: 14px; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+    section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+    .error { border-color: var(--red); color: var(--red); }
+    .muted { color: var(--muted); }
+    .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+    .tabs a { color: var(--text); text-decoration: none; border: 1px solid var(--border); border-radius: 99px; padding: 3px 12px; font-size: 13px; }
+    .tabs a[aria-current="page"] { border-color: var(--accent); color: var(--accent); }
+    .stats { display: flex; gap: 28px; flex-wrap: wrap; }
+    .stat b { display: block; font-size: 22px; font-family: var(--mono); }
+    .stat span { color: var(--muted); font-size: 12px; }
+    .lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+    .lists > section { margin: 0; }
+    ol.rank { list-style: none; display: grid; gap: 7px; }
+    ol.rank li { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 13px; }
+    ol.rank .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    ol.rank .name small { color: var(--muted); }
+    ol.rank .n { font-family: var(--mono); color: var(--muted); }
+    ol.rank .bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--border) 60%, transparent); }
+    ol.rank .bar i { display: block; height: 100%; border-radius: 2px; background: color-mix(in srgb, var(--accent) 75%, var(--surface)); }
+    .cols { display: flex; align-items: flex-end; gap: 3px; height: 90px; }
+    .cols.wide { gap: 6px; }
+    .cols.wide .col, .axis.wide span { max-width: 56px; }
+    .cols .col { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; }
+    .cols .col i { display: block; border-radius: 3px 3px 0 0; background: color-mix(in srgb, var(--accent) 75%, var(--surface)); min-height: 1px; }
+    .axis { display: flex; gap: 3px; font-size: 10px; color: var(--muted); margin-top: 4px; }
+    .axis.wide { gap: 6px; }
+    .axis span { flex: 1; text-align: center; overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
+    th { color: var(--muted); font-weight: 600; }
+    details.table-view { margin-top: 10px; font-size: 12px; color: var(--muted); }
+    details.table-view summary { cursor: pointer; }
+    @media (max-width: 600px) { td, th { padding: 4px 4px; } }
+  </style>
+  {% include "_theme_head.html" %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
+</head>
+<body>
+{% include "_site_nav.html" %}
+<main>
+  <h1>Listening</h1>
+  {% if summary is none %}
+  <section class="error" role="alert"><h2>Unavailable</h2>Your listening history is unavailable: {{ error }}</section>
+  {% else %}
+  <nav class="tabs" aria-label="Time window">
+    {% for key, label in windows %}<a href="?window={{ key }}" {% if view.window == key %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
+  </nav>
+  <section>
+    <h2>At a glance</h2>
+    <div class="stats">
+      <div class="stat"><b>{{ '{:,}'.format(view.plays) }}</b><span>plays</span></div>
+      <div class="stat"><b>{{ '{:,.1f}'.format(view.hours) }}</b><span>hours listened</span></div>
+      <div class="stat"><b>{{ '{:,}'.format(summary.plays) }}</b><span>plays on record{% if summary.first %} since {{ summary.first[:10] }}{% endif %}</span></div>
+    </div>
+    <p class="muted" style="margin-top:8px;font-size:12px">Last play {{ summary.last[:16].replace('T', ' ') }} UTC · summary updated {{ summary.generated[:16].replace('T', ' ') }} UTC
+      · sources: {% for k, v in summary.sources.items() %}{{ k }} {{ '{:,}'.format(v) }}{% if not loop.last %}, {% endif %}{% else %}none{% endfor %}</p>
+  </section>
+  <div class="lists">
+    <section>
+      <h2>Top artists</h2>
+      <ol class="rank">{% for r in view.artists %}<li><span class="name">{{ r.name }}</span><span class="n">{{ r.plays }}</span><span class="bar"><i style="width:{{ r.pct }}%"></i></span></li>{% else %}<li class="muted">Nothing in this window.</li>{% endfor %}</ol>
+    </section>
+    <section>
+      <h2>Top tracks</h2>
+      <ol class="rank">{% for r in view.tracks %}<li><span class="name">{{ r.name }} <small>{{ r.artist }}</small></span><span class="n">{{ r.plays }}</span><span class="bar"><i style="width:{{ r.pct }}%"></i></span></li>{% else %}<li class="muted">Nothing in this window.</li>{% endfor %}</ol>
+    </section>
+    <section>
+      <h2>Top albums</h2>
+      <ol class="rank">{% for r in view.albums %}<li><span class="name">{{ r.name }} <small>{{ r.artist }}</small></span><span class="n">{{ r.plays }}</span><span class="bar"><i style="width:{{ r.pct }}%"></i></span></li>{% else %}<li class="muted">Nothing in this window.</li>{% endfor %}</ol>
+    </section>
+  </div>
+  <section>
+    <h2>When you listen (all time, local time)</h2>
+    <div class="cols" role="img" aria-label="Plays by hour of day">{% for b in view.hours_of_day %}<div class="col" title="{{ b.label }}:00 — {{ b.value }} plays"><i style="height:{{ b.pct }}%"></i></div>{% endfor %}</div>
+    <div class="axis" aria-hidden="true">{% for b in view.hours_of_day %}<span>{{ b.label if (b.label | int) % 6 == 0 else '' }}</span>{% endfor %}</div>
+    <div class="cols wide" style="margin-top:14px" role="img" aria-label="Plays by weekday">{% for b in view.weekdays %}<div class="col" title="{{ b.label }} — {{ b.value }} plays"><i style="height:{{ b.pct }}%"></i></div>{% endfor %}</div>
+    <div class="axis wide" aria-hidden="true">{% for b in view.weekdays %}<span>{{ b.label }}</span>{% endfor %}</div>
+    <details class="table-view"><summary>Table view</summary>
+      <table><tr><th>Hour</th><th>Plays</th></tr>{% for b in view.hours_of_day %}<tr><td>{{ b.label }}:00</td><td>{{ b.value }}</td></tr>{% endfor %}</table>
+      <table style="margin-top:8px"><tr><th>Weekday</th><th>Plays</th></tr>{% for b in view.weekdays %}<tr><td>{{ b.label }}</td><td>{{ b.value }}</td></tr>{% endfor %}</table>
+    </details>
+  </section>
+  <section>
+    <h2>By month</h2>
+    <div class="cols wide" role="img" aria-label="Plays by month">{% for b in view.months %}<div class="col" title="{{ b.label }} — {{ b.value }} plays"><i style="height:{{ b.pct }}%"></i></div>{% endfor %}</div>
+    <div class="axis wide" aria-hidden="true">{% for b in view.months %}<span>{{ b.label[2:] if loop.first or b.label.endswith('-01') or b.label.endswith('-07') else '' }}</span>{% endfor %}</div>
+    <details class="table-view"><summary>Table view</summary>
+      <table><tr><th>Month</th><th>Plays</th></tr>{% for b in view.months %}<tr><td>{{ b.label }}</td><td>{{ b.value }}</td></tr>{% endfor %}</table>
+    </details>
+  </section>
+  <section>
+    <h2>Recently played</h2>
+    <table><tr><th>When (UTC)</th><th>Track</th><th>Artist</th></tr>
+      {% for r in view.recent %}<tr><td class="muted">{{ r.played_at[5:16].replace('T', ' ') }}</td><td>{{ r.name }}</td><td class="muted">{{ r.artist }}</td></tr>{% else %}<tr><td colspan="3" class="muted">No plays yet.</td></tr>{% endfor %}
+    </table>
+  </section>
+  {% endif %}
+</main>
+</body>
+</html>

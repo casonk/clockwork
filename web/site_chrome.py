@@ -45,6 +45,7 @@ MEDIA_MENU = (
     ("Library", "🎬", "/library"),
     ("To Read", "📚", "/to-read"),
     ("To Listen", "🎧", "/to-listen"),
+    ("Listening", "🎵", "/listening"),
 )
 SERVICES_MENU = (
     ("Clockwork", "⏰", "/"),
