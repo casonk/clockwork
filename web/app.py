@@ -1813,6 +1813,80 @@ def ecu_page():
     return render_template("ecu.html", ecu=document, error=error)
 
 
+LISTENING_FILE = Path(
+    os.environ.get(
+        "CLOCKWORK_TAPE_DECK_FILE", Path.home() / ".local" / "share" / "tape-deck" / "summary.json"
+    )
+)
+LISTENING_WINDOWS = (("all", "All time"), ("365d", "Last year"), ("30d", "Last 30 days"))
+_WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def _listening_summary() -> tuple[dict | None, str]:
+    """tape-deck's summary.json as a document, or (None, why it is unavailable)."""
+    try:
+        document = json.loads(LISTENING_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None, "no summary yet: run `tape-deck poll --summary` (see the tape-deck repo)"
+    except (OSError, ValueError) as exc:
+        return None, f"the summary could not be read ({type(exc).__name__})"
+    if not isinstance(document, dict) or "windows" not in document:
+        return None, "the summary is not a tape-deck summary"
+    return document, ""
+
+
+def _bars(values: list[tuple[str, int]]) -> list[dict]:
+    """Labelled counts with their height as a percentage of the largest."""
+    peak = max((v for _, v in values), default=0) or 1
+    return [
+        {"label": label, "value": value, "pct": round(100 * value / peak, 1)}
+        for label, value in values
+    ]
+
+
+def _listening_view(document: dict, window: str) -> dict:
+    chosen = document["windows"].get(window) or document["windows"]["all"]
+
+    def ranked(rows: list[dict]) -> list[dict]:
+        peak = max((r["plays"] for r in rows), default=0) or 1
+        return [{**r, "pct": round(100 * r["plays"] / peak, 1)} for r in rows]
+
+    return {
+        "window": window if window in document["windows"] else "all",
+        "plays": chosen["plays"],
+        "hours": chosen["hours"],
+        "tracks": ranked(chosen["tracks"]),
+        "artists": ranked(chosen["artists"]),
+        "albums": ranked(chosen["albums"]),
+        "hours_of_day": _bars([(str(h), n) for h, n in enumerate(document.get("by_hour", []))]),
+        "weekdays": _bars(list(zip(_WEEKDAYS, document.get("by_weekday", []), strict=False))),
+        "months": _bars(list(document.get("by_month", {}).items())),
+        "recent": document.get("recent", [])[:15],
+    }
+
+
+@app.get("/api/listening")
+def api_listening():
+    document, error = _listening_summary()
+    if document is None:
+        return jsonify({"error": error}), 503
+    return jsonify(document)
+
+
+@app.get("/listening")
+def listening_page():
+    document, error = _listening_summary()
+    window = request.args.get("window", "all")
+    view = _listening_view(document, window) if document else None
+    return render_template(
+        "listening.html",
+        summary=document,
+        view=view,
+        error=error,
+        windows=LISTENING_WINDOWS,
+    )
+
+
 _SCHEDULE_UNIT_PROPS = ("Id", "ActiveState", "Result", "ExecMainStatus")
 
 
@@ -7642,6 +7716,16 @@ def _load_portal_groups(apply_labels: bool = True) -> list[tuple[str, list[dict]
             "hostname": "",
             "access_mode": "shared-mtls",
             "icon": "📚",
+        }
+    )
+    groups["Clockwork"].append(
+        {
+            "name": "clockwork-listening",
+            "display": "Listening",
+            "url": "/listening",
+            "hostname": "",
+            "access_mode": "shared-mtls",
+            "icon": "🎵",
         }
     )
     groups["Clockwork"].append(
