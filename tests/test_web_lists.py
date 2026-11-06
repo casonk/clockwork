@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import re
 import sys
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
@@ -2048,3 +2049,71 @@ def test_a_coin_row_links_to_its_usd_pair_card_when_a_stock_owns_the_symbol(clie
     assert "/to-tradility?ticker=T-USD" in html  # the coin's own card
     assert "/to-tradility?ticker=ETH" in html  # a coin nothing collides with keeps its plain symbol
     assert html.count('/to-tradility?ticker=T"') == 1  # AT&T's link is the plain symbol, once
+
+
+def _portal(*groups):
+    return [
+        (
+            name,
+            [
+                {
+                    "name": n,
+                    "display": d,
+                    "url": "/",
+                    "hostname": h,
+                    "access_mode": "shared-mtls",
+                    "icon": "x",
+                }
+                for n, d, h in cards
+            ],
+        )
+        for name, cards in groups
+    ]
+
+
+def test_the_home_page_shows_one_tradility_card_and_the_service_stays_in_the_menu(
+    client, monkeypatch
+):
+    groups = _portal(
+        ("Clockwork", [("clockwork-to-tradility", "Tradility", "")]),
+        (
+            "Tradility",
+            [
+                (
+                    "tradility-web",
+                    "Tradility technical analysis and trading dashboard",
+                    "tradility.clockwork.internal",
+                )
+            ],
+        ),
+        ("Other", [("auto-pass", "Auto Pass", "auto-pass.internal")]),
+    )
+    monkeypatch.setattr(web_app, "_load_portal_groups", lambda apply_labels=True: groups)
+    html = client.get("/home").get_data(as_text=True)
+    cards = re.findall(r'<span class="card-name">([^<]*)</span>', html)
+    assert cards.count("Tradility") == 1  # Clockwork's own page card stays
+    assert not any("trading dashboard" in c for c in cards)  # the standalone service's card is gone
+    assert "Auto Pass" in cards  # other services are untouched
+    assert (
+        "Tradility technical analysis and trading dashboard" in html
+    )  # still in the Services menu
+    # the Services menu is fed by the same groups, not by the Home filter
+    pinned = web_app._top_bar_services(
+        [("Tradility", [{"name": "tradility-web", "top_bar": True}])]
+    )
+    assert [c["name"] for c in pinned] == ["tradility-web"]
+
+
+def test_home_groups_drop_hidden_services_and_empty_groups_and_can_be_switched_off(monkeypatch):
+    groups = _portal(
+        ("Tradility", [("tradility-web", "T", "h")]), ("Other", [("a", "A", "h"), ("b", "B", "h")])
+    )
+    assert [g for g, _ in web_app._home_groups(groups, {"tradility-web"})] == ["Other"]
+    assert [c["name"] for _, cs in web_app._home_groups(groups, {"a"}) for c in cs] == [
+        "tradility-web",
+        "b",
+    ]
+    monkeypatch.setenv("CLOCKWORK_HOME_HIDE_SERVICES", "")
+    assert web_app._home_hidden_services() == set()  # an empty setting shows every card
+    monkeypatch.delenv("CLOCKWORK_HOME_HIDE_SERVICES")
+    assert web_app._home_hidden_services() == {"tradility-web"}
