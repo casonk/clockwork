@@ -1642,3 +1642,75 @@ def test_to_invest_rows_have_anchors_for_real_tickers_only_and_a_reveal_script(c
     assert "invest-item-TECHNOLOGY" not in html  # derived cards are not tickers
     assert "revealLinkedRow" in html and "hashchange" in html and "group-collapsed" in html
     assert "scroll-margin-top" in html and "setTimeout(revealLinkedRow, 60)" in html
+
+
+def _seed_duplicate_btc(client, list_files):
+    """BTC is a Schwab ETF and a Binance coin: one ticker, two rows, two categories."""
+    list_files["INVEST_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {
+                        "name": "ETFs",
+                        "items": [{"ticker": "BTC", "holding": False, "target_pct": "10"}],
+                    },
+                    {
+                        "name": "Crypto",
+                        "items": [
+                            {"ticker": "BTC", "holding": False, "target_pct": "30"},
+                            {"ticker": "ETH", "holding": False, "target_pct": "60"},
+                        ],
+                    },
+                ]
+            }
+        )
+    )
+    list_files["HOLDINGS_AGGREGATE_FILE"].write_text(
+        json.dumps(
+            {
+                "holdings": [
+                    {
+                        "ticker": "BTC",
+                        "asset_class": "ETFs",  # the export labels a merged row by its first account
+                        "total_ending_value": 1000,
+                        "accounts": [
+                            {"asset_class": "ETFs", "ending_value": 200},
+                            {"asset_class": "Crypto", "ending_value": 800},
+                        ],
+                    },
+                    {"ticker": "ETH", "asset_class": "Crypto", "total_ending_value": 1000},
+                ]
+            }
+        )
+    )
+    csrf = _csrf(client, "/api/invest")
+    client.post("/to-invest/sync-holdings", data={"csrf_token": csrf})
+    return csrf
+
+
+def test_a_ticker_in_two_categories_splits_its_holding_by_account_class(client, list_files):
+    _seed_duplicate_btc(client, list_files)
+    etfs, _ = _cards(client, "ETFs")
+    crypto, _ = _cards(client, "Crypto")
+    # portfolio 2000: BTC ETF $200 = 10%, BTC coin $800 = 40%, ETH $1000 = 50%
+    assert etfs["BTC"]["allocation_pct"] == "10" and etfs["BTC"]["holding"] is True
+    assert crypto["BTC"]["allocation_pct"] == "40"
+    assert crypto["ETH"]["allocation_pct"] == "50"
+
+
+def test_each_row_of_a_duplicated_ticker_keeps_its_own_target(client, list_files):
+    csrf = _seed_duplicate_btc(client, list_files)
+    before = {"etf": _targets(client, "ETFs")["BTC"], "coin": _targets(client, "Crypto")["BTC"]}
+    assert round(before["etf"] + before["coin"] + _targets(client, "Crypto")["ETH"], 3) == 100
+    _save(client, csrf, [{"category": "Crypto", "ticker": "BTC", "target_pct": "50"}])
+    assert _targets(client, "Crypto")["BTC"] == 50  # the coin row moved
+    assert _targets(client, "ETFs")["BTC"] < before["etf"]  # the ETF row only rescaled around it
+    total = _targets(client, "ETFs")["BTC"] + sum(_targets(client, "Crypto").values())
+    assert round(total, 3) == 100  # both BTC rows are counted once each
+
+
+def test_a_duplicated_ticker_gets_one_anchor_not_two(client, list_files):
+    _seed_duplicate_btc(client, list_files)
+    html = client.get("/to-invest").get_data(as_text=True)
+    assert html.count('id="invest-item-BTC"') == 1
+    assert html.count('id="invest-item-ETH"') == 1
