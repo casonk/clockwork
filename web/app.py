@@ -4625,16 +4625,17 @@ def _rebalance_invest_targets(
     _summary, totals = _invest_allocation_summary(data)
 
     leaves: list[dict] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     for category in data["categories"]:
         if _is_invest_derived(category):
             continue
         info = totals.get(category["name"], {}).get("item_targets", {})
         for item in category["items"]:
             ticker = str(item.get("ticker") or "").upper().strip()
-            if not ticker or ticker in seen:
+            # one leaf per row: a ticker may sit in two categories (BTC the ETF and BTC the coin)
+            if not ticker or (category["name"].casefold(), ticker) in seen:
                 continue
-            seen.add(ticker)
+            seen.add((category["name"].casefold(), ticker))
             sector, industry = _invest_labels(ticker, classes, industry_sectors, crypto)
             try:
                 current = float(item.get("allocation_pct") or 0)
@@ -4643,6 +4644,7 @@ def _rebalance_invest_targets(
             leaves.append(
                 {
                     "item": item,
+                    "category": category["name"].casefold(),
                     "ticker": ticker,
                     "sector": sector,
                     "industry": industry,
@@ -4675,7 +4677,14 @@ def _rebalance_invest_targets(
         elif key == "industries":
             level, members = 1, [leaf for leaf in leaves if leaf["industry"] == label]
         else:
-            level, members = 2, [leaf for leaf in leaves if leaf["ticker"] == label]
+            level, members = (
+                2,
+                [
+                    leaf
+                    for leaf in leaves
+                    if leaf["ticker"] == label and leaf["category"] == category.strip().casefold()
+                ],
+            )
         if not members:
             return [f"no listed tickers fall under {label.title()}"]
         if value is None:
@@ -4787,15 +4796,37 @@ def _merge_invest_holdings(data: dict, holdings: list) -> tuple[int, int, int, i
     """
 
     known: dict[str, dict] = {}
+    homes: dict[str, list[tuple[str, dict]]] = {}  # every row a ticker has, one per category
     for category in data["categories"]:
         if _is_invest_derived(category):
             continue
         for item in category["items"]:
             ticker = str(item.get("ticker") or "").upper().strip()
-            if ticker and ticker not in known:
-                known[ticker] = item
+            if ticker:
+                homes.setdefault(ticker, []).append((category["name"], item))
+                known.setdefault(ticker, item)
 
     portfolio_value, ticker_values = _invest_ticker_values(holdings)
+    # A ticker can be two instruments (BTC is a Schwab ETF and a Binance coin) and sit in two
+    # categories. The export merges them into one row but keeps each account's asset class, so
+    # a duplicated ticker's value is split between its rows by the category that class maps to.
+    class_values: dict[tuple[str, str], float] = {}
+    for holding in holdings:
+        if not isinstance(holding, dict):
+            continue
+        name = str(holding.get("ticker") or "").upper().strip()
+        if len(homes.get(name, [])) < 2:
+            continue
+        for account in holding.get("accounts") or []:
+            try:
+                value = float(account.get("ending_value"))
+            except (AttributeError, TypeError, ValueError):
+                continue
+            category = INVEST_ASSET_CLASS_CATEGORIES.get(
+                str(account.get("asset_class") or "").strip(), "Stocks"
+            )
+            if math.isfinite(value):
+                class_values[(name, category)] = class_values.get((name, category), 0.0) + value
     allocations = (
         {
             ticker: _format_invest_percentage(value / portfolio_value * 100)
@@ -4806,16 +4837,25 @@ def _merge_invest_holdings(data: dict, holdings: list) -> tuple[int, int, int, i
     )
 
     allocation_changes = 0
-    for ticker, item in known.items():
-        desired = allocations.get(ticker, "")
-        current = str(item.get("allocation_pct") or "")
-        if desired:
-            if current != desired:
-                item["allocation_pct"] = desired
+    for ticker, rows in homes.items():
+        for category_name, item in rows:
+            if len(rows) > 1 and portfolio_value > 0:
+                value = class_values.get((ticker, category_name), 0.0)
+                desired = (
+                    _format_invest_percentage(value / portfolio_value * 100) if value > 0 else ""
+                )
+                if value > 0:
+                    item["holding"] = True
+            else:
+                desired = allocations.get(ticker, "")
+            current = str(item.get("allocation_pct") or "")
+            if desired:
+                if current != desired:
+                    item["allocation_pct"] = desired
+                    allocation_changes += 1
+            elif "allocation_pct" in item:
+                item.pop("allocation_pct", None)
                 allocation_changes += 1
-        elif "allocation_pct" in item:
-            item.pop("allocation_pct", None)
-            allocation_changes += 1
 
     marked = added = named = skipped = 0
     for holding in holdings:
