@@ -56,6 +56,8 @@
     .check-btn:hover { border-color:var(--muted); }
     .item-body { flex:1; min-width:0; display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
     .item-title { font-weight:600; overflow-wrap:anywhere; }
+    .dup-badge { margin-left:6px; padding:1px 6px; border:1px dashed var(--accent); border-radius:4px; color:var(--accent); font-size:10px; font-weight:600; white-space:nowrap; }
+    .dup-badge a { color:inherit; }
     .item-link { margin-left:6px; text-decoration:none; font-size:12px; opacity:.75; }
     .item-link:hover, .item-link:focus-visible { opacity:1; }
     .item-title.done { color:var(--muted); text-decoration:line-through; }
@@ -256,7 +258,6 @@
   </div>
   {% endif %}
 
-  {% set anchored = namespace(seen=[]) %}
   {% for cat in data.categories %}
     {% set active = cat["items"] | rejectattr(cfg.status) | list %}
     {% set completed = cat["items"] | selectattr(cfg.status) | list %}
@@ -299,7 +300,7 @@
           {% endif %}
           {% set find_torrent = cfg.key == "watch" %}
           {% set find_media = cfg.key in ("read", "listen") and not item[cfg.status] %}
-          <div class="item" data-group="{{ grp }}"{% if cfg.key == "invest" and cat.name|lower not in ("sectors", "industries") and value not in anchored.seen %} id="invest-item-{{ value }}"{% set _ = anchored.seen.append(value) %}{% endif %}{% if cfg.key in ("watch", "read", "listen") %} data-title="{{ value }}" data-year="{{ item.year or '' }}" data-category="{{ cat.name }}"{% elif cfg.key == "invest" %} data-invest-anchor="item:{{ cat.name }}:{{ value }}"{% endif %}>
+          <div class="item" data-group="{{ grp }}"{% if cfg.key == "invest" and invest_anchors.get(cat.name ~ "|" ~ value) %} id="{{ invest_anchors[cat.name ~ "|" ~ value] }}"{% endif %}{% if cfg.key in ("watch", "read", "listen") %} data-title="{{ value }}" data-year="{{ item.year or '' }}" data-category="{{ cat.name }}"{% elif cfg.key == "invest" %} data-invest-anchor="item:{{ cat.name }}:{{ value }}"{% endif %}>
             <form method="post" action="/{{ cfg.page }}/toggle-item">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <input type="hidden" name="category" value="{{ cat.name }}">
@@ -322,6 +323,7 @@
             {% endif %}
             <div class="item-body">
               <span class="item-title {% if item[cfg.status] %}done{% endif %}">{{ value }}</span>
+              {% if cfg.key == "invest" and invest_duplicates.get(value) %}<span class="dup-badge" title="{{ value }} is listed in {{ invest_duplicates[value]|map('first')|join(' and ') }}: each row keeps its own target and its share of the holding">⧉ also in {% for other, anchor in invest_duplicates[value] if other != cat.name %}<a href="#{{ anchor }}">{{ other }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</span>{% endif %}
               {% if cfg.key == "invest" and value|upper in tradility_cards %}<a class="item-link" href="{{ tradility_card_url|replace('{ticker}', value|urlencode) }}" title="Open {{ value }} in Tradility" aria-label="Open {{ value }} in Tradility">📈</a>{% endif %}
               {% if item.year %}<span class="item-meta">{{ item.year }}</span>{% endif %}
               {% if watch_badges and watch_badges.get(value) %}<span class="item-meta watch-badge" title="Logged by the library viewer">{{ watch_badges[value] }}</span>{% endif %}
