@@ -1318,7 +1318,7 @@ def test_sync_builds_sector_and_industry_cards_from_holdings(client, list_files)
     assert sectors["ENERGY"]["holding"] is False
     # Crypto is its own industry and rolls up once, into Financials.
     assert sectors["FINANCIALS"]["allocation_pct"] == "20"
-    assert sectors["FINANCIALS"]["name"] == "XYZ 20%"
+    assert sectors["FINANCIALS"]["name"] == "XYZ-USD 20%"  # a coin is named as the coin
     assert "UNCLASSIFIED" not in sectors
     industries, _ = _cards(client, "Industries")
     assert industries["SEMICONDUCTORS"]["allocation_pct"] == "50"
@@ -1716,17 +1716,53 @@ def test_a_duplicated_ticker_gets_one_anchor_not_two(client, list_files):
     assert html.count('id="invest-item-ETH"') == 1
 
 
-def test_duplicated_tickers_are_marked_in_to_invest_with_links_to_their_other_rows(
+def test_a_symbol_shared_by_two_instruments_gets_a_neutral_tag_with_links_not_a_duplicate_badge(
     client, list_files
 ):
-    _seed_duplicate_btc(client, list_files)
+    _seed_duplicate_btc(client, list_files)  # BTC the Schwab ETF (ETFs) and BTC the coin (Crypto)
     html = client.get("/to-invest").get_data(as_text=True)
-    # the ETFs row points at the Crypto row and the Crypto row at the ETFs row
-    assert html.count('class="dup-badge"') == 2
+    assert 'class="dup-badge"' not in html  # different instruments are not duplicates
+    assert html.count('class="sym-tag"') == 2
     assert 'href="#invest-item-BTC--crypto">Crypto</a>' in html
     assert 'href="#invest-item-BTC">ETFs</a>' in html
     assert 'id="invest-item-BTC"' in html and 'id="invest-item-BTC--crypto"' in html
-    # only the two BTC rows carry the badge; ETH (a single row) does not
+
+
+def test_the_same_instrument_in_two_categories_is_a_marked_duplicate_counted_once(
+    client, list_files
+):
+    list_files["INVEST_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {"name": "Stocks", "items": [{"ticker": "VOO", "holding": True}]},
+                    {"name": "ETFs", "items": [{"ticker": "VOO", "holding": True}]},
+                ]
+            }
+        )
+    )
+    list_files["HOLDINGS_AGGREGATE_FILE"].write_text(
+        json.dumps(
+            {
+                "holdings": [
+                    {
+                        "ticker": "VOO",
+                        "instrument_id": "VOO",
+                        "asset_class": "ETFs",
+                        "total_ending_value": 500,
+                    }
+                ]
+            }
+        )
+    )
+    csrf = _csrf(client, "/api/invest")
+    client.post("/to-invest/sync-holdings", data={"csrf_token": csrf})
+    html = client.get("/to-invest").get_data(as_text=True)
+    assert html.count('class="dup-badge"') == 2 and "duplicate · also in" in html
+    assert 'class="sym-tag"' not in html
+    stocks, _ = _cards(client, "Stocks")
+    etfs, _ = _cards(client, "ETFs")
+    assert stocks["VOO"]["allocation_pct"] == "100" and "allocation_pct" not in etfs["VOO"]
 
 
 def test_a_single_ticker_has_no_duplicate_badge(client, list_files):
@@ -1900,3 +1936,115 @@ def test_another_custodians_label_goes_to_the_stock_or_fund_row_not_nowhere(clie
     )
     assert _cards(client, "ETFs")[0]["BTC"]["allocation_pct"] == "20"
     assert _cards(client, "Crypto")[0]["BTC"]["allocation_pct"] == "80"
+
+
+T_EXPORT = {
+    "holdings": [
+        {  # AT&T and the Threshold coin are separate instruments in the export
+            "ticker": "T",
+            "instrument_id": "T",
+            "asset_class": "Stocks",
+            "description": "AT&T INC",
+            "total_ending_value": 990,
+        },
+        {
+            "ticker": "T",
+            "instrument_id": "crypto:T",
+            "asset_class": "Crypto",
+            "total_ending_value": 10,
+        },
+    ]
+}
+
+
+def test_att_and_the_threshold_coin_are_two_rows_and_not_duplicates(client, list_files):
+    html = _sync_holdings(
+        client,
+        list_files,
+        [
+            {"name": "Stocks", "items": [{"ticker": "T", "holding": True}]},
+            {"name": "Crypto", "items": []},
+        ],
+        T_EXPORT["holdings"],
+    )
+    assert "1 new tickers added" in html  # the coin gets its own row, the stock keeps its own
+    assert _cards(client, "Stocks")[0]["T"]["allocation_pct"] == "99"
+    assert _cards(client, "Crypto")[0]["T"]["allocation_pct"] == "1"
+    page = client.get("/to-invest").get_data(as_text=True)
+    assert 'class="dup-badge"' not in page and page.count('class="sym-tag"') == 2
+
+
+def test_a_stock_is_not_labelled_as_crypto_because_a_coin_shares_its_symbol(client, list_files):
+    list_files["INVEST_CLASSIFICATIONS_FILE"].write_text(
+        "symbol,cusip,sector,industry,sub_industry\nT,1,Communication Services,Telecom Services,\n"
+    )
+    _sync_holdings(
+        client,
+        list_files,
+        [
+            {"name": "Stocks", "items": [{"ticker": "T", "holding": True}]},
+            {"name": "Crypto", "items": []},
+        ],
+        T_EXPORT["holdings"],
+    )
+    sectors, _ = _cards(client, "Sectors")
+    industries, _ = _cards(client, "Industries")
+    assert sectors["COMMUNICATION SERVICES"]["allocation_pct"] == "99"  # AT&T
+    assert sectors["FINANCIALS"]["allocation_pct"] == "1"  # only the coin
+    assert industries["TELECOM SERVICES"]["name"] == "T 99%"
+    assert industries["CRYPTO"]["name"] == "T-USD 1%"
+
+
+def test_tradility_sets_the_stock_target_for_t_and_the_coin_target_for_t_usd(client, list_files):
+    _sync_holdings(
+        client,
+        list_files,
+        [
+            {"name": "Stocks", "items": [{"ticker": "T", "holding": True, "target_pct": "50"}]},
+            {"name": "Crypto", "items": [{"ticker": "T", "holding": True, "target_pct": "50"}]},
+        ],
+        T_EXPORT["holdings"],
+    )
+    with client.session_transaction() as session:
+        session["_csrf_token"] = "tok"
+    client.environ_base["HTTP_X_CSRF_TOKEN"] = "tok"
+    assert client.post("/api/tradility-targets/T-USD", json={"target_pct": "20"}).status_code == 200
+    assert _targets(client, "Crypto")["T"] == 20 and _targets(client, "Stocks")["T"] == 80
+    assert client.post("/api/tradility-targets/T", json={"target_pct": "70"}).status_code == 200
+    assert _targets(client, "Stocks")["T"] == 70 and _targets(client, "Crypto")["T"] == 30
+    rows = client.get("/api/tradility-targets").get_json()["targets"]
+    assert rows["T"]["category"] == "Stocks" and rows["T-USD"]["category"] == "Crypto"
+
+
+def test_a_coin_row_links_to_its_usd_pair_card_when_a_stock_owns_the_symbol(client, list_files):
+    list_files["TRADILITY_ANALYSIS_FILE"].write_text(
+        json.dumps(
+            {
+                "tickers": [
+                    {"ticker": "T", "price_history": [{"date": "d", "close": 1}]},
+                    {"ticker": "T-USD", "price_history": [{"date": "d", "close": 1}]},
+                    {"ticker": "ETH", "price_history": [{"date": "d", "close": 1}]},
+                ]
+            }
+        )
+    )
+    list_files["INVEST_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {"name": "Stocks", "items": [{"ticker": "T", "holding": True}]},
+                    {
+                        "name": "Crypto",
+                        "items": [
+                            {"ticker": "T", "holding": True},
+                            {"ticker": "ETH", "holding": True},
+                        ],
+                    },
+                ]
+            }
+        )
+    )
+    html = client.get("/to-invest").get_data(as_text=True)
+    assert "/to-tradility?ticker=T-USD" in html  # the coin's own card
+    assert "/to-tradility?ticker=ETH" in html  # a coin nothing collides with keeps its plain symbol
+    assert html.count('/to-tradility?ticker=T"') == 1  # AT&T's link is the plain symbol, once
