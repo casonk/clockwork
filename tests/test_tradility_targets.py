@@ -188,3 +188,58 @@ def test_the_target_bar_is_redrawn_once_the_open_orders_are_known():
     assert HTML.index("refreshTargetCard();\n    await loadTradeStatus();") > HTML.index(
         "detailOrders = data;"
     )
+
+
+def test_setting_a_target_from_tradility_rebalances_and_rolls_up_like_to_invest(client, list_files):
+    list_files["INVEST_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {
+                        "name": "Stocks",
+                        "items": [
+                            {"ticker": "AAA", "holding": True, "target_pct": "40"},
+                            {"ticker": "BBB", "holding": True, "target_pct": "40"},
+                            {"ticker": "CCC", "holding": True, "target_pct": "20"},
+                        ],
+                    },
+                    {"name": "Sectors", "items": [{"ticker": "TECHNOLOGY"}, {"ticker": "ENERGY"}]},
+                ]
+            }
+        )
+    )
+    list_files["HOLDINGS_AGGREGATE_FILE"].write_text(
+        json.dumps({"holdings": [{"ticker": "AAA", "total_ending_value": 100}]})
+    )
+    list_files["INVEST_CLASSIFICATIONS_FILE"].write_text(
+        "symbol,cusip,sector,industry,sub_industry\n"
+        "AAA,1,Technology,Software,\nBBB,2,Technology,Software,\nCCC,3,Energy,Oil & Gas,\n"
+    )
+    with client.session_transaction() as session:
+        session["_csrf_token"] = "tok"
+    client.environ_base["HTTP_X_CSRF_TOKEN"] = "tok"
+
+    reply = client.post("/api/tradility-targets/AAA", json={"target_pct": "60"})
+    assert reply.status_code == 200 and reply.get_json()["target"]["target"] == 60
+
+    cards = {
+        c["name"]: {i["ticker"]: float(i.get("target_pct") or 0) for i in c["items"]}
+        for c in json.loads(list_files["INVEST_LIST_FILE"].read_text())["categories"]
+    }
+    assert cards["Stocks"]["AAA"] == 60
+    assert round(sum(cards["Stocks"].values()), 3) == 100  # the others rescaled around it
+    assert abs(cards["Stocks"]["BBB"] - 2 * cards["Stocks"]["CCC"]) < 1e-3  # still 40:20
+    assert (
+        abs(cards["Sectors"]["TECHNOLOGY"] - cards["Stocks"]["AAA"] - cards["Stocks"]["BBB"]) < 1e-3
+    )
+    assert round(cards["Sectors"]["TECHNOLOGY"] + cards["Sectors"]["ENERGY"], 3) == 100
+
+
+def test_a_tradility_target_that_cannot_be_placed_is_refused_without_saving(client, list_files):
+    setup(list_files, client)
+    before = list_files["INVEST_LIST_FILE"].read_text()
+    reply = client.post(
+        "/api/tradility-targets/NEWCO", json={"target_pct": "5"}
+    )  # no category chosen
+    assert reply.status_code == 400
+    assert list_files["INVEST_LIST_FILE"].read_text() == before
