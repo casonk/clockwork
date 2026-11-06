@@ -22,6 +22,17 @@ def test_home_card_badges_start_on_their_own_line():
     assert "align-items: flex-start;" in card_footer
 
 
+def test_home_cards_open_in_current_tab_with_explicit_new_tab_controls():
+    template = HOME_TEMPLATE.read_text()
+
+    assert '<a href="{{ card.url }}" class="card-link">' in template
+    assert 'class="card-new-tab" target="_blank" rel="noopener noreferrer"' in template
+    assert 'aria-label="Open {{ card.display }} in a new tab"' in template
+    assert '<a href="{{ card.url }}" class="btn-action btn-login">Browser</a>' in template
+    assert 'class="btn-action btn-login" target="_blank"' not in template
+    assert '{% if not is_relative %}target="_blank"' not in template
+
+
 def test_standalone_pages_share_site_navigation():
     templates = HOME_TEMPLATE.parent
     for path in templates.glob("*.html"):
