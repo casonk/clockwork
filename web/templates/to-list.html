@@ -102,6 +102,7 @@
     .group-toggle::before { content:"\25BE "; }
     .group-toggle[aria-expanded="false"]::before { content:"\25B8 "; }
     .group-collapsed { display:none !important; }
+    .item { scroll-margin-top:96px; }
     .item.row-flash { animation:row-flash 2.4s ease-out; }
     @keyframes row-flash { 0%, 40% { box-shadow:inset 0 0 0 2px var(--accent); background:var(--surface3); } 100% { box-shadow:inset 0 0 0 2px transparent; } }
     @media (prefers-reduced-motion: reduce) { .item.row-flash { animation:none; box-shadow:inset 0 0 0 2px var(--accent); } }
@@ -490,7 +491,10 @@
       row.classList.add('row-flash');
     });
   };
-  revealLinkedRow();
+  // The browser's own jump to a #fragment runs once the page has loaded, after this script, and would
+  // undo the centring, so wait for the load (and a beat after it) before revealing the row.
+  if (document.readyState === 'complete') revealLinkedRow();
+  else window.addEventListener('load', () => setTimeout(revealLinkedRow, 60));
   window.addEventListener('hashchange', revealLinkedRow);
 
   const markDirty = control => {
