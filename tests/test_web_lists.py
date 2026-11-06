@@ -1714,3 +1714,102 @@ def test_a_duplicated_ticker_gets_one_anchor_not_two(client, list_files):
     html = client.get("/to-invest").get_data(as_text=True)
     assert html.count('id="invest-item-BTC"') == 1
     assert html.count('id="invest-item-ETH"') == 1
+
+
+def test_duplicated_tickers_are_marked_in_to_invest_with_links_to_their_other_rows(
+    client, list_files
+):
+    _seed_duplicate_btc(client, list_files)
+    html = client.get("/to-invest").get_data(as_text=True)
+    # the ETFs row points at the Crypto row and the Crypto row at the ETFs row
+    assert html.count('class="dup-badge"') == 2
+    assert 'href="#invest-item-BTC--crypto">Crypto</a>' in html
+    assert 'href="#invest-item-BTC">ETFs</a>' in html
+    assert 'id="invest-item-BTC"' in html and 'id="invest-item-BTC--crypto"' in html
+    # only the two BTC rows carry the badge; ETH (a single row) does not
+
+
+def test_a_single_ticker_has_no_duplicate_badge(client, list_files):
+    list_files["INVEST_LIST_FILE"].write_text(
+        json.dumps(
+            {"categories": [{"name": "Stocks", "items": [{"ticker": "AAA", "holding": False}]}]}
+        )
+    )
+    html = client.get("/to-invest").get_data(as_text=True)
+    assert 'class="dup-badge"' not in html
+
+
+def test_sync_adds_the_missing_row_when_a_holding_spans_two_categories(client, list_files):
+    list_files["INVEST_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {"name": "Crypto", "items": [{"ticker": "BTC", "holding": True}]},
+                    {"name": "ETFs", "items": []},
+                ]
+            }
+        )
+    )
+    list_files["HOLDINGS_AGGREGATE_FILE"].write_text(
+        json.dumps(
+            {
+                "holdings": [
+                    {
+                        "ticker": "BTC",
+                        "description": "Grayscale Bitcoin Mini Trust ETF",
+                        "asset_class": "ETFs",
+                        "total_ending_value": 1000,
+                        "accounts": [
+                            {"asset_class": "ETFs", "ending_value": 250},
+                            {"asset_class": "Crypto", "ending_value": 750},
+                        ],
+                    },
+                    # a ticker held in one class only never gets a second row
+                    {
+                        "ticker": "VOO",
+                        "asset_class": "ETFs",
+                        "total_ending_value": 1000,
+                        "accounts": [{"asset_class": "ETFs", "ending_value": 1000}],
+                    },
+                ]
+            }
+        )
+    )
+    csrf = _csrf(client, "/api/invest")
+    reply = client.post(
+        "/to-invest/sync-holdings", data={"csrf_token": csrf}, follow_redirects=True
+    )
+    assert "2 new tickers added" in reply.get_data(as_text=True)  # the BTC ETF row and VOO
+    etfs, _ = _cards(client, "ETFs")
+    crypto, _ = _cards(client, "Crypto")
+    assert set(etfs) == {"BTC", "VOO"} and set(crypto) == {"BTC"}
+    assert etfs["BTC"]["allocation_pct"] == "12.5" and crypto["BTC"]["allocation_pct"] == "37.5"
+    assert (
+        etfs["BTC"]["name"] == "Grayscale Bitcoin Mini Trust ETF" and etfs["BTC"]["holding"] is True
+    )
+    again = client.post(
+        "/to-invest/sync-holdings", data={"csrf_token": csrf}, follow_redirects=True
+    )
+    assert "new tickers added" not in again.get_data(as_text=True)  # a second sync adds nothing
+
+
+def test_adding_a_ticker_to_a_second_category_says_it_is_a_duplicate(client, list_files):
+    list_files["INVEST_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {"name": "Stocks", "items": [{"ticker": "AAA", "holding": False}]},
+                    {"name": "ETFs", "items": []},
+                ]
+            }
+        )
+    )
+    csrf = _csrf(client, "/api/invest")
+    reply = client.post(
+        "/to-invest/add-item",
+        data={"csrf_token": csrf, "category": "ETFs", "item": "AAA"},
+        follow_redirects=True,
+    )
+    html = reply.get_data(as_text=True)
+    assert "&#34;AAA&#34; is also in Stocks" in html or '"AAA" is also in Stocks' in html
+    assert [i["ticker"] for i in _cards(client, "ETFs")[0].values()] == ["AAA"]
