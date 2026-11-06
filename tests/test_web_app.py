@@ -1613,6 +1613,13 @@ def test_auto_pass_registry_entry_gets_an_infrastructure_home_card(tmp_path, mon
     assert card["url"] == "https://passwords.example.invalid"
     assert card["icon"] == "🔑"
 
+    html = web_app.app.test_client().get("/home").get_data(as_text=True)
+    assert '<a href="https://passwords.example.invalid" class="card-link">' in html
+    assert (
+        '<a href="https://passwords.example.invalid" class="card-new-tab" '
+        'target="_blank" rel="noopener noreferrer"' in html
+    )
+
 
 def test_site_navigation_groups_registry_services_and_keeps_pins_first(tmp_path, monkeypatch):
     (tmp_path / "services.local.toml").write_text(
