@@ -260,7 +260,7 @@
 
   const GROUP_LABELS = {invest: 'Investments', bank: 'Cash', crypt: 'Crypto', cred: 'Credit'};
   const GROUP_ORDER = ['invest', 'bank', 'crypt', 'cred'];
-  const state = {gran: 'month', view: 'total', meta: {}, summary: null, all: [], points: [], thresholds: {green: 0.05, red: -0.05}, cats: false, cash: true, open: null,
+  const state = {gran: 'month', view: 'total', meta: {}, summary: null, all: [], points: [], thresholds: {green: 0.05, red: -0.05}, cats: false, cash: true, open: new Set(), hist: new Map(),
                  mode: 'default', ids: new Set(), from: '', to: '', showOut: false, bounds: {first: '', last: ''}};
   const KEY = 'finances-filter';
   function loadPrefs() {
@@ -781,7 +781,7 @@
           !a.counted ? '<span class="badge">not in totals</span>' : '',
           a.possible_duplicate ? '<span class="badge warn">⚠ same balance as another</span>' : '',
         ].join('');
-        const open = state.open === a.id;
+        const open = state.open.has(a.id);
         return `<div class="acct-card ${a.counted ? '' : 'uncounted'}" data-id="${esc(a.id)}"><button type="button" class="acct" data-id="${esc(a.id)}" aria-expanded="${open}">
           <div class="acct-top"><span class="acct-name">${esc(short(a.label))}</span><span class="acct-bal money ${a.balance < 0 ? 'neg' : ''}">${esc(money(Math.abs(a.balance), true))}</span></div>
           <div class="acct-meta"><span>${esc(a.institution.toUpperCase())}</span><span>as of ${esc(dayName(a.as_of))}</span>${badges}</div>
@@ -792,17 +792,20 @@
       return `<div class="group-head"><h3>${esc(GROUP_LABELS[cat] || cat)}</h3><span class="muted money">${esc(money(sum))}</span></div>${cards}`;
     }).join('');
     $('accounts').innerHTML = html || '<span class="muted">No accounts selected.</span>';
-    if (state.open) loadHistory(state.open);
+    state.open.forEach((id) => loadHistory(id));
   }
 
   async function loadHistory(id) {
     const box = document.getElementById('detail-' + id);
     if (!box) return;
     try {
-      const pts = (await api(`accounts/${encodeURIComponent(id)}/history`, new URLSearchParams({granularity: 'daily'}))).points;
-      if (pts.length < 2) { box.innerHTML = '<span class="muted">Only one statement so far.</span>'; return; }
-      mountHistoryChart(box, pts, 160);
-    } catch (e) { box.innerHTML = `<span class="error-card">${esc(e.message)}</span>`; }
+      // several accounts can be open at once, so a history is fetched once and redrawn from the cache
+      if (!state.hist.has(id)) state.hist.set(id, (await api(`accounts/${encodeURIComponent(id)}/history`, new URLSearchParams({granularity: 'daily'}))).points);
+      const pts = state.hist.get(id), live = document.getElementById('detail-' + id);
+      if (!live) return;  // closed while loading
+      if (pts.length < 2) { live.innerHTML = '<span class="muted">Only one statement so far.</span>'; return; }
+      mountHistoryChart(live, pts, 160);
+    } catch (e) { const live = document.getElementById('detail-' + id); if (live) live.innerHTML = `<span class="error-card">${esc(e.message)}</span>`; }
   }
 
   $('accounts').addEventListener('click', (e) => {
@@ -811,7 +814,8 @@
     const pop = e.target.closest('[data-pop]');
     if (pop) { popOut(`window=1&account=${encodeURIComponent(pop.dataset.pop)}`, 'finances-account-' + pop.dataset.pop); return; }
     const b = e.target.closest('.acct'); if (!b) return;
-    state.open = state.open === b.dataset.id ? null : b.dataset.id;
+    const id = b.dataset.id;
+    if (state.open.has(id)) state.open.delete(id); else state.open.add(id);
     renderAccounts();
   });
 
