@@ -4787,6 +4787,58 @@ def _rebalance_invest_targets(
     return []
 
 
+def _add_missing_duplicate_rows(
+    data: dict,
+    holdings: list,
+    homes: dict[str, list[tuple[str, dict]]],
+    known: dict[str, dict],
+) -> int:
+    """Give a ticker held in two categories a row in each.
+
+    A ticker the export merges from several accounts (BTC: a Schwab ETF and a Binance coin) keeps
+    each account's asset class; when those classes map to different categories every one of them
+    gets a row, so the sync can split the value between them. Only categories the export says hold
+    value are added, and nothing is ever moved or removed."""
+    created = 0
+    for holding in holdings:
+        if not isinstance(holding, dict) or str(holding.get("asset_class") or "") == "Core Account":
+            continue
+        ticker = str(holding.get("ticker") or "").upper().strip()
+        if not ticker:
+            continue
+        held_in: set[str] = set()
+        for account in holding.get("accounts") or []:
+            category_name = INVEST_ASSET_CLASS_CATEGORIES.get(
+                str(account.get("asset_class") or "").strip()
+            )
+            try:
+                value = float(account.get("ending_value"))
+            except (AttributeError, TypeError, ValueError):
+                continue
+            if category_name and math.isfinite(value) and value > 0:
+                held_in.add(category_name)
+        if len(held_in) < 2:
+            continue
+        description = str(holding.get("description") or "").strip()
+        for category_name in sorted(held_in):
+            if any(
+                name.casefold() == category_name.casefold() for name, _ in homes.get(ticker, [])
+            ):
+                continue
+            category = _find_simple_category(data, category_name)
+            if category is None:
+                category = {"name": category_name, "items": []}
+                data["categories"].append(category)
+            item = {"ticker": ticker, "holding": True}
+            if description:
+                item["name"] = description
+            category["items"].append(item)
+            homes.setdefault(ticker, []).append((category["name"], item))
+            known.setdefault(ticker, item)
+            created += 1
+    return created
+
+
 def _merge_invest_holdings(data: dict, holdings: list) -> tuple[int, int, int, int, int]:
     """Mark current tickers held, add new ones, and refresh allocation percentages.
 
@@ -4806,6 +4858,7 @@ def _merge_invest_holdings(data: dict, holdings: list) -> tuple[int, int, int, i
                 homes.setdefault(ticker, []).append((category["name"], item))
                 known.setdefault(ticker, item)
 
+    created_rows = _add_missing_duplicate_rows(data, holdings, homes, known)
     portfolio_value, ticker_values = _invest_ticker_values(holdings)
     # A ticker can be two instruments (BTC is a Schwab ETF and a Binance coin) and sit in two
     # categories. The export merges them into one row but keeps each account's asset class, so
@@ -4857,7 +4910,8 @@ def _merge_invest_holdings(data: dict, holdings: list) -> tuple[int, int, int, i
                 item.pop("allocation_pct", None)
                 allocation_changes += 1
 
-    marked = added = named = skipped = 0
+    marked = named = skipped = 0
+    added = created_rows
     for holding in holdings:
         if not isinstance(holding, dict):
             skipped += 1
@@ -4895,6 +4949,31 @@ def _merge_invest_holdings(data: dict, holdings: list) -> tuple[int, int, int, i
         added += 1
 
     return marked, added, named, skipped, allocation_changes
+
+
+def _invest_row_anchors(data: dict) -> tuple[dict[str, str], dict[str, list[tuple[str, str]]]]:
+    """Page anchors for every To Invest row, and the rows of each ticker listed more than once.
+
+    The first row of a ticker keeps ``invest-item-TICKER`` (the link Tradility uses); a later row in
+    another category gets ``invest-item-TICKER--category`` so each duplicate can be linked."""
+    homes: dict[str, list[str]] = {}
+    for category in data["categories"]:
+        if _is_invest_derived(category):
+            continue
+        for item in category["items"]:
+            ticker = str(item.get("ticker") or "").upper().strip()
+            if ticker:
+                homes.setdefault(ticker, []).append(category["name"])
+    anchors: dict[str, str] = {}
+    duplicates: dict[str, list[tuple[str, str]]] = {}
+    for ticker, names in homes.items():
+        for index, name in enumerate(names):
+            anchors[f"{name}|{ticker}"] = (
+                f"invest-item-{ticker}" if index == 0 else f"invest-item-{ticker}--{_slug(name)}"
+            )
+        if len(names) > 1:
+            duplicates[ticker] = [(name, anchors[f"{name}|{ticker}"]) for name in names]
+    return anchors, duplicates
 
 
 def _invest_allocation_summary(data: dict) -> tuple[dict, dict[str, dict]]:
@@ -5083,6 +5162,8 @@ def _render_simple_list(key: str):
         backup_slots_exist=backup_exists,
         backup_slots_mtime=backup_mtimes,
         invest_summary=invest_summary,
+        invest_anchors=_invest_row_anchors(data)[0] if key == "invest" else {},
+        invest_duplicates=_invest_row_anchors(data)[1] if key == "invest" else {},
         tradility_cards=_tradility_card_tickers() if key == "invest" else frozenset(),
         tradility_card_url=_tradility_card_url_template(),
         invest_category_totals=invest_category_totals,
@@ -5412,9 +5493,20 @@ def simple_list_add_item(page):
     if _find_simple_item(cat, value, cfg, repo=repo if key == "code" else None):
         flash(f'"{value}" is already in {repo or category}.', "error")
         return redirect(url_for(_simple_list_endpoint(key)))
+    elsewhere = (
+        [c["name"] for c in data["categories"] if c is not cat and _find_simple_item(c, value, cfg)]
+        if key == "invest" and not _is_invest_derived(cat)
+        else []
+    )
     cat["items"].append(item)
     save_simple_list(key, data)
     _log_event(cfg["history_file"], "add", item=value, category=category, detail=repo)
+    if elsewhere:
+        flash(
+            f'"{value}" is also in {", ".join(elsewhere)}: each row keeps its own target and '
+            "its share of the holding.",
+            "success",
+        )
     return redirect(url_for(_simple_list_endpoint(key)) + f"#{_slug(category)}")
 
 
