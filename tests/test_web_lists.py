@@ -1574,3 +1574,53 @@ def test_tradility_analysis_with_bare_nan_is_served_as_strict_json_without_live_
     assert "live_bars" not in listing["tickers"][0] and listing["tickers"][0]["rsi_14"] is None
     detail = strict(client.get("/api/tradility-analysis/aapl").get_data(as_text=True))
     assert "live_bars" not in detail["ticker"]
+
+
+def test_to_invest_links_each_ticker_with_a_tradility_card_and_only_those(client, list_files):
+    list_files["TRADILITY_ANALYSIS_FILE"].write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-11-05T16:00:00Z",
+                "tickers": [
+                    {"ticker": "AAA", "price_history": [{"date": "2026-11-04", "close": 1}]},
+                    {"ticker": "BBB", "price_history": []},  # analysed, but no detail view to open
+                    {"ticker": "TECHNOLOGY", "price_history": [{"date": "2026-11-04", "close": 1}]},
+                ],
+            }
+        )
+    )
+    list_files["INVEST_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {
+                        "name": "Stocks",
+                        "items": [{"ticker": t, "holding": False} for t in ("AAA", "BBB", "CCC")],
+                    },
+                    {"name": "Crypto", "items": [{"ticker": "A/B", "holding": False}]},
+                ]
+            }
+        )
+    )
+    html = client.get("/to-invest").get_data(as_text=True)
+    assert 'href="/to-tradility?ticker=AAA"' in html
+    assert 'aria-label="Open AAA in Tradility"' in html
+    assert "ticker=BBB" not in html and "ticker=CCC" not in html  # no card, no link
+    assert html.count("/to-tradility?ticker=") == 1
+
+
+def test_to_invest_card_links_follow_a_configured_tradility_url(client, list_files, monkeypatch):
+    list_files["TRADILITY_ANALYSIS_FILE"].write_text(
+        json.dumps({"tickers": [{"ticker": "AAA", "price_history": [{"date": "d", "close": 1}]}]})
+    )
+    list_files["INVEST_LIST_FILE"].write_text(
+        json.dumps(
+            {"categories": [{"name": "Stocks", "items": [{"ticker": "AAA", "holding": False}]}]}
+        )
+    )
+    monkeypatch.setenv("CLOCKWORK_TRADILITY_CARD_URL", "https://tradility.example/?ticker={ticker}")
+    assert 'href="https://tradility.example/?ticker=AAA"' in client.get("/to-invest").get_data(
+        as_text=True
+    )
+    monkeypatch.setenv("CLOCKWORK_TRADILITY_CARD_URL", "https://tradility.example/no-placeholder")
+    assert 'href="/to-tradility?ticker=AAA"' in client.get("/to-invest").get_data(as_text=True)

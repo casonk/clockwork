@@ -5043,6 +5043,8 @@ def _render_simple_list(key: str):
         backup_slots_exist=backup_exists,
         backup_slots_mtime=backup_mtimes,
         invest_summary=invest_summary,
+        tradility_cards=_tradility_card_tickers() if key == "invest" else frozenset(),
+        tradility_card_url=_tradility_card_url_template(),
         invest_category_totals=invest_category_totals,
         ollama_available=_ollama_available(),
         watch_available=WATCH_DIR.exists(),
@@ -6052,6 +6054,43 @@ def _read_tradility_analysis() -> dict:
     return json.loads(
         TRADILITY_ANALYSIS_FILE.read_text(encoding="utf-8"), parse_constant=lambda _name: None
     )
+
+
+_tradility_card_cache: dict = {"key": None, "tickers": frozenset()}
+
+
+def _tradility_card_url_template() -> str:
+    """Where a ticker's Tradility card lives; ``{ticker}`` is replaced (URL-encoded).
+
+    Defaults to this app's own page; set CLOCKWORK_TRADILITY_CARD_URL to point at the standalone
+    Tradility service once it is federated."""
+    template = os.environ.get("CLOCKWORK_TRADILITY_CARD_URL", "").strip()
+    return template if "{ticker}" in template else "/to-tradility?ticker={ticker}"
+
+
+def _tradility_card_tickers() -> frozenset[str]:
+    """Tickers that have a Tradility card with a detail view, for linking from other pages.
+
+    Cached on the analysis file's modification time so a page render does not re-read it."""
+    try:
+        stat = TRADILITY_ANALYSIS_FILE.stat()
+    except OSError:
+        return frozenset()
+    key = (str(TRADILITY_ANALYSIS_FILE), stat.st_mtime_ns, stat.st_size)
+    if _tradility_card_cache["key"] != key:
+        try:
+            data = _read_tradility_analysis()
+        except (OSError, ValueError):
+            return frozenset()
+        _tradility_card_cache.update(
+            key=key,
+            tickers=frozenset(
+                str(t["ticker"]).strip().upper()
+                for t in data.get("tickers", [])
+                if isinstance(t, dict) and t.get("ticker") and t.get("price_history")
+            ),
+        )
+    return _tradility_card_cache["tickers"]
 
 
 @app.get("/api/tradility-analysis")
