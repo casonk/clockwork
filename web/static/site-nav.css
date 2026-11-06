@@ -141,3 +141,11 @@ body { --cw-nav-height: 52px; }
 @media (max-width: 360px) {
   .cw-site-nav__direct span, .cw-site-nav summary span { font-size: 11px; }
 }
+
+/* Collapsible cards (static/collapsible-cards.js): the title is the handle, the rest folds away. */
+.cc-title { cursor: pointer; user-select: none; }
+.cc-title::before { content: '▾'; display: inline-block; width: 1.1em; opacity: .7; }
+.cc-collapsed .cc-title::before { content: '▸'; }
+body:not(.popout):not(.popout-chart) .cc-card.cc-collapsed:not(.fs-card):not(.chart-fs) > :not(.cc-head) { display: none; }
+.cc-card.cc-collapsed .cc-title { margin-bottom: 0; }
+.cc-card.cc-collapsed > .cc-head { margin-bottom: 0; }
