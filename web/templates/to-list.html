@@ -56,6 +56,8 @@
     .check-btn:hover { border-color:var(--muted); }
     .item-body { flex:1; min-width:0; display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
     .item-title { font-weight:600; overflow-wrap:anywhere; }
+    .item-link { margin-left:6px; text-decoration:none; font-size:12px; opacity:.75; }
+    .item-link:hover, .item-link:focus-visible { opacity:1; }
     .item-title.done { color:var(--muted); text-decoration:line-through; }
     .item-meta { color:var(--muted); font-size:11px; }
     .allocation-meta { color:var(--muted); font-size:11px; white-space:nowrap; }
@@ -315,6 +317,7 @@
             {% endif %}
             <div class="item-body">
               <span class="item-title {% if item[cfg.status] %}done{% endif %}">{{ value }}</span>
+              {% if cfg.key == "invest" and value|upper in tradility_cards %}<a class="item-link" href="/to-tradility?ticker={{ value|urlencode }}" title="Open {{ value }} in Tradility" aria-label="Open {{ value }} in Tradility">📈</a>{% endif %}
               {% if item.year %}<span class="item-meta">{{ item.year }}</span>{% endif %}
               {% if watch_badges and watch_badges.get(value) %}<span class="item-meta watch-badge" title="Logged by the library viewer">{{ watch_badges[value] }}</span>{% endif %}
               {% if item.name %}<span class="item-meta">{{ item.name }}</span>{% endif %}
