@@ -1,7 +1,7 @@
 /* Collapsible cards, shared by every Clockwork page.
  *
  * A card folds to its title row when the title is clicked (or focused and Enter/Space is pressed). A card
- * qualifies when it is a .card, .panel, .detail-card, .tpl-card or a section directly under main whose first child is a heading, or a
+ * qualifies when it is a .card, .panel, .detail-card, .tpl-card or a section directly under main, or a home-page .group whose first child is a heading, or a
  * head row (.card-head, .detail-card-head) holding one. Cards with no heading, modal dialogs, full-screen
  * and pop-out views are left alone. Opt a card out with data-cc="off"; a full-page view that is
  * marked as a dialog opts its cards back in with data-cc="on".
@@ -11,8 +11,8 @@
  */
 (function () {
   'use strict';
-  const CARDS = 'section.card, article.card, section.panel, aside.panel, div.panel, .detail-card, .tpl-card, main > section, .page > section';
-  const HEADINGS = 'h1, h2, h3, h4, .detail-card-title';
+  const CARDS = 'section.card, article.card, section.panel, aside.panel, div.panel, .detail-card, .tpl-card, main > section, .page > section, .group';
+  const HEADINGS = 'h1, h2, h3, h4, .detail-card-title, .group-label';
   const HEADS = '.card-head, .detail-card-head';
   const KEY = 'cw.cardsClosed';
   const SKIP = '.fs-card, .chart-fs, [data-cc="off"]';
