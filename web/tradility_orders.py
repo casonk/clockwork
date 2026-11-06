@@ -30,6 +30,11 @@ from typing import Any
 
 from flask import Blueprint, abort, current_app, jsonify, request
 
+try:
+    from web import order_templates
+except ModuleNotFoundError:  # run as a script, with web/ on the path
+    import order_templates
+
 SIDES = ("buy", "sell")
 KINDS = ("market", "limit", "stop", "stop_limit")
 STATUSES = ("open", "filled", "cancelled")
@@ -434,6 +439,65 @@ def transfers():
     """Read-only deposit, withdrawal and transfer history from the trader service."""
     code, payload = call_trader("GET", "/transfers")
     return jsonify(payload), code
+
+
+@bp.post("/api/tradility-trade/batch/<step>")
+def batch_step(step: str):
+    """Preview or confirm a ladder (the trader service enforces the policy, limits and the phrase)."""
+    if step not in ("preview", "confirm"):
+        abort(404)
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"ok": False, "error": "send a JSON object"}), 400
+    code, payload = call_trader("POST", f"/batch/{step}", body)
+    return jsonify(payload), code
+
+
+@bp.get("/api/tradility-templates")
+def templates_list():
+    return jsonify({"ok": True, "templates": order_templates.load(order_templates.default_file())})
+
+
+@bp.post("/api/tradility-templates")
+def templates_add():
+    path = order_templates.default_file()
+    try:
+        with order_templates.LOCK:
+            templates = order_templates.load(path)
+            template = order_templates.add(templates, request.get_json(silent=True))
+            order_templates.save(path, templates)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return jsonify({"ok": True, "template": template}), 201
+
+
+@bp.put("/api/tradility-templates/<template_id>")
+def templates_update(template_id: str):
+    path = order_templates.default_file()
+    try:
+        with order_templates.LOCK:
+            templates = order_templates.load(path)
+            template = order_templates.update(templates, template_id, request.get_json(silent=True))
+            if template is not None:
+                order_templates.save(path, templates)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    if template is None:
+        return jsonify({"ok": False, "error": "template not found"}), 404
+    return jsonify({"ok": True, "template": template})
+
+
+@bp.delete("/api/tradility-templates/<template_id>")
+def templates_delete(template_id: str):
+    path = order_templates.default_file()
+    with order_templates.LOCK:
+        templates = order_templates.load(path)
+        removed = order_templates.delete(templates, template_id)
+        if removed:
+            order_templates.save(path, templates)
+    if not removed:
+        return jsonify({"ok": False, "error": "template not found"}), 404
+    return jsonify({"ok": True})
 
 
 @bp.post("/api/tradility-trade/withdraw/<step>")
