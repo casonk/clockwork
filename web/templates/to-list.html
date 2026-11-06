@@ -58,6 +58,8 @@
     .item-title { font-weight:600; overflow-wrap:anywhere; }
     .dup-badge { margin-left:6px; padding:1px 6px; border:1px dashed var(--accent); border-radius:4px; color:var(--accent); font-size:10px; font-weight:600; white-space:nowrap; }
     .dup-badge a { color:inherit; }
+    .sym-tag { margin-left:6px; padding:1px 6px; border:1px dotted var(--border); border-radius:4px; color:var(--muted); font-size:10px; white-space:nowrap; }
+    .sym-tag a { color:inherit; }
     .item-link { margin-left:6px; text-decoration:none; font-size:12px; opacity:.75; }
     .item-link:hover, .item-link:focus-visible { opacity:1; }
     .item-title.done { color:var(--muted); text-decoration:line-through; }
@@ -323,8 +325,15 @@
             {% endif %}
             <div class="item-body">
               <span class="item-title {% if item[cfg.status] %}done{% endif %}">{{ value }}</span>
-              {% if cfg.key == "invest" and invest_duplicates.get(value) %}<span class="dup-badge" title="{{ value }} is listed in {{ invest_duplicates[value]|map('first')|join(' and ') }}: each row keeps its own target and its share of the holding">⧉ also in {% for other, anchor in invest_duplicates[value] if other != cat.name %}<a href="#{{ anchor }}">{{ other }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</span>{% endif %}
-              {% if cfg.key == "invest" and value|upper in tradility_cards %}<a class="item-link" href="{{ tradility_card_url|replace('{ticker}', value|urlencode) }}" title="Open {{ value }} in Tradility" aria-label="Open {{ value }} in Tradility">📈</a>{% endif %}
+              {% if cfg.key == "invest" %}
+                {% set row_key = cat.name ~ "|" ~ value %}
+                {% set dups = invest_duplicates.get(row_key) %}
+                {% set sym = invest_shared.get(row_key) %}
+                {% if dups %}<span class="dup-badge" title="{{ value }} is the same instrument listed in more than one category; the allocation counts on the first row only">⧉ duplicate · also in {% for other, anchor in dups %}<a href="#{{ anchor }}">{{ other }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</span>{% endif %}
+                {% if sym %}<span class="sym-tag" title="{{ value }} is also the symbol of a different instrument; each has its own identity, allocation and target">≈ symbol shared with {% for other, anchor in sym %}<a href="#{{ anchor }}">{{ other }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</span>{% endif %}
+                {% set card = invest_card_links.get(row_key) %}
+                {% if card %}<a class="item-link" href="{{ tradility_card_url|replace('{ticker}', card|urlencode) }}" title="Open {{ card }} in Tradility" aria-label="Open {{ card }} in Tradility">📈</a>{% endif %}
+              {% endif %}
               {% if item.year %}<span class="item-meta">{{ item.year }}</span>{% endif %}
               {% if watch_badges and watch_badges.get(value) %}<span class="item-meta watch-badge" title="Logged by the library viewer">{{ watch_badges[value] }}</span>{% endif %}
               {% if item.name %}<span class="item-meta">{{ item.name }}</span>{% endif %}

@@ -4443,22 +4443,68 @@ def _invest_market_value(holding: dict) -> float | None:
     return value if math.isfinite(value) else None
 
 
-def _invest_ticker_values(holdings: list) -> tuple[float, dict[str, float]]:
-    """Return the full valued portfolio total and each ticker's market value."""
+def _invest_kind(category_name: str) -> str:
+    """What a To Invest row is: a coin (the Crypto category) or an asset (a stock, ETF or fund)."""
 
-    portfolio_value = 0.0
-    ticker_values: dict[str, float] = {}
+    return "crypto" if str(category_name).strip().casefold() == "crypto" else "asset"
+
+
+def _invest_holding_rows(holdings: list) -> list[dict]:
+    """Holdings as separate instruments: ``ticker``, ``kind``, ``value``, ``asset_class``, ``description``.
+
+    The export gives every instrument its own record (``instrument_id`` is ``T`` for AT&T and
+    ``crypto:T`` for the coin), so AT&T and the Threshold coin never share a row. An older export that
+    merged a symbol across a stock and a coin is split here by each account's asset class."""
+
+    rows: list[dict] = []
     for holding in holdings:
         if not isinstance(holding, dict):
             continue
-        value = _invest_market_value(holding)
-        if value is None:
-            continue
-        portfolio_value += value
         ticker = str(holding.get("ticker") or "").upper().strip()
-        if ticker:
-            ticker_values[ticker] = ticker_values.get(ticker, 0.0) + value
-    return portfolio_value, ticker_values
+        asset_class = str(holding.get("asset_class") or "").strip()
+        description = str(holding.get("description") or "").strip()
+        value = _invest_market_value(holding)
+        if value is None or not ticker:
+            continue
+        instrument = str(holding.get("instrument_id") or "")
+        accounts = holding.get("accounts") if isinstance(holding.get("accounts"), list) else []
+        if instrument:
+            kind = "crypto" if instrument.startswith("crypto:") else "asset"
+            rows.append(_holding_row(ticker, kind, value, asset_class, description))
+            continue
+        coin = asset_class == "Crypto"
+        coin_value = stock_value = 0.0
+        stock_class = "" if coin else asset_class
+        for account in accounts:
+            try:
+                account_value = float(account.get("ending_value"))
+            except (AttributeError, TypeError, ValueError):
+                continue
+            if not math.isfinite(account_value):
+                continue
+            if str(account.get("asset_class") or "").strip() == "Crypto":
+                coin_value += account_value
+            else:
+                stock_value += account_value
+                stock_class = stock_class or str(account.get("asset_class") or "").strip()
+        if coin_value and stock_value:  # legacy merged row: a coin and a stock or fund
+            rows.append(_holding_row(ticker, "crypto", coin_value, "Crypto", description))
+            rows.append(_holding_row(ticker, "asset", stock_value, stock_class, description))
+        else:
+            rows.append(
+                _holding_row(ticker, "crypto" if coin else "asset", value, asset_class, description)
+            )
+    return rows
+
+
+def _holding_row(ticker: str, kind: str, value: float, asset_class: str, description: str) -> dict:
+    return {
+        "ticker": ticker,
+        "kind": kind,
+        "value": value,
+        "asset_class": asset_class,
+        "description": description,
+    }
 
 
 # Categories computed from holdings and the classification export. Their
@@ -4491,21 +4537,6 @@ def _load_invest_classifications() -> dict[str, dict[str, str]]:
 INVEST_CRYPTO_LABELS = ("FINANCIALS", "CRYPTO")  # (sector, industry): rolls up once
 
 
-def _invest_crypto_tickers(data: dict, holdings: list) -> set[str]:
-    """Tickers that are crypto, by list category or holdings asset class."""
-
-    found = {
-        str(h.get("ticker") or "").upper().strip()
-        for h in holdings
-        if isinstance(h, dict) and str(h.get("asset_class") or "").strip() == "Crypto"
-    }
-    for category in data["categories"]:
-        if str(category.get("name", "")).strip().casefold() == "crypto":
-            found.update(str(i.get("ticker") or "").upper().strip() for i in category["items"])
-    found.discard("")
-    return found
-
-
 def _invest_industry_sectors(classes: dict[str, dict[str, str]]) -> dict[str, str]:
     """Pin each industry to one sector (its most common) so a ticker rolls up once."""
 
@@ -4523,11 +4554,11 @@ def _invest_labels(
     ticker: str,
     classes: dict[str, dict[str, str]],
     industry_sectors: dict[str, str],
-    crypto: set[str],
+    is_coin: bool,
 ) -> tuple[str, str]:
-    """Return the one (sector, industry) a ticker belongs to."""
+    """Return the one (sector, industry) an instrument belongs to; a coin is its own industry."""
 
-    if ticker in crypto:
+    if is_coin:
         return INVEST_CRYPTO_LABELS
     industry = (classes.get(ticker) or {}).get("industry", "").upper()
     sector = industry_sectors.get(industry, "")
@@ -4547,18 +4578,21 @@ def _sync_invest_classifications(
     targets and card order are kept; new cards start in order of current weight.
     """
 
-    portfolio_value, ticker_values = _invest_ticker_values(holdings)
-    crypto = _invest_crypto_tickers(data, holdings)
+    rows = _invest_holding_rows(holdings)
+    portfolio_value = sum(r["value"] for r in rows)
     industry_sectors = _invest_industry_sectors(classes)
     changes = 0
     for name, level in (("Sectors", 0), ("Industries", 1)):
         wanted: dict[str, dict[str, float]] = {}
         for industry, sector in industry_sectors.items():
             wanted.setdefault((sector, industry)[level], {})
-        for ticker, value in ticker_values.items():
-            label = _invest_labels(ticker, classes, industry_sectors, crypto)[level]
+        for row in rows:
+            label = _invest_labels(
+                row["ticker"], classes, industry_sectors, row["kind"] == "crypto"
+            )[level]
+            shown = f"{row['ticker']}-USD" if row["kind"] == "crypto" else row["ticker"]
             bucket = wanted.setdefault(label, {})
-            bucket[ticker] = bucket.get(ticker, 0.0) + value
+            bucket[shown] = bucket.get(shown, 0.0) + row["value"]
         if not industry_sectors:
             continue
         category = _find_simple_category(data, name)
@@ -4603,7 +4637,6 @@ def _rebalance_invest_targets(
     data: dict,
     edits: list[tuple[str, str, float | None]],
     classes: dict[str, dict[str, str]],
-    holdings: list | None = None,
 ) -> list[str]:
     """Apply target edits so sectors, industries and tickers always agree.
 
@@ -4620,7 +4653,6 @@ def _rebalance_invest_targets(
     problems found; on any problem nothing is changed.
     """
 
-    crypto = _invest_crypto_tickers(data, holdings or [])
     industry_sectors = _invest_industry_sectors(classes)
     _summary, totals = _invest_allocation_summary(data)
 
@@ -4636,7 +4668,9 @@ def _rebalance_invest_targets(
             if not ticker or (category["name"].casefold(), ticker) in seen:
                 continue
             seen.add((category["name"].casefold(), ticker))
-            sector, industry = _invest_labels(ticker, classes, industry_sectors, crypto)
+            sector, industry = _invest_labels(
+                ticker, classes, industry_sectors, _invest_kind(category["name"]) == "crypto"
+            )
             try:
                 current = float(item.get("allocation_pct") or 0)
             except (TypeError, ValueError):
@@ -4787,128 +4821,44 @@ def _rebalance_invest_targets(
     return []
 
 
-def _add_missing_duplicate_rows(
-    data: dict,
-    holdings: list,
-    homes: dict[str, list[tuple[str, dict]]],
-    known: dict[str, dict],
-) -> int:
-    """Give a symbol that is two different assets a row for each.
-
-    The export merges a ticker's accounts into one row but keeps each account's asset class. The same
-    symbol can be two instruments (BTC is a Schwab ETF and a Binance coin; T is AT&T and a coin), and
-    then Crypto and the stock or fund category each get a row so the sync can split the value. A fund
-    that merely sits under different labels at different custodians (VOO is ETFs at Schwab and
-    Stocks at Fidelity) is one instrument and gets no extra row. Nothing is moved or removed."""
-    created = 0
-    for holding in holdings:
-        if not isinstance(holding, dict) or str(holding.get("asset_class") or "") == "Core Account":
-            continue
-        ticker = str(holding.get("ticker") or "").upper().strip()
-        if not ticker:
-            continue
-        held_in: set[str] = set()
-        for account in holding.get("accounts") or []:
-            category_name = INVEST_ASSET_CLASS_CATEGORIES.get(
-                str(account.get("asset_class") or "").strip()
-            )
-            try:
-                value = float(account.get("ending_value"))
-            except (AttributeError, TypeError, ValueError):
-                continue
-            if category_name and math.isfinite(value) and value > 0:
-                held_in.add(category_name)
-        others = held_in - {"Crypto"}
-        if "Crypto" not in held_in or not others:
-            continue  # one instrument, however many custodians or labels
-        own = INVEST_ASSET_CLASS_CATEGORIES.get(str(holding.get("asset_class") or "").strip())
-        wanted = {"Crypto", own if own in others else sorted(others)[0]}
-        description = str(holding.get("description") or "").strip()
-        for category_name in sorted(wanted):
-            if any(
-                name.casefold() == category_name.casefold() for name, _ in homes.get(ticker, [])
-            ):
-                continue
-            category = _find_simple_category(data, category_name)
-            if category is None:
-                category = {"name": category_name, "items": []}
-                data["categories"].append(category)
-            item = {"ticker": ticker, "holding": True}
-            if description:
-                item["name"] = description
-            category["items"].append(item)
-            homes.setdefault(ticker, []).append((category["name"], item))
-            known.setdefault(ticker, item)
-            created += 1
-    return created
-
-
 def _merge_invest_holdings(data: dict, holdings: list) -> tuple[int, int, int, int, int]:
-    """Mark current tickers held, add new ones, and refresh allocation percentages.
+    """Mark current instruments held, add new ones, and refresh allocation percentages.
 
-    The denominator includes every valued aggregate position, including Core
-    Account cash that is intentionally omitted from the visible investment
-    list. This keeps each displayed percentage tied to the full portfolio.
+    An instrument is a stock or fund by its ticker, or a coin by its ticker in the Crypto category,
+    so AT&T and the Threshold coin are different rows with their own allocations. The denominator
+    includes every valued aggregate position, including Core Account cash that is intentionally
+    omitted from the visible investment list, so each percentage is tied to the full portfolio.
+    A true duplicate (the same instrument listed in two categories) shows its value on the first
+    row only, so the page never counts a position twice.
     """
 
-    known: dict[str, dict] = {}
-    homes: dict[str, list[tuple[str, dict]]] = {}  # every row a ticker has, one per category
+    homes: dict[tuple[str, str], list[dict]] = {}
     for category in data["categories"]:
         if _is_invest_derived(category):
             continue
+        kind = _invest_kind(category["name"])
         for item in category["items"]:
             ticker = str(item.get("ticker") or "").upper().strip()
             if ticker:
-                homes.setdefault(ticker, []).append((category["name"], item))
-                known.setdefault(ticker, item)
+                homes.setdefault((kind, ticker), []).append(item)
 
-    created_rows = _add_missing_duplicate_rows(data, holdings, homes, known)
-    portfolio_value, ticker_values = _invest_ticker_values(holdings)
-    # A ticker can be two instruments (BTC is a Schwab ETF and a Binance coin) and sit in two
-    # categories. The export merges them into one row but keeps each account's asset class, so
-    # a duplicated ticker's value is split between its rows by the category that class maps to.
-    class_values: dict[tuple[str, str], float] = {}
-    for holding in holdings:
-        if not isinstance(holding, dict):
-            continue
-        name = str(holding.get("ticker") or "").upper().strip()
-        if len(homes.get(name, [])) < 2:
-            continue
-        row_categories = {category_name for category_name, _item in homes[name]}
-        stock_like = [c for c in row_categories if c.casefold() != "crypto"]
-        for account in holding.get("accounts") or []:
-            try:
-                value = float(account.get("ending_value"))
-            except (AttributeError, TypeError, ValueError):
-                continue
-            category = INVEST_ASSET_CLASS_CATEGORIES.get(
-                str(account.get("asset_class") or "").strip(), "Stocks"
-            )
-            if category not in row_categories and category != "Crypto" and len(stock_like) == 1:
-                category = stock_like[0]  # another custodian's label for the same fund or stock
-            if math.isfinite(value):
-                class_values[(name, category)] = class_values.get((name, category), 0.0) + value
-    allocations = (
-        {
-            ticker: _format_invest_percentage(value / portfolio_value * 100)
-            for ticker, value in ticker_values.items()
-        }
-        if portfolio_value > 0
-        else {}
-    )
+    rows = _invest_holding_rows(holdings)
+    portfolio_value = sum(r["value"] for r in rows)
+    values: dict[tuple[str, str], float] = {}
+    for row in rows:
+        key = (row["kind"], row["ticker"])
+        values[key] = values.get(key, 0.0) + row["value"]
+
+    def percent(key: tuple[str, str]) -> str:
+        value = values.get(key, 0.0)
+        if portfolio_value <= 0 or value <= 0:
+            return ""
+        return _format_invest_percentage(value / portfolio_value * 100)
 
     allocation_changes = 0
-    for ticker, rows in homes.items():
-        for category_name, item in rows:
-            if len(rows) > 1 and portfolio_value > 0:
-                value = class_values.get((ticker, category_name), 0.0)
-                desired = (
-                    _format_invest_percentage(value / portfolio_value * 100) if value > 0 else ""
-                )
-                if value > 0:
-                    item["holding"] = True
-            else:
-                desired = allocations.get(ticker, "")
+    for key, items in homes.items():
+        for position, item in enumerate(items):
+            desired = percent(key) if position == 0 else ""
             current = str(item.get("allocation_pct") or "")
             if desired:
                 if current != desired:
@@ -4918,70 +4868,110 @@ def _merge_invest_holdings(data: dict, holdings: list) -> tuple[int, int, int, i
                 item.pop("allocation_pct", None)
                 allocation_changes += 1
 
-    marked = named = skipped = 0
-    added = created_rows
-    for holding in holdings:
-        if not isinstance(holding, dict):
+    marked = added = named = skipped = 0
+    for row in rows:
+        ticker, kind, asset_class = row["ticker"], row["kind"], row["asset_class"]
+        if asset_class == "Core Account":
             skipped += 1
             continue
-        ticker = str(holding.get("ticker") or "").upper().strip()
-        asset_class = str(holding.get("asset_class") or "").strip()
-        if not ticker or asset_class == "Core Account":
-            skipped += 1
-            continue
-        description = str(holding.get("description") or "").strip()
-
-        existing = known.get(ticker)
-        if existing is not None:
-            if not existing.get("holding", False):
-                existing["holding"] = True
+        key = (kind, ticker)
+        existing = homes.get(key)
+        if existing:
+            first = existing[0]
+            if not first.get("holding", False):
+                first["holding"] = True
                 marked += 1
-            if description and not existing.get("name"):
-                existing["name"] = description
+            if row["description"] and not first.get("name"):
+                first["name"] = row["description"]
                 named += 1
             continue
-
-        category_name = INVEST_ASSET_CLASS_CATEGORIES.get(asset_class, "Stocks")
+        category_name = (
+            "Crypto"
+            if kind == "crypto"
+            else INVEST_ASSET_CLASS_CATEGORIES.get(asset_class, "Stocks")
+        )
         category = _find_simple_category(data, category_name)
         if category is None:
             category = {"name": category_name, "items": []}
             data["categories"].append(category)
         item = {"ticker": ticker, "holding": True}
-        if description:
-            item["name"] = description
-        if ticker in allocations:
-            item["allocation_pct"] = allocations[ticker]
+        if row["description"]:
+            item["name"] = row["description"]
+        desired = percent(key)
+        if desired:
+            item["allocation_pct"] = desired
             allocation_changes += 1
         category["items"].append(item)
-        known[ticker] = item
+        homes[key] = [item]
         added += 1
 
     return marked, added, named, skipped, allocation_changes
 
 
-def _invest_row_anchors(data: dict) -> tuple[dict[str, str], dict[str, list[tuple[str, str]]]]:
-    """Page anchors for every To Invest row, and the rows of each ticker listed more than once.
+def _invest_row_anchors(
+    data: dict,
+) -> tuple[dict[str, str], dict[str, list[tuple[str, str]]], dict[str, list[tuple[str, str]]]]:
+    """Page anchors for every To Invest row, and how rows that share a ticker relate.
 
-    The first row of a ticker keeps ``invest-item-TICKER`` (the link Tradility uses); a later row in
-    another category gets ``invest-item-TICKER--category`` so each duplicate can be linked."""
-    homes: dict[str, list[str]] = {}
+    All three maps are keyed ``"<category>|<ticker>"``. The first row of a ticker keeps
+    ``invest-item-TICKER`` (the link Tradility uses); a later row gets
+    ``invest-item-TICKER--category``. ``duplicates`` lists the other rows of the *same instrument*
+    (a stock or fund listed in two categories); ``shared`` lists rows of a *different* instrument
+    that merely has the same symbol (AT&T and the Threshold coin), which are not duplicates."""
+    rows: dict[str, list[tuple[str, str]]] = {}
     for category in data["categories"]:
         if _is_invest_derived(category):
             continue
+        kind = _invest_kind(category["name"])
         for item in category["items"]:
             ticker = str(item.get("ticker") or "").upper().strip()
             if ticker:
-                homes.setdefault(ticker, []).append(category["name"])
+                rows.setdefault(ticker, []).append((category["name"], kind))
     anchors: dict[str, str] = {}
     duplicates: dict[str, list[tuple[str, str]]] = {}
-    for ticker, names in homes.items():
-        for index, name in enumerate(names):
+    shared: dict[str, list[tuple[str, str]]] = {}
+    for ticker, listed in rows.items():
+        for index, (name, _kind) in enumerate(listed):
             anchors[f"{name}|{ticker}"] = (
                 f"invest-item-{ticker}" if index == 0 else f"invest-item-{ticker}--{_slug(name)}"
             )
-        if len(names) > 1:
-            duplicates[ticker] = [(name, anchors[f"{name}|{ticker}"]) for name in names]
-    return anchors, duplicates
+        for name, kind in listed:
+            same = [(n, anchors[f"{n}|{ticker}"]) for n, k in listed if n != name and k == kind]
+            other = [(n, anchors[f"{n}|{ticker}"]) for n, k in listed if k != kind]
+            if same:
+                duplicates[f"{name}|{ticker}"] = same
+            if other:
+                shared[f"{name}|{ticker}"] = other
+    return anchors, duplicates, shared
+
+
+def _invest_card_links(data: dict, cards: frozenset[str]) -> dict[str, str]:
+    """Which Tradility card each To Invest row opens, keyed ``"<category>|<ticker>"``.
+
+    A stock or fund opens the card with its own symbol. A coin opens ``SYMBOL-USD`` (how Tradility
+    names a coin whose symbol a stock or fund also uses) or, when nothing collides, the plain symbol.
+    """
+    assets = {
+        str(i.get("ticker") or "").upper().strip()
+        for c in data["categories"]
+        if _invest_kind(c["name"]) == "asset" and not _is_invest_derived(c)
+        for i in c["items"]
+    }
+    links: dict[str, str] = {}
+    for category in data["categories"]:
+        if _is_invest_derived(category):
+            continue
+        kind = _invest_kind(category["name"])
+        for item in category["items"]:
+            ticker = str(item.get("ticker") or "").upper().strip()
+            if kind == "asset" and ticker in cards:
+                links[f"{category['name']}|{ticker}"] = ticker
+            elif kind == "crypto":
+                if f"{ticker}-USD" in cards:
+                    links[f"{category['name']}|{ticker}"] = f"{ticker}-USD"
+                elif ticker in cards and ticker not in assets:
+                    links[f"{category['name']}|{ticker}"] = ticker
+    return links
 
 
 def _invest_allocation_summary(data: dict) -> tuple[dict, dict[str, dict]]:
@@ -5158,6 +5148,7 @@ def _render_simple_list(key: str):
                     category["items"],
                     key=lambda i: -float(i.get("allocation_pct") or 0),
                 )
+    invest_rows = _invest_row_anchors(data) if key == "invest" else ({}, {}, {})
     return render_template(
         "to-list.html",
         cfg=cfg,
@@ -5170,9 +5161,12 @@ def _render_simple_list(key: str):
         backup_slots_exist=backup_exists,
         backup_slots_mtime=backup_mtimes,
         invest_summary=invest_summary,
-        invest_anchors=_invest_row_anchors(data)[0] if key == "invest" else {},
-        invest_duplicates=_invest_row_anchors(data)[1] if key == "invest" else {},
-        tradility_cards=_tradility_card_tickers() if key == "invest" else frozenset(),
+        invest_anchors=invest_rows[0],
+        invest_duplicates=invest_rows[1],
+        invest_shared=invest_rows[2],
+        invest_card_links=(
+            _invest_card_links(data, _tradility_card_tickers()) if key == "invest" else {}
+        ),
         tradility_card_url=_tradility_card_url_template(),
         invest_category_totals=invest_category_totals,
         ollama_available=_ollama_available(),
@@ -5628,7 +5622,7 @@ def sync_invest_holdings():
         flash(f"Classification file unreadable: {exc}", "error")
     grouped = _sync_invest_classifications(data, payload["holdings"], classes) if classes else 0
     if classes:
-        _rebalance_invest_targets(data, [], classes, payload["holdings"])
+        _rebalance_invest_targets(data, [], classes)
     if marked or added or named or allocations or grouped:
         save_simple_list("invest", data)
     _log_event(
@@ -5657,17 +5651,12 @@ def sync_invest_holdings():
     return redirect(url_for("to_invest"))
 
 
-def _invest_rebalance_inputs() -> tuple[dict, list]:
-    """The classification table and holdings the target rebalance needs; empty when unavailable."""
+def _invest_classes() -> dict[str, dict[str, str]]:
+    """The classification table the target rebalance needs; empty when it is unavailable."""
     try:
-        classes = _load_invest_classifications()
+        return _load_invest_classifications()
     except (OSError, csv.Error, UnicodeDecodeError):
-        classes = {}
-    try:
-        holdings = _load_invest_holdings_payload()["holdings"]
-    except (OSError, json.JSONDecodeError, ValueError):
-        holdings = []
-    return classes, holdings
+        return {}
 
 
 INVEST_ORDERS = {"holding", "rank"}
@@ -5794,8 +5783,7 @@ def update_invest_targets():
     for item, category, ticker, target in resolved:
         if target != str(item.get("target_pct") or ""):
             edits.append((category, ticker, float(target) if target else None))
-    classes, holdings = _invest_rebalance_inputs()
-    problems = _rebalance_invest_targets(data, edits, classes, holdings)
+    problems = _rebalance_invest_targets(data, edits, _invest_classes())
     if problems:
         flash(problems[0][:1].upper() + problems[0][1:] + ". No targets were saved.", "error")
         return redirect(url_for("to_invest"))
@@ -5828,9 +5816,13 @@ def _invest_target_rows(data: dict) -> tuple[dict[str, dict], dict]:
     also keyed as ``BTC-USD`` because that is how Tradility names it."""
     summary, categories = _invest_allocation_summary(data)
     rows: dict[str, dict] = {}
-    for category in data["categories"]:
-        if _is_invest_derived(category):
-            continue
+    # Stocks and funds first, so a plain symbol that is also a coin's goes to the stock or fund;
+    # the coin is always reachable as SYMBOL-USD.
+    ordered = sorted(
+        (c for c in data["categories"] if not _is_invest_derived(c)),
+        key=lambda c: _invest_kind(c["name"]) == "crypto",
+    )
+    for category in ordered:
         info = categories.get(category["name"], {})
         for item in category["items"]:
             ticker = str(item.get("ticker", "")).upper()
@@ -5883,6 +5875,29 @@ def api_tradility_targets():
     )
 
 
+def _find_invest_instrument(data: dict, symbol: str, cfg: dict) -> dict | None:
+    """The To Invest row for a Tradility symbol, telling a coin from a stock or fund of the same name.
+
+    ``T-USD`` is the coin and only the Crypto category is searched for it. A plain symbol belongs to
+    the stock or fund that owns it; only when none does, a coin of that name (Tradility shows a coin
+    without a collision as its plain symbol)."""
+    crypto = [c for c in data["categories"] if _invest_kind(c["name"]) == "crypto"]
+    assets = [
+        c
+        for c in data["categories"]
+        if _invest_kind(c["name"]) == "asset" and not _is_invest_derived(c)
+    ]
+    if symbol.endswith("-USD"):
+        search = [(c, symbol.removesuffix("-USD")) for c in crypto]
+    else:
+        search = [(c, symbol) for c in assets] + [(c, symbol) for c in crypto]
+    for category, wanted in search:
+        found = _find_simple_item(category, wanted, cfg)
+        if found:
+            return found
+    return None
+
+
 @app.post("/api/tradility-targets/<path:ticker>")
 def api_tradility_set_target(ticker: str):
     """Set (or clear) a ticker's To Invest target, adding the ticker to a category if needed."""
@@ -5899,11 +5914,7 @@ def api_tradility_set_target(ticker: str):
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     data = load_simple_list("invest")
-    found = None
-    for category in data["categories"]:
-        found = _find_simple_item(category, symbol, cfg) or _find_simple_item(category, base, cfg)
-        if found:
-            break
+    found = _find_invest_instrument(data, symbol, cfg)
     placed_in = None
     if found is None:
         name = str(payload.get("category") or "").strip()
@@ -5916,12 +5927,10 @@ def api_tradility_set_target(ticker: str):
     # The same rebalance as the To Invest page: targets are one tree that sums to 100%, so this
     # ticker's share rolls up to its industry and sector and the others rescale around it.
     owner = next(c for c in data["categories"] if any(i is found for i in c["items"]))
-    classes, holdings = _invest_rebalance_inputs()
     problems = _rebalance_invest_targets(
         data,
         [(owner["name"], found["ticker"], float(target) if target else None)],
-        classes,
-        holdings,
+        _invest_classes(),
     )
     if problems:
         return jsonify({"ok": False, "error": problems[0][:1].upper() + problems[0][1:]}), 400
