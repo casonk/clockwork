@@ -13,6 +13,8 @@
     section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
     .error { border-color: var(--red); color: var(--red); }
     .muted { color: var(--muted); }
+    .refresh-note { color: var(--muted); font-size: 12px; margin-top: -8px; }
+    .refresh-note.stale { color: var(--yellow); }
     .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
     .tabs a { color: var(--text); text-decoration: none; border: 1px solid var(--border); border-radius: 99px; padding: 3px 12px; font-size: 13px; }
     .tabs a[aria-current="page"] { border-color: var(--accent); color: var(--accent); }
@@ -53,6 +55,7 @@
   {% if summary is none %}
   <section class="error" role="alert"><h2>Unavailable</h2>Your listening history is unavailable: {{ error }}</section>
   {% else %}
+  <p class="refresh-note" id="refresh-note" data-generated="{{ summary.generated }}">Updated <time id="refresh-when" datetime="{{ summary.generated }}">{{ summary.generated[:16].replace('T', ' ') }} UTC</time><span id="refresh-ago"></span> · tape-deck polls every 30 minutes; this page checks for a new summary every minute</p>
   <nav class="tabs" aria-label="Time window">
     {% for key, label in windows %}<a href="?window={{ key }}" {% if view.window == key %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
   </nav>
@@ -107,5 +110,39 @@
   </section>
   {% endif %}
 </main>
+{% if summary is not none %}
+<script>
+  // Keep the "Updated" note live and reload when a newer summary has been written.
+  (function () {
+    const note = document.getElementById('refresh-note');
+    if (!note) return;
+    let generated = new Date(note.dataset.generated);
+    const when = document.getElementById('refresh-when');
+    const ago = document.getElementById('refresh-ago');
+    const STALE_MINUTES = 90;
+    function paint() {
+      if (isNaN(generated)) return;
+      when.textContent = generated.toLocaleString([], {month: 'numeric', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit'});
+      const minutes = Math.max(0, Math.round((Date.now() - generated.getTime()) / 60000));
+      const text = minutes < 1 ? 'just now' : minutes < 60 ? minutes + ' min ago' : Math.floor(minutes / 60) + ' h ' + (minutes % 60) + ' min ago';
+      ago.textContent = ' (' + text + ')';
+      const stale = minutes > STALE_MINUTES;
+      note.classList.toggle('stale', stale);
+      ago.title = stale ? 'Older than ' + STALE_MINUTES + ' minutes: is the tape-deck poller running?' : '';
+    }
+    async function check() {
+      try {
+        const res = await fetch('/api/listening', {cache: 'no-store'});
+        if (!res.ok) return;
+        const fresh = (await res.json()).generated;
+        if (fresh && fresh !== note.dataset.generated) location.reload();
+      } catch (err) { /* offline: try again next minute */ }
+    }
+    paint();
+    setInterval(paint, 30000);
+    setInterval(check, 60000);
+  })();
+</script>
+{% endif %}
 </body>
 </html>

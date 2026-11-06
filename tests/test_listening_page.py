@@ -93,6 +93,28 @@ def test_a_corrupt_summary_fails_soft(client):
     assert "not a tape-deck summary" in client.get("/listening").get_data(as_text=True)
 
 
+def test_the_refresh_note_carries_the_summary_time_and_the_script_parses(client, tmp_path):
+    import re
+    import subprocess
+
+    html = client.get("/listening").get_data(as_text=True)
+    assert 'id="refresh-note" data-generated="2026-11-06T13:00:00Z"' in html
+    assert "polls every 30 minutes" in html
+    script = re.findall(r"<script>(.*?)</script>", html, re.S)[-1]
+    path = tmp_path / "refresh_check.js"
+    path.write_text(script)
+    try:
+        result = subprocess.run(["node", "--check", str(path)], capture_output=True, text=True)
+    except FileNotFoundError:
+        pytest.skip("node is not installed")
+    assert result.returncode == 0, result.stderr
+
+
+def test_the_error_page_has_no_refresh_script(client):
+    client.summary_path.unlink()
+    assert 'id="refresh-note"' not in client.get("/listening").get_data(as_text=True)
+
+
 def test_the_api_returns_the_document(client):
     assert client.get("/api/listening").get_json()["plays"] == 120
 
