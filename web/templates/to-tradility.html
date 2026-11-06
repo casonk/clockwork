@@ -1803,7 +1803,7 @@
       <form class="target-form" id="target-form" autocomplete="off">
         <input name="target_pct" type="number" step="any" min="0" max="100" value="${r.target_input == null ? '' : esc(String(r.target_input))}" aria-label="Target percent" placeholder="Target %">
         <span class="orders-sync">${r.mode === 'basket' ? 'of the ' + esc(r.category) + ' basket' : 'of the portfolio'} · the other targets rescale so the total stays 100%</span>
-        <button type="submit">Save target</button> <a class="company-link" href="/to-invest">Open To Invest ↗</a>
+        <button type="submit">Save target</button> <a class="company-link" href="/to-invest#invest-item-${encodeURIComponent(r.ticker || ticker)}">Open this row in To Invest ↗</a>
       </form><div class="order-error" id="target-error" role="alert"></div>`;
   }
 
