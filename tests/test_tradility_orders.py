@@ -750,3 +750,54 @@ def test_the_fidelity_browser_steps_are_forwarded_and_the_page_gates_submitting_
     ):
         assert needle in html, needle
     assert html.index("tradeCall('fidelity-stage'") < html.index("tradeCall('fidelity-submit'")
+
+
+def test_live_quotes_are_forwarded_from_the_standalone_tradility_app(api, monkeypatch):
+    http, _ = api
+    seen = []
+
+    class Reply:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return json.dumps({"ok": True, "quotes": {"AAPL": 211.5}, "indicators": {}}).encode()
+
+    def fake_urlopen(request, timeout):
+        seen.append(request.full_url)
+        return Reply()
+
+    monkeypatch.setattr(t.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("CLOCKWORK_TRADILITY_WEB_URL", "http://127.0.0.1:9999/")
+    response = http.get("/api/tradility-quotes")
+    assert response.status_code == 200 and response.get_json()["quotes"] == {"AAPL": 211.5}
+    assert seen == ["http://127.0.0.1:9999/api/tradility-quotes"]
+
+
+def test_live_quotes_say_so_when_the_tradility_app_is_not_running(api, monkeypatch):
+    http, _ = api
+
+    def refuse(request, timeout):
+        raise t.urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(t.urllib.request, "urlopen", refuse)
+    response = http.get("/api/tradility-quotes")
+    assert response.status_code == 503 and "not running" in response.get_json()["error"]
+
+
+def test_the_clockwork_page_carries_the_live_controls_and_card_repaint(api):
+    http, _ = api
+    page = http.get("/to-tradility").get_data(as_text=True)
+    for hook in (
+        'id="live-select"',
+        "/api/tradility-quotes",
+        "function startLive",
+        "function paintDetailLiveCards",
+        'id="detail-rating-card"',
+    ):
+        assert hook in page, hook

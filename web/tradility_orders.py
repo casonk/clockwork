@@ -388,6 +388,31 @@ def call_trader(
         return 503, {"ok": False, "error": "the trader service is not running"}
 
 
+def web_url() -> str:
+    """The standalone Tradility web application, which owns the live price and indicator maths."""
+    return os.environ.get("CLOCKWORK_TRADILITY_WEB_URL", "http://127.0.0.1:8770").rstrip("/")
+
+
+@bp.get("/api/tradility-quotes")
+def tradility_quotes():
+    """Live prices and live-moved indicators for every ticker, from the standalone Tradility app.
+
+    The indicator code lives in the Tradility package, so this only forwards the read."""
+    request = urllib.request.Request(
+        f"{web_url()}/api/tradility-quotes", headers={"Accept": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:  # noqa: S310
+            return jsonify(json.loads(response.read().decode("utf-8"))), response.status
+    except urllib.error.HTTPError as exc:
+        try:
+            return jsonify(json.loads(exc.read().decode("utf-8"))), exc.code
+        except ValueError:
+            return jsonify({"ok": False, "error": f"Tradility web error ({exc.code})"}), exc.code
+    except (urllib.error.URLError, OSError, ValueError):
+        return jsonify({"ok": False, "error": "the Tradility web application is not running"}), 503
+
+
 @bp.get("/api/tradility-trade/status")
 def trade_status():
     """Whether trading is available here, and the limits the policy sets (never any credential)."""
