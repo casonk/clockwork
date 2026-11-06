@@ -10,11 +10,21 @@ Mark items `[x]` when complete and move them to Done.
 
 ## Pending
 
+- [ ] [manual:2026-11-05] **Fix the failing `tests/test_site_chrome.py` test** —
+  `test_publish_writes_both_files_once_and_skips_a_missing_directory` fails on `main`
+  (an assertion at line 73); it predates this month's work and is the only red test in
+  the suite.
+
 - [ ] [manual:2026-11-04] **Complete Tradility UI federation** — after the
   standalone Tradility web service is installed and verified, set
   `CLOCKWORK_TRADILITY_WEB_URL` for the Clockwork service, preserve optional To
   Invest/finances provider contracts, and remove Clockwork's duplicated
   Tradility template and domain routes.
+  Update 2026-11-05: until then the legacy `/to-tradility` page carries the Live
+  control and live cards (#162) and `/api/tradility-quotes` forwards to the
+  standalone app; To Invest links each ticker to its card, and
+  `CLOCKWORK_TRADILITY_CARD_URL` (a `{ticker}` template) points those links at the
+  standalone service once it is federated. Remove all of this with the template.
 - [ ] [manual:2026-10-15] **Ask GitHub Support to purge pre-rewrite commits** — this
   repository's published history was rewritten (most recently on 2026-10-15,
   to remove per-commit AI attribution trailers). GitHub keeps serving the old
@@ -27,6 +37,20 @@ Mark items `[x]` when complete and move them to Done.
 ## In Progress
 
 ## Done
+
+- [x] [manual:2026-11-05] **Finances daily series** — a Month-end/Daily toggle on
+  `/finances`; daily Schwab balances are rebuilt from order history and anchored to
+  statements, with source, raw and adjustment per point. (#157)
+- [x] [manual:2026-11-05] **To Invest industries and target ranking** — Sectors and
+  Industries cards computed from holdings and the classification CSV (crypto is its own
+  industry under Financials), a Grouped / Holding % / Target rank order, and up/down
+  arrows to rank cards. (#158)
+- [x] [manual:2026-11-05] **Cascading targets** — targets are one tree that sums to 100%;
+  a ticker edit rolls up, an industry or sector edit rescales what is beneath it, and
+  typed values hold across tiers (impossible combinations are refused). (#159, #160)
+- [x] [manual:2026-11-05] **Live Tradility page and To Invest links** — live prices,
+  indicators and detail cards on `/to-tradility`, and a link from each To Invest ticker
+  to its Tradility card. (#162, #164)
 
 - [x] [manual:2026-11-01] **Let shopping AI recategorize existing items** —
   preserve the safe missing-only action and add an explicit confirmed scope
