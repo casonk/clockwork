@@ -317,7 +317,7 @@
             {% endif %}
             <div class="item-body">
               <span class="item-title {% if item[cfg.status] %}done{% endif %}">{{ value }}</span>
-              {% if cfg.key == "invest" and value|upper in tradility_cards %}<a class="item-link" href="/to-tradility?ticker={{ value|urlencode }}" title="Open {{ value }} in Tradility" aria-label="Open {{ value }} in Tradility">📈</a>{% endif %}
+              {% if cfg.key == "invest" and value|upper in tradility_cards %}<a class="item-link" href="{{ tradility_card_url|replace('{ticker}', value|urlencode) }}" title="Open {{ value }} in Tradility" aria-label="Open {{ value }} in Tradility">📈</a>{% endif %}
               {% if item.year %}<span class="item-meta">{{ item.year }}</span>{% endif %}
               {% if watch_badges and watch_badges.get(value) %}<span class="item-meta watch-badge" title="Logged by the library viewer">{{ watch_badges[value] }}</span>{% endif %}
               {% if item.name %}<span class="item-meta">{{ item.name }}</span>{% endif %}

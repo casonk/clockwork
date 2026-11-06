@@ -5044,6 +5044,7 @@ def _render_simple_list(key: str):
         backup_slots_mtime=backup_mtimes,
         invest_summary=invest_summary,
         tradility_cards=_tradility_card_tickers() if key == "invest" else frozenset(),
+        tradility_card_url=_tradility_card_url_template(),
         invest_category_totals=invest_category_totals,
         ollama_available=_ollama_available(),
         watch_available=WATCH_DIR.exists(),
@@ -6056,6 +6057,15 @@ def _read_tradility_analysis() -> dict:
 
 
 _tradility_card_cache: dict = {"key": None, "tickers": frozenset()}
+
+
+def _tradility_card_url_template() -> str:
+    """Where a ticker's Tradility card lives; ``{ticker}`` is replaced (URL-encoded).
+
+    Defaults to this app's own page; set CLOCKWORK_TRADILITY_CARD_URL to point at the standalone
+    Tradility service once it is federated."""
+    template = os.environ.get("CLOCKWORK_TRADILITY_CARD_URL", "").strip()
+    return template if "{ticker}" in template else "/to-tradility?ticker={ticker}"
 
 
 def _tradility_card_tickers() -> frozenset[str]:
