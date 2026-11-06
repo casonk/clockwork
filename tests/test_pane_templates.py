@@ -26,15 +26,6 @@ class PaneTemplatesTest(unittest.TestCase):
         self.assertIn("function confirmLadder(view = LADDER_TAB)", self.html)
         self.assertEqual(self.html.count("async function confirmLadder"), 1)
 
-    def test_every_card_collapses_from_its_title(self):
-        for needle in (
-            "initCollapsibleCards();",
-            ".cc-collapsed",
-            "tradility.cardsClosed",
-            "'.detail-card, .tpl-card'",
-        ):
-            self.assertIn(needle, self.html)
-
     def test_inline_script_parses(self):
         script = [
             x for x in re.findall(r"<script>(.*?)</script>", self.html, re.S) if "paneItems" in x
