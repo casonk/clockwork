@@ -1641,3 +1641,4 @@ def test_to_invest_rows_have_anchors_for_real_tickers_only_and_a_reveal_script(c
     assert 'id="invest-item-AAA"' in html
     assert "invest-item-TECHNOLOGY" not in html  # derived cards are not tickers
     assert "revealLinkedRow" in html and "hashchange" in html and "group-collapsed" in html
+    assert "scroll-margin-top" in html and "setTimeout(revealLinkedRow, 60)" in html
