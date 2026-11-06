@@ -44,15 +44,13 @@
     }
 
     .card {
+      position: relative;
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 10px;
-      padding: 16px;
-      text-decoration: none;
       color: var(--text);
       display: flex;
       flex-direction: column;
-      gap: 10px;
       min-width: 0;
       min-height: 112px;
       transition: border-color 0.15s, transform 0.12s, box-shadow 0.12s;
@@ -63,6 +61,33 @@
       box-shadow: 0 6px 22px rgba(0,0,0,0.45);
     }
     .card:active { transform: translateY(0); }
+
+    .card-link {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      gap: 10px;
+      min-width: 0;
+      min-height: 112px;
+      padding: 16px 42px 16px 16px;
+      color: var(--text);
+      text-decoration: none;
+    }
+    .card-new-tab {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      text-decoration: none;
+      line-height: 1;
+    }
+    .card-new-tab:hover { border-color: var(--accent); color: var(--accent); }
 
     .card-top { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
     .card-icon { font-size: 22px; line-height: 1; flex-shrink: 0; }
@@ -105,7 +130,7 @@
     .badge-snowbridge-mtls { background: var(--purple-dim); color: var(--purple); }
     .badge-vpn-only-direct { background: var(--red-dim);    color: var(--red);    }
     .badge-placeholder     { background: var(--yellow-dim); color: var(--yellow); }
-    .card-placeholder { cursor: default; }
+    .card-placeholder { cursor: default; padding: 16px; }
     .card-placeholder:hover {
       border-color: var(--border);
       transform: none;
@@ -114,10 +139,9 @@
 
     /* Split-action card (e.g. Guacamole: Login + Rebuild) */
     .card-split {
-      text-decoration: none;
-      color: var(--text);
       cursor: default;
     }
+    .card-split > .card-top { padding: 16px 42px 0 16px; }
     .card-split:hover {
       border-color: var(--border);
       transform: none;
@@ -129,6 +153,7 @@
       gap: 8px;
       margin-top: auto;
       min-width: 0;
+      padding: 0 16px 16px;
     }
     .btn-action {
       flex: 1;
@@ -155,7 +180,10 @@
     @media (max-width: 640px) {
       main { padding: 18px 12px 60px; }
       .card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-      .card { padding: 14px 12px; }
+      .card-link { padding: 14px 38px 14px 12px; }
+      .card-split > .card-top { padding: 14px 38px 0 12px; }
+      .card-placeholder { padding: 14px 12px; }
+      .card-actions { padding: 0 12px 14px; }
       .badge { font-size: 9px; padding: 2px 6px; }
     }
     @media (max-width: 380px) {
@@ -202,7 +230,9 @@
           <span class="card-name">Remote Desktop</span>
         </div>
         <div class="card-actions">
-          <a href="{{ card.url }}" class="btn-action btn-login" target="_blank" rel="noopener noreferrer">Browser</a>
+          <a href="{{ card.url }}" class="btn-action btn-login">Browser</a>
+          <a href="{{ card.url }}" class="card-new-tab" target="_blank" rel="noopener noreferrer"
+             aria-label="Open Remote Desktop in a new tab" title="Open Remote Desktop in a new tab">↗</a>
           {% if card.rdp_url %}
           <a href="{{ card.rdp_url }}" class="btn-action btn-app">App</a>
           {% endif %}
@@ -225,26 +255,27 @@
         </div>
       </div>
       {% else %}
-      {% set is_relative = card.url.startswith('/') %}
-      <a href="{{ card.url }}"
-         class="card"
-         {% if not is_relative %}target="_blank" rel="noopener noreferrer"{% endif %}>
-        <div class="card-top">
-          <span class="card-icon">{{ card.icon }}</span>
-          <span class="card-name">{{ card.display }}</span>
-        </div>
-        <div class="card-footer">
-          <span class="card-host">{{ card.hostname if card.hostname else "clockwork" }}</span>
-          {% set am = card.access_mode %}
-          {% if am == "shared-mtls" %}
-          <span class="badge badge-shared-mtls">mTLS</span>
-          {% elif am == "snowbridge-mtls" %}
-          <span class="badge badge-snowbridge-mtls">Snowbridge</span>
-          {% elif am == "vpn-only-direct" %}
-          <span class="badge badge-vpn-only-direct">VPN</span>
-          {% endif %}
-        </div>
-      </a>
+      <div class="card">
+        <a href="{{ card.url }}" class="card-link">
+          <div class="card-top">
+            <span class="card-icon">{{ card.icon }}</span>
+            <span class="card-name">{{ card.display }}</span>
+          </div>
+          <div class="card-footer">
+            <span class="card-host">{{ card.hostname if card.hostname else "clockwork" }}</span>
+            {% set am = card.access_mode %}
+            {% if am == "shared-mtls" %}
+            <span class="badge badge-shared-mtls">mTLS</span>
+            {% elif am == "snowbridge-mtls" %}
+            <span class="badge badge-snowbridge-mtls">Snowbridge</span>
+            {% elif am == "vpn-only-direct" %}
+            <span class="badge badge-vpn-only-direct">VPN</span>
+            {% endif %}
+          </div>
+        </a>
+        <a href="{{ card.url }}" class="card-new-tab" target="_blank" rel="noopener noreferrer"
+           aria-label="Open {{ card.display }} in a new tab" title="Open {{ card.display }} in a new tab">↗</a>
+      </div>
       {% endif %}
       {% endfor %}
     </div>
