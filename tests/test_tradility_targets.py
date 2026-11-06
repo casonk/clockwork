@@ -243,3 +243,7 @@ def test_a_tradility_target_that_cannot_be_placed_is_refused_without_saving(clie
     )  # no category chosen
     assert reply.status_code == 400
     assert list_files["INVEST_LIST_FILE"].read_text() == before
+
+
+def test_the_target_card_links_to_its_own_row_in_to_invest():
+    assert "/to-invest#invest-item-${encodeURIComponent(r.ticker || ticker)}" in HTML
