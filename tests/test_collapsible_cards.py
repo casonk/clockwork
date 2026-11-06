@@ -29,6 +29,11 @@ class CollapsibleCardsTest(unittest.TestCase):
         for needle in ("dialog", ".fs-card", ".chart-fs", ".popout", "data-cc"):
             self.assertIn(needle, js)
 
+    def test_home_page_groups_collapse(self):
+        js = SCRIPT.read_text()
+        self.assertIn(".group'", js)
+        self.assertIn(".group-label", js)
+
     def test_script_parses(self):
         try:
             result = subprocess.run(
