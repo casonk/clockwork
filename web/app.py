@@ -5517,6 +5517,19 @@ def sync_invest_holdings():
     return redirect(url_for("to_invest"))
 
 
+def _invest_rebalance_inputs() -> tuple[dict, list]:
+    """The classification table and holdings the target rebalance needs; empty when unavailable."""
+    try:
+        classes = _load_invest_classifications()
+    except (OSError, csv.Error, UnicodeDecodeError):
+        classes = {}
+    try:
+        holdings = _load_invest_holdings_payload()["holdings"]
+    except (OSError, json.JSONDecodeError, ValueError):
+        holdings = []
+    return classes, holdings
+
+
 INVEST_ORDERS = {"holding", "rank"}
 
 
@@ -5641,14 +5654,7 @@ def update_invest_targets():
     for item, category, ticker, target in resolved:
         if target != str(item.get("target_pct") or ""):
             edits.append((category, ticker, float(target) if target else None))
-    try:
-        classes = _load_invest_classifications()
-    except (OSError, csv.Error, UnicodeDecodeError):
-        classes = {}
-    try:
-        holdings = _load_invest_holdings_payload()["holdings"]
-    except (OSError, json.JSONDecodeError, ValueError):
-        holdings = []
+    classes, holdings = _invest_rebalance_inputs()
     problems = _rebalance_invest_targets(data, edits, classes, holdings)
     if problems:
         flash(problems[0][:1].upper() + problems[0][1:] + ". No targets were saved.", "error")
@@ -5758,6 +5764,7 @@ def api_tradility_set_target(ticker: str):
         found = _find_simple_item(category, symbol, cfg) or _find_simple_item(category, base, cfg)
         if found:
             break
+    placed_in = None
     if found is None:
         name = str(payload.get("category") or "").strip()
         category = _find_simple_category(data, name) if name else None
@@ -5765,13 +5772,23 @@ def api_tradility_set_target(ticker: str):
             return jsonify({"ok": False, "error": "choose a To Invest category to add it to"}), 400
         found = _parse_simple_item(base if name == "Crypto" else symbol, cfg)
         category["items"].append(found)
+        placed_in = name
+    # The same rebalance as the To Invest page: targets are one tree that sums to 100%, so this
+    # ticker's share rolls up to its industry and sector and the others rescale around it.
+    owner = next(c for c in data["categories"] if any(i is found for i in c["items"]))
+    classes, holdings = _invest_rebalance_inputs()
+    problems = _rebalance_invest_targets(
+        data,
+        [(owner["name"], found["ticker"], float(target) if target else None)],
+        classes,
+        holdings,
+    )
+    if problems:
+        return jsonify({"ok": False, "error": problems[0][:1].upper() + problems[0][1:]}), 400
+    if placed_in:
         _log_event(
-            cfg["history_file"], "add", item=found["ticker"], category=name, detail="tradility"
+            cfg["history_file"], "add", item=found["ticker"], category=placed_in, detail="tradility"
         )
-    if target:
-        found["target_pct"] = target
-    else:
-        found.pop("target_pct", None)
     save_simple_list("invest", data)
     _log_event(
         cfg["history_file"], "targets", detail=f"tradility {found['ticker']}={target or 'cleared'}"
