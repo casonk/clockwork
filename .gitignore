@@ -59,3 +59,4 @@ coverage.xml
 
 # Portfolio site link (created by traction-control scripts/portfolio_sites.py link)
 /.portfolio
+config/home-cards.json

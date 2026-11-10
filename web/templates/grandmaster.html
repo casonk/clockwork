@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1, user-scalable=yes">
+  <title>Grandmaster Clock — Clockwork</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: var(--font-size); min-height: 100vh; }
+    main { max-width: 1000px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+    header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+    h1 { font-size: 18px; }
+    h2 { font-size: 14px; color: var(--muted); font-weight: 600; }
+    section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; display: grid; gap: 8px; }
+    .group-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .app { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--border); }
+    .app:first-of-type { border-top: 0; }
+    .name { font-family: var(--mono); font-size: 13px; }
+    .desc, .muted { color: var(--muted); font-size: 12px; }
+    .badge { font-family: var(--mono); font-size: 12px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--border); }
+    .running { color: var(--green); } .failed { color: var(--red); } .stopped, .restarting { color: var(--yellow); } .disabled, .unknown { color: var(--muted); }
+    .actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+    button { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 12px; font: inherit; font-size: 13px; cursor: pointer; min-height: 32px; }
+    button:hover:not(:disabled) { border-color: var(--text); }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    #log { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; color: var(--muted); }
+    #log .bad { color: var(--red); }
+    .hc-row { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; padding: 6px 0; border-top: 1px solid var(--border); }
+    .hc-row.off .hc-name { text-decoration: line-through; color: var(--muted); }
+    .hc-name { font-size: 13px; } .hc-kind { font-size: 11px; color: var(--muted); margin-left: 6px; }
+    form.hc-add { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+    input, select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 13px; min-height: 32px; width: 100%; }
+    @media (max-width: 600px) { .app { grid-template-columns: 1fr; } .actions { justify-content: flex-start; } }
+  </style>
+  {% include "_theme_head.html" %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
+</head>
+<body>
+{% include "_site_nav.html" %}
+<main>
+  <header>
+    <h1>🎛️ Grandmaster Clock</h1>
+    <div class="actions">
+      <button data-all="enable">Enable all</button>
+      <button data-all="disable">Disable all</button>
+      <button data-all="restart">Restart running</button>
+    </div>
+  </header>
+  <p class="muted">Long-running apps only. Enable installs and starts an app; disable stops it and keeps it from starting; restart bounces it. The web UI itself is protected.</p>
+  {% for repo, apps in groups %}
+  <section data-repo="{{ repo }}">
+    <div class="group-head">
+      <h2>{{ repo }}</h2>
+      <div class="actions">
+        <button data-all="enable" data-repo="{{ repo }}">Enable</button>
+        <button data-all="disable" data-repo="{{ repo }}">Disable</button>
+        <button data-all="restart" data-repo="{{ repo }}">Restart</button>
+      </div>
+    </div>
+    {% for a in apps %}
+    <div class="app" data-manifest="{{ a.manifest_path }}" data-name="{{ a.name }}"{% if a.home_card %} data-home-card="{{ a.home_card }}"{% endif %}>
+      <div>
+        <span class="name">{{ a.name }}</span>
+        <span class="badge {{ a.state }}" data-state>{{ a.state }}</span>
+        {% if a.scope == 'system' %}<span class="muted">system</span>{% endif %}
+        {% if a.description %}<div class="desc">{{ a.description }}</div>{% endif %}
+        <a class="muted" href="/logs/{{ a.unit }}?scope={{ a.scope }}">logs</a>
+      </div>
+      <div class="actions">
+        {% if a.protected %}
+        <span class="muted">this web UI</span>
+        {% else %}
+        <button data-act="enable">Enable</button>
+        <button data-act="disable">Disable</button>
+        <button data-act="restart">Restart</button>
+        {% endif %}
+        {% if a.home_card %}
+        <button type="button" data-home-toggle data-hidden="{{ 'true' if a.home_hidden else 'false' }}" title="Whether this app's card is on the Home page">{{ 'Show on Home' if a.home_hidden else 'Hide from Home' }}</button>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </section>
+  {% else %}
+  <section><p class="muted">No long-running apps found in the manifests.</p></section>
+  {% endfor %}
+  <section id="home-cards">
+    <div class="group-head"><h2>🏠 Home page cards</h2><span class="muted" id="hc-count"></span></div>
+    <p class="muted">Hide a card to take it off Home (it stays in the Services menu). Link and placeholder cards can be removed outright; real services cannot.</p>
+    <div id="hc-list"><span class="muted">Loading…</span></div>
+    <h2>Add a link card</h2>
+    <form class="hc-add" id="hc-form" autocomplete="off">
+      <input name="name" placeholder="Name" maxlength="32" required>
+      <input name="url" placeholder="https://… or /page" maxlength="300" required>
+      <input name="icon" placeholder="Icon (emoji)" maxlength="8">
+      <select name="group" id="hc-group">{% for g in home_groups %}<option>{{ g }}</option>{% endfor %}</select>
+      <button type="submit">Add card</button>
+    </form>
+  </section>
+  <section aria-live="polite"><h2>Activity</h2><div id="log" class="muted">Nothing yet.</div></section>
+</main>
+<script>
+(() => {
+  const token = {{ csrf_token|tojson }};
+  const log = document.getElementById('log');
+  const say = (text, bad) => {
+    if (log.classList.contains('muted')) { log.classList.remove('muted'); log.textContent = ''; }
+    const line = document.createElement('div');
+    if (bad) line.className = 'bad';
+    line.textContent = text;
+    log.prepend(line);
+  };
+  const post = (action, body) => fetch('/api/grandmaster/' + action, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-CSRF-Token': token},
+    body: JSON.stringify(body),
+  }).then(r => r.json());
+  const report = (action, res) => {
+    const detail = (res.steps || []).filter(s => s[1] !== 0).map(s => s[2] || s[0]).join('; ');
+    say(`${action} ${res.name}: ${res.ok ? 'ok' : 'failed' + (detail ? ' (' + detail + ')' : '')}`, !res.ok);
+  };
+  const refresh = () => fetch('/api/grandmaster').then(r => r.json()).then(data => {
+    for (const a of data.apps) {
+      const row = [...document.querySelectorAll('.app')].find(
+        e => e.dataset.manifest === a.manifest_path && e.dataset.name === a.name);
+      const badge = row && row.querySelector('[data-state]');
+      if (badge) { badge.textContent = a.state; badge.className = 'badge ' + a.state; }
+    }
+  });
+  const busy = (on) => document.querySelectorAll('button').forEach(b => b.disabled = on);
+
+  // ---- Home page cards -------------------------------------------------
+  const hcList = document.getElementById('hc-list');
+  const hcPost = (path, body) => fetch('/api/grandmaster/home/' + path, {
+    method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': token},
+    body: JSON.stringify(body)}).then(r => r.json());
+  const renderCards = (cards) => {
+    hcList.innerHTML = '';
+    document.getElementById('hc-count').textContent =
+      `${cards.filter(c => !c.hidden).length} shown, ${cards.filter(c => c.hidden).length} hidden`;
+    let group = null, wrap = null;
+    for (const c of cards) {
+      if (c.group !== group) {
+        group = c.group;
+        const h = document.createElement('div'); h.className = 'muted'; h.style.marginTop = '8px'; h.textContent = group;
+        hcList.appendChild(h);
+      }
+      const row = document.createElement('div'); row.className = 'hc-row' + (c.hidden ? ' off' : '');
+      const label = document.createElement('div');
+      const name = document.createElement('span'); name.className = 'hc-name'; name.textContent = `${c.icon} ${c.display}`;
+      const kind = document.createElement('span'); kind.className = 'hc-kind'; kind.textContent = c.kind + (c.hidden ? ' · hidden' : '');
+      label.append(name, kind);
+      const actions = document.createElement('div'); actions.className = 'actions';
+      const toggle = document.createElement('button'); toggle.type = 'button'; toggle.textContent = c.hidden ? 'Show' : 'Hide';
+      toggle.onclick = async () => {
+        const res = await hcPost('hide', {name: c.name, hidden: !c.hidden});
+        res.ok ? renderCards(res.cards) : say(`home card ${c.display}: ${res.error}`, true);
+      };
+      if (c.pinned) {
+        const pin = document.createElement('span'); pin.className = 'muted'; pin.textContent = 'always shown';
+        actions.appendChild(pin);
+      } else {
+        actions.appendChild(toggle);
+      }
+      if (c.removable) {
+        const rm = document.createElement('button'); rm.type = 'button'; rm.textContent = 'Remove';
+        rm.onclick = async () => {
+          if (!confirm(`Remove the ${c.display} card?`)) return;
+          const res = await hcPost('remove', {name: c.name});
+          res.ok ? (say(`removed card ${c.display}`), renderCards(res.cards)) : say(`remove ${c.display}: ${res.error}`, true);
+        };
+        actions.appendChild(rm);
+      }
+      row.append(label, actions);
+      hcList.appendChild(row);
+    }
+  };
+  fetch('/api/grandmaster/home').then(r => r.json()).then(d => renderCards(d.cards))
+    .catch(e => { hcList.textContent = 'Could not load cards: ' + e; });
+  document.getElementById('hc-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.target;
+    const res = await hcPost('links', Object.fromEntries(new FormData(form)));
+    if (res.ok) { say(`added card ${res.card.name}`); form.reset(); renderCards(res.cards); }
+    else say(`add card: ${res.error}`, true);
+  });
+  document.addEventListener('click', async (event) => {
+    const toggle = event.target.closest('[data-home-toggle]');
+    if (!toggle) return;
+    const row = toggle.closest('.app');
+    const hide = toggle.dataset.hidden !== 'true';
+    const res = await hcPost('hide', {name: row.dataset.homeCard, hidden: hide});
+    if (!res.ok) { say(`home card ${row.dataset.name}: ${res.error}`, true); return; }
+    toggle.dataset.hidden = String(hide);
+    toggle.textContent = hide ? 'Show on Home' : 'Hide from Home';
+    say(`${hide ? 'hid' : 'showed'} ${row.dataset.name} on Home`);
+    renderCards(res.cards);
+  });
+  document.addEventListener('click', async (event) => {
+    const button = event.target.closest('button');
+    if (!button || !(button.dataset.act || button.dataset.all)) return;
+    const row = button.closest('.app');
+    busy(true);
+    try {
+      if (button.dataset.act && row) {
+        report(button.dataset.act, await post(button.dataset.act, {manifest_path: row.dataset.manifest, name: row.dataset.name}));
+      } else if (button.dataset.all) {
+        const scope = button.dataset.repo || 'every app';
+        if (button.dataset.all === 'disable' && !confirm(`Disable ${scope}?`)) return;
+        const res = await post(button.dataset.all, {all: true, repo: button.dataset.repo || null});
+        (res.results || []).forEach(r => report(button.dataset.all, r));
+        if (!(res.results || []).length) say(`${button.dataset.all} ${scope}: nothing to do`);
+      }
+    } catch (error) {
+      say('request failed: ' + error, true);
+    } finally {
+      busy(false);
+      refresh();
+    }
+  });
+})();
+</script>
+</body>
+</html>

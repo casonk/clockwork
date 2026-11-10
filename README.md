@@ -621,6 +621,21 @@ Clockwork's **To Code** list is available from `/home` and the Lists menu at
 `/to-code`. It groups backlog items by repository family and repository, with
 an explicit family selector when adding an item. Its default store is the
 gitignored `config/to-code.json`; `CLOCKWORK_CODE_LIST_FILE` and
+### Grandmaster Clock (`/grandmaster`)
+
+The Services menu links **Grandmaster Clock**, the orchestration page for long-running
+apps (manifest jobs with no timer or cron that are not one-shots). Each app shows
+running, failed, stopped or disabled, with Enable, Disable and Restart buttons per app
+and per repository, plus Enable all, Disable all and Restart running. It uses the same
+install, `systemctl` and sudo paths as the main page. The web UI's own unit is never
+disabled or restarted from it. `POST /api/grandmaster/<enable|disable|restart>` takes
+`{"manifest_path", "name"}` or `{"all": true, "repo": "..."}`.
+
+Grandmaster Clock also manages the Home page cards: hide or show any card, add link
+cards (`https://…` or `/path`), and remove link or placeholder cards. Real services can
+only be hidden, not removed, and hiding affects Home only. State lives in the gitignored
+`config/home-cards.json`.
+
 `CLOCKWORK_CODE_LIST_HISTORY_FILE` can point to other local files. Importing
 repo `BACKLOG.md` entries is a one-time local snapshot. Keep each repo's tracked
 `BACKLOG.md` current when completing an item; the page does not write back to

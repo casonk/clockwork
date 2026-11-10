@@ -50,6 +50,7 @@ MEDIA_MENU = (
 SERVICES_MENU = (
     ("Clockwork", "⏰", "/"),
     ("Schedule", "🗓️", "/schedule"),
+    ("Grandmaster Clock", "🎛️", "/grandmaster"),
     ("Themes", "🎨", "/themes"),
     ("Machine load", "🖥️", "/ecu"),
     ("All services", "", "/home"),
