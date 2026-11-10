@@ -112,8 +112,14 @@
     @media (prefers-reduced-motion: reduce) { .item.row-flash { animation:none; box-shadow:inset 0 0 0 2px var(--accent); } }
     .add-item-row, .add-category { display:flex; gap:8px; padding:10px 14px; background:var(--surface3); border-top:1px solid var(--border); }
     .add-category { border:1px solid var(--border); border-radius:8px; background:var(--surface); margin-top:16px; }
-    input[type="text"] { flex:1; min-width:0; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px; color:var(--text); outline:none; }
-    input[type="text"]:focus { border-color:var(--accent); }
+    input[type="text"], input[type="url"] { flex:1; min-width:0; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px; color:var(--text); outline:none; }
+    input[type="text"]:focus, input[type="url"]:focus { border-color:var(--accent); }
+    .youtube-linker { color:var(--muted); font-size:11px; }
+    .youtube-linker[open] { flex-basis:100%; }
+    .youtube-linker summary { cursor:pointer; }
+    .youtube-link-form { display:flex; gap:7px; margin-top:5px; width:100%; }
+    .youtube-link-form input { padding:5px 8px; }
+    .youtube-link-form button { padding:5px 9px; }
     .add-btn { padding:8px 14px; border-radius:6px; border:1px solid var(--accent-dim); background:transparent; color:var(--accent); font-weight:700; cursor:pointer; white-space:nowrap; }
     .add-btn:hover { background:var(--accent-dim); }
     .backup-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 14px; border:1px solid var(--border); border-radius:8px; background:var(--surface); margin:0 0 14px; }
@@ -189,6 +195,23 @@
     {% elif cfg.key in ("read", "listen") %}
       <button class="action-btn lib-check-btn" type="button" id="media-check-btn" title="Check which titles are available as local files">📁 Check Files</button>
       <a class="action-btn" href="{{ url_for('personal_library.browse', kind=cfg.key) }}" title="Browse local {{ cfg.title|lower }} files">{{ '🎧' if cfg.key == 'listen' else '📚' }} Library</a>
+    {% endif %}
+    {% if cfg.key in ("watch", "listen") %}
+      <form method="post" action="/{{ cfg.page }}/sync-youtube">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="action-btn" type="submit"{% if not youtube_status.configured %} disabled{% endif %}
+                title="{% if youtube_status.configured %}Pull playlist videos into Clockwork and push explicitly linked active items to every configured account{% else %}Configure YouTube OAuth and this list's playlist ID first{% endif %}">↔ Sync YouTube</button>
+      </form>
+      <form method="post" action="/youtube/create-playlists">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="/{{ cfg.page }}">
+        <button class="action-btn" type="submit"{% if not youtube_account_count %} disabled{% endif %}
+                title="Create only missing private To Watch and To Listen playlists for authorized accounts">＋ YouTube Lists</button>
+      </form>
+      {% for playlist in youtube_playlists %}
+        <a class="action-btn" href="{{ playlist.url }}" target="_blank" rel="noopener noreferrer"
+           title="Open this list's private YouTube playlist ({{ playlist.account }})">▶ Playlist{% if youtube_playlists|length > 1 %} · {{ playlist.account }}{% endif %}</a>
+      {% endfor %}
     {% endif %}
     {% if cfg.get("holdings_sync") %}
       <form method="post" action="/to-invest/sync-holdings">
@@ -325,6 +348,7 @@
             {% endif %}
             <div class="item-body">
               <span class="item-title {% if item[cfg.status] %}done{% endif %}">{{ value }}</span>
+              {% if item.youtube_url %}<a class="item-link" href="{{ item.youtube_url }}" target="_blank" rel="noopener noreferrer" title="Open on YouTube" aria-label="Open {{ value }} on YouTube">▶</a>{% endif %}
               {% if cfg.key == "invest" %}
                 {% set row_key = cat.name ~ "|" ~ value %}
                 {% set dups = invest_duplicates.get(row_key) %}
@@ -335,6 +359,20 @@
                 {% if card %}<a class="item-link" href="{{ tradility_card_url|replace('{ticker}', card|urlencode) }}" title="Open {{ card }} in Tradility" aria-label="Open {{ card }} in Tradility">📈</a>{% endif %}
               {% endif %}
               {% if item.year %}<span class="item-meta">{{ item.year }}</span>{% endif %}
+              {% if item.youtube_channel %}<span class="item-meta">{{ item.youtube_channel }}</span>{% endif %}
+              {% if item.youtube_account %}<span class="item-meta" title="YouTube account">via {{ item.youtube_account }}</span>{% endif %}
+              {% if cfg.key in ("watch", "listen") %}
+                <details class="youtube-linker">
+                  <summary>{{ "Change YouTube link" if item.youtube_url else "Link YouTube video" }}</summary>
+                  <form class="youtube-link-form" method="post" action="/{{ cfg.page }}/link-youtube">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="category" value="{{ cat.name }}">
+                    <input type="hidden" name="item" value="{{ value }}">
+                    <input type="url" name="youtube_url" value="{{ item.youtube_url or '' }}" placeholder="https://youtu.be/..." aria-label="YouTube URL for {{ value }}" required>
+                    <button class="add-btn" type="submit">Link</button>
+                  </form>
+                </details>
+              {% endif %}
               {% if watch_badges and watch_badges.get(value) %}<span class="item-meta watch-badge" title="Logged by the library viewer">{{ watch_badges[value] }}</span>{% endif %}
               {% if item.name %}<span class="item-meta">{{ item.name }}</span>{% endif %}
               {% if cfg.key == "invest" %}
@@ -395,6 +433,7 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="category" value="{{ cat.name }}">
         <input type="text" name="item" placeholder="{{ cfg.item_placeholder }}" autocomplete="off">
+        {% if cfg.key in ("watch", "listen") %}<input type="url" name="youtube_url" placeholder="YouTube URL (optional)" autocomplete="off">{% endif %}
         <button class="add-btn" type="submit">+ Add</button>
       </form>
     </section>

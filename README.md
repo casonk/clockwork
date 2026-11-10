@@ -299,6 +299,74 @@ time with Real-ESRGAN on the GPU: sources up to 576 lines become 1080p, 720p
 and 1080p sources become 4K (the model runs at 4x, then the frame is resized to
 the exact target). Animation (the Animation genre folder or "animated" genres)
 uses `realesr-animevideov3`; live action blends `realesr-general-x4v3` with its
+### YouTube playlists for To Watch and To Listen
+
+To Watch and To Listen synchronize separate private YouTube playlists across
+one or more Google accounts. Sync is additive in both directions: it imports
+playlist videos by stable YouTube video ID and pushes active Clockwork rows
+that have an explicit YouTube URL into every configured account's matching
+playlist. It preserves Clockwork categories and completion state and never
+removes a local or remote row. An existing local row with the same title is
+left unchanged instead of being guessed to be the same video. One expired
+account does not block successful syncs from the others.
+
+Set up the integration as the user that runs Clockwork:
+
+1. In Google Cloud, enable **YouTube Data API v3**, configure the OAuth consent
+   screen, create an OAuth client of type **Desktop app**, and download its JSON
+   credential outside this repository.
+2. Either create private `To Watch` and `To Listen` playlists in YouTube and
+   copy their IDs, or let Clockwork create only the missing private playlists
+   after the broader opt-in authorization described below.
+3. Run `python3 scripts/authorize_youtube.py /path/to/client.json`. The local
+   loopback flow requests only `youtube.readonly` and stores the refresh token
+   in owner-only `~/.config/clockwork/youtube-oauth.json`; it never prints the
+   token.
+   To use **+ YouTube Lists**, add `--create-playlists`. Google has no
+   playlist-only scope: this requests `youtube.force-ssl`, whose grant is broad
+   enough to edit and delete other YouTube resources even though Clockwork's
+   implementation exposes only exact-name private playlist lookup/creation and
+   adding explicitly linked videos to those playlists. It has no update or
+   delete operation.
+   An existing Clockwork OAuth grant can be supplied in place of the downloaded
+   client JSON when broadening its permission, with the same path passed to
+   `--output`; the old grant remains intact unless the new flow succeeds.
+4. For every additional account, run the helper again with a distinct output:
+
+   ```bash
+   python3 scripts/authorize_youtube.py /path/to/second-client.json \
+     --output ~/.config/clockwork/youtube-second.json \
+     --create-playlists
+   ```
+
+5. Copy `config/youtube-accounts.example.json` to owner-only
+   `~/.config/clockwork/youtube-accounts.json`, add one row per account and its
+   two playlist IDs, and set this in owner-only
+   `~/.config/clockwork/clockwork-web.env` before restarting the service:
+
+   ```dotenv
+   CLOCKWORK_YOUTUBE_ACCOUNTS_FILE=/home/you/.config/clockwork/youtube-accounts.json
+   ```
+
+   The older `CLOCKWORK_YOUTUBE_OAUTH_FILE` and per-list playlist variables
+   remain supported when the registry does not exist.
+
+The **+ YouTube Lists** action creates or links only missing exact-name private
+playlists, records each returned ID in the owner-only registry immediately,
+and isolates per-account failures. The **Sync YouTube** button is enabled
+separately on each list once at least one account has its playlist ID and
+credential file present. It first imports remote playlist items, then pushes
+each distinct active local item with an explicit YouTube URL to every healthy
+configured account that does not already contain it. The add form accepts an
+optional URL, and every existing row has a **Link YouTube video** control.
+Clockwork never searches by title or guesses which video represents a movie,
+show, album, podcast, or artist. New remote entries go into a local `YouTube`
+category by default; each account may override its `watch_category` and
+`listen_category` in the registry.
+Clockwork does not use YouTube Watch Later or watch history, which the Data API
+does not expose. It cannot upload, comment, edit videos, or delete playlists.
+See `config/youtube.env.example` for the complete environment template.
+
 weak-denoise twin (`CLOCKWORK_UPSCALE_DENOISE`, default 0.5) so film grain and
 skin texture survive. The queue runs lowest resolution first, newest downloads
 first within that.
