@@ -71,6 +71,392 @@ def _csrf(client, path: str) -> str:
     return resp.get_json()["csrf_token"]
 
 
+def test_youtube_status_exposes_readiness_without_credential_path(client, tmp_path, monkeypatch):
+    settings = web_app.youtube_api.Settings(
+        oauth_file=tmp_path / "youtube.json",
+        watch_playlist_id="watch-playlist",
+    )
+    monkeypatch.setattr(web_app.youtube_api, "settings_list_from_env", lambda: [settings])
+
+    payload = client.get("/api/youtube").get_json()
+
+    assert payload["ok"] is True
+    assert payload["youtube"]["watch"]["configured"] is False
+    assert "oauth_file" not in json.dumps(payload)
+
+
+def test_list_pages_link_to_configured_playlists_only_in_the_page(client, tmp_path, monkeypatch):
+    accounts = [
+        web_app.youtube_api.Settings(
+            oauth_file=tmp_path / "a.json",
+            name="One",
+            watch_playlist_id="PLwatch1",
+            listen_playlist_id="PLlisten1",
+        ),
+        web_app.youtube_api.Settings(
+            oauth_file=tmp_path / "b.json", name="Two", watch_playlist_id="PLwatch2"
+        ),
+    ]
+    monkeypatch.setattr(web_app.youtube_api, "settings_list_from_env", lambda: accounts)
+
+    watch = client.get("/to-watch").get_data(as_text=True)
+    listen = client.get("/to-listen").get_data(as_text=True)
+
+    assert "https://www.youtube.com/playlist?list=PLwatch1" in watch
+    assert "https://www.youtube.com/playlist?list=PLwatch2" in watch
+    assert "PLlisten1" not in watch
+    assert "https://www.youtube.com/playlist?list=PLlisten1" in listen
+    assert "PLwatch1" not in listen
+    assert "PLwatch1" not in json.dumps(client.get("/api/youtube").get_json())
+
+
+def test_playlist_links_skip_accounts_without_a_playlist(tmp_path):
+    settings = web_app.youtube_api.Settings(oauth_file=tmp_path / "a.json", name="One")
+
+    assert web_app.youtube_api.playlist_links([settings], "watch") == []
+
+
+def test_youtube_metadata_is_scoped_to_watch_and_listen_lists():
+    for key in ("watch", "listen"):
+        extras = web_app._simple_list_config(key)["extras"]
+        assert "youtube_video_id" in extras
+        assert "youtube_url" in extras
+    assert web_app._simple_list_config("read")["extras"] == ["year"]
+
+
+def test_youtube_sync_imports_additively_and_is_idempotent(
+    client, list_files, tmp_path, monkeypatch
+):
+    settings = web_app.youtube_api.Settings(
+        oauth_file=tmp_path / "youtube.json",
+        watch_playlist_id="watch-playlist",
+        watch_category="YouTube",
+    )
+    videos = [
+        {
+            "video_id": "video-1",
+            "playlist_item_id": "playlist-item-1",
+            "title": "A useful talk",
+            "channel": "Useful Channel",
+            "account": "Personal",
+            "url": "https://www.youtube.com/watch?v=video-1",
+        }
+    ]
+    monkeypatch.setattr(web_app.youtube_api, "settings_list_from_env", lambda: [settings])
+    monkeypatch.setattr(web_app.youtube_api, "playlist_videos", lambda *_args: videos)
+    list_files["WATCH_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {"name": "Movies", "items": [{"title": "Local movie", "watched": True}]}
+                ]
+            }
+        )
+    )
+    token = _csrf(client, "/api/watch")
+
+    first = client.post("/to-watch/sync-youtube", data={"csrf_token": token})
+    second = client.post("/to-watch/sync-youtube", data={"csrf_token": token})
+
+    assert first.status_code == 302
+    assert second.status_code == 302
+    saved = json.loads(list_files["WATCH_LIST_FILE"].read_text())
+    assert saved["categories"][0]["items"] == [{"title": "Local movie", "watched": True}]
+    imported = saved["categories"][-1]["items"]
+    assert len(imported) == 1
+    assert imported[0]["youtube_video_id"] == "video-1"
+    assert imported[0]["youtube_channel"] == "Useful Channel"
+    assert imported[0]["youtube_account"] == "Personal"
+    assert imported[0]["watched"] is False
+    history = list_files["WATCH_LIST_HISTORY_FILE"].read_text()
+    assert '"action": "sync-youtube"' in history
+    assert "added=1" in history
+    assert "added=0" in history
+
+
+def test_youtube_sync_pushes_explicit_active_links_to_each_account(
+    client, list_files, tmp_path, monkeypatch
+):
+    accounts = [
+        web_app.youtube_api.Settings(
+            oauth_file=tmp_path / "main.json",
+            name="Main",
+            watch_playlist_id="watch-main",
+        ),
+        web_app.youtube_api.Settings(
+            oauth_file=tmp_path / "other.json",
+            name="Other",
+            watch_playlist_id="watch-other",
+        ),
+    ]
+    remote = {
+        "Main": [
+            {
+                "video_id": "remote-1",
+                "playlist_item_id": "item-remote",
+                "title": "Remote video",
+                "channel": "Creator",
+                "account": "Main",
+                "url": "https://www.youtube.com/watch?v=remote-1",
+            }
+        ],
+        "Other": [
+            {
+                "video_id": "local-1",
+                "playlist_item_id": "item-local",
+                "title": "Local video",
+                "channel": "Creator",
+                "account": "Other",
+                "url": "https://www.youtube.com/watch?v=local-1",
+            }
+        ],
+    }
+    monkeypatch.setattr(web_app.youtube_api, "settings_list_from_env", lambda: accounts)
+    monkeypatch.setattr(
+        web_app.youtube_api,
+        "playlist_videos",
+        lambda account, _key: remote[account.name],
+    )
+    pushed = []
+    monkeypatch.setattr(
+        web_app.youtube_api,
+        "add_video_to_playlist",
+        lambda account, key, video_id: (
+            pushed.append((account.name, key, video_id)) or f"item-{video_id}"
+        ),
+    )
+    list_files["WATCH_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {
+                        "name": "Movies",
+                        "items": [
+                            {
+                                "title": "Local video",
+                                "watched": False,
+                                "youtube_video_id": "local-1",
+                                "youtube_url": "https://www.youtube.com/watch?v=local-1",
+                            },
+                            {
+                                "title": "Completed video",
+                                "watched": True,
+                                "youtube_video_id": "done-1",
+                                "youtube_url": "https://www.youtube.com/watch?v=done-1",
+                            },
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+    token = _csrf(client, "/api/watch")
+
+    response = client.post(
+        "/to-watch/sync-youtube", data={"csrf_token": token}, follow_redirects=True
+    )
+
+    assert response.status_code == 200
+    assert set(pushed) == {
+        ("Main", "watch", "local-1"),
+        ("Other", "watch", "remote-1"),
+    }
+    assert "2 pushed" in response.get_data(as_text=True)
+    history = list_files["WATCH_LIST_HISTORY_FILE"].read_text()
+    assert "pushed=2" in history
+
+
+def test_youtube_url_can_be_added_and_linked_without_guessing(client, list_files):
+    token = _csrf(client, "/api/watch")
+    response = client.post(
+        "/to-watch/add-item",
+        data={
+            "csrf_token": token,
+            "category": "Movies",
+            "item": "Explicit video",
+            "youtube_url": "https://youtu.be/abc_123-XYZ?t=30",
+        },
+    )
+    assert response.status_code == 302
+    saved = json.loads(list_files["WATCH_LIST_FILE"].read_text())
+    item = saved["categories"][0]["items"][0]
+    assert item["youtube_video_id"] == "abc_123-XYZ"
+    assert item["youtube_url"] == "https://www.youtube.com/watch?v=abc_123-XYZ"
+
+    response = client.post(
+        "/to-watch/link-youtube",
+        data={
+            "csrf_token": token,
+            "category": "Movies",
+            "item": "Explicit video",
+            "youtube_url": "https://youtube.com/shorts/xyz_789-ABC",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "Sync YouTube to push it" in response.get_data(as_text=True)
+    assert 'action="/to-watch/link-youtube"' in response.get_data(as_text=True)
+    assert 'name="youtube_url"' in response.get_data(as_text=True)
+    saved = json.loads(list_files["WATCH_LIST_FILE"].read_text())
+    item = saved["categories"][0]["items"][0]
+    assert item["youtube_video_id"] == "xyz_789-ABC"
+    assert item["youtube_url"] == "https://www.youtube.com/watch?v=xyz_789-ABC"
+
+
+def test_youtube_url_api_rejects_non_youtube_host(client):
+    token = _csrf(client, "/api/listen")
+    response = client.post(
+        "/api/listen/add-item",
+        json={
+            "category": "Albums",
+            "title": "Wrong host",
+            "youtube_url": "https://youtube.example/watch?v=abc_123-XYZ",
+        },
+        headers={"X-CSRF-Token": token},
+    )
+
+    assert response.status_code == 400
+    assert "valid youtube.com or youtu.be" in response.get_json()["error"]
+
+
+def test_youtube_sync_leaves_exact_title_conflicts_unlinked(
+    client, list_files, tmp_path, monkeypatch
+):
+    settings = web_app.youtube_api.Settings(
+        oauth_file=tmp_path / "youtube.json",
+        listen_playlist_id="listen-playlist",
+    )
+    monkeypatch.setattr(web_app.youtube_api, "settings_list_from_env", lambda: [settings])
+    monkeypatch.setattr(
+        web_app.youtube_api,
+        "playlist_videos",
+        lambda *_args: [
+            {
+                "video_id": "video-1",
+                "playlist_item_id": "item-1",
+                "title": "Existing album",
+                "channel": "Artist",
+                "url": "https://www.youtube.com/watch?v=video-1",
+            }
+        ],
+    )
+    list_files["LISTEN_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {"name": "Albums", "items": [{"title": "Existing album", "watched": False}]}
+                ]
+            }
+        )
+    )
+    token = _csrf(client, "/api/listen")
+
+    response = client.post(
+        "/to-listen/sync-youtube", data={"csrf_token": token}, follow_redirects=True
+    )
+
+    assert response.status_code == 200
+    assert "1 exact-title conflict(s) were left unchanged" in response.get_data(as_text=True)
+    saved = json.loads(list_files["LISTEN_LIST_FILE"].read_text())
+    assert len(saved["categories"]) == 1
+    assert "youtube_video_id" not in saved["categories"][0]["items"][0]
+
+
+def test_youtube_sync_merges_accounts_and_isolates_one_account_failure(
+    client, list_files, tmp_path, monkeypatch
+):
+    accounts = [
+        web_app.youtube_api.Settings(
+            oauth_file=tmp_path / "main.json",
+            name="Main",
+            watch_playlist_id="watch-main",
+        ),
+        web_app.youtube_api.Settings(
+            oauth_file=tmp_path / "broken.json",
+            name="Broken",
+            watch_playlist_id="watch-broken",
+        ),
+    ]
+    monkeypatch.setattr(web_app.youtube_api, "settings_list_from_env", lambda: accounts)
+
+    def videos(account, _key):
+        if account.name == "Broken":
+            raise web_app.youtube_api.YouTubeError("grant expired")
+        return [
+            {
+                "video_id": "video-main",
+                "playlist_item_id": "item-main",
+                "title": "From main",
+                "channel": "Creator",
+                "account": account.name,
+                "url": "https://www.youtube.com/watch?v=video-main",
+            }
+        ]
+
+    monkeypatch.setattr(web_app.youtube_api, "playlist_videos", videos)
+    token = _csrf(client, "/api/watch")
+
+    response = client.post(
+        "/to-watch/sync-youtube", data={"csrf_token": token}, follow_redirects=True
+    )
+
+    html = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "checked 1 account(s), added 1" in html
+    assert "Broken: grant expired" in html
+    saved = json.loads(list_files["WATCH_LIST_FILE"].read_text())
+    imported = saved["categories"][-1]["items"][0]
+    assert imported["youtube_account"] == "Main"
+
+
+def test_youtube_create_playlists_creates_missing_and_records_ids(client, tmp_path, monkeypatch):
+    accounts = [
+        web_app.youtube_api.Settings(
+            oauth_file=tmp_path / "main.json",
+            name="Main",
+            watch_playlist_id="existing-watch",
+        ),
+        web_app.youtube_api.Settings(
+            oauth_file=tmp_path / "other.json",
+            name="Other",
+        ),
+    ]
+    monkeypatch.setattr(web_app.youtube_api, "settings_list_from_env", lambda: accounts)
+    created = []
+    recorded = []
+
+    def ensure(account, title):
+        created.append((account.name, title))
+        return f"{account.name}-{title}", True
+
+    monkeypatch.setattr(web_app.youtube_api, "ensure_private_playlist", ensure)
+    monkeypatch.setattr(
+        web_app.youtube_api,
+        "set_playlist_id",
+        lambda name, key, playlist_id: recorded.append((name, key, playlist_id)),
+    )
+    token = _csrf(client, "/api/watch")
+
+    response = client.post(
+        "/youtube/create-playlists",
+        data={"csrf_token": token, "next": "/to-watch"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert created == [
+        ("Main", "To Listen"),
+        ("Other", "To Watch"),
+        ("Other", "To Listen"),
+    ]
+    assert [row[:2] for row in recorded] == [
+        ("Main", "listen"),
+        ("Other", "watch"),
+        ("Other", "listen"),
+    ]
+    assert "created 3, linked 0 existing" in response.get_data(as_text=True)
+
+
 def test_tradility_api_reports_stale_data_and_refreshes_via_systemd(
     client, list_files, monkeypatch
 ):

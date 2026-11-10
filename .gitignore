@@ -43,6 +43,9 @@ config/*-history.jsonl
 config/*.hot.json
 config/*.cold.json
 config/*.archive.json
+config/youtube-oauth.json
+config/youtube-accounts.json
+config/google-oauth-client*.json
 
 # Media library catalog and rename journal (local library state).
 config/media-library*

@@ -1,0 +1,18 @@
+{
+  "accounts": [
+    {
+      "name": "Main channel",
+      "oauth_file": "youtube-main.json",
+      "watch_playlist_id": "PL...",
+      "listen_playlist_id": "PL...",
+      "watch_category": "YouTube",
+      "listen_category": "YouTube"
+    },
+    {
+      "name": "Second channel",
+      "oauth_file": "youtube-second.json",
+      "watch_playlist_id": "PL...",
+      "listen_playlist_id": "PL..."
+    }
+  ]
+}
