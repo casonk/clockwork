@@ -55,6 +55,7 @@ try:
         themes_admin,
         tradility_orders,
         watch_log,
+        youtube_api,
     )
     from web import personal_library as personal_media
     from web.library_pages import library_pages
@@ -82,6 +83,7 @@ except ModuleNotFoundError:
     import themes_admin
     import tradility_orders
     import watch_log
+    import youtube_api
     from library_pages import library_pages
     from personal_library import personal_library
     from portfolio import site as portfolio_site
@@ -4076,7 +4078,14 @@ SIMPLE_LIST_CONFIGS = {
         "item_placeholder": "Add title or Title (Year)...",
         "category_placeholder": "New list (e.g. Live Shows)...",
         "name_label": "List",
-        "extras": ["year"],
+        "extras": [
+            "year",
+            "youtube_video_id",
+            "youtube_playlist_item_id",
+            "youtube_url",
+            "youtube_channel",
+            "youtube_account",
+        ],
     },
     "read": {
         "page": "to-read",
@@ -4112,7 +4121,14 @@ SIMPLE_LIST_CONFIGS = {
         "item_placeholder": "Add title, artist, or Title (Year)...",
         "category_placeholder": "New list...",
         "name_label": "List",
-        "extras": ["year"],
+        "extras": [
+            "year",
+            "youtube_video_id",
+            "youtube_playlist_item_id",
+            "youtube_url",
+            "youtube_channel",
+            "youtube_account",
+        ],
         "ollama": True,
     },
     "invest": {
@@ -5123,6 +5139,85 @@ def _find_todo_item(cat: dict, title: str) -> dict | None:
     return _find_simple_item(cat, title, _simple_list_config("todo"))
 
 
+def _merge_youtube_playlist(
+    data: dict, cfg: dict, videos: list[dict[str, str]], category_name: str
+) -> tuple[int, int, int, int]:
+    """Add new playlist videos without deleting, moving, or title-matching local rows.
+
+    Returns ``(added, linked, conflicts, changed)``. An exact-title collision is
+    left alone because titles are Clockwork's local item identity; guessing that
+    it is the same video would attach provider state to the wrong row.
+    """
+
+    by_video_id: dict[str, dict] = {}
+    local_titles: set[str] = set()
+    for category in data["categories"]:
+        for item in category["items"]:
+            local_titles.add(_simple_item_value(item, cfg).casefold())
+            video_id = str(item.get("youtube_video_id") or "").strip()
+            if video_id:
+                by_video_id.setdefault(video_id, item)
+
+    target = _find_simple_category(data, category_name)
+    added = linked = conflicts = changed = 0
+    for video in videos:
+        video_id = str(video.get("video_id") or "").strip()
+        title = str(video.get("title") or "").strip()
+        if not video_id or not title:
+            continue
+        metadata = {
+            "youtube_video_id": video_id,
+            "youtube_playlist_item_id": str(video.get("playlist_item_id") or "").strip(),
+            "youtube_url": str(video.get("url") or "").strip(),
+            "youtube_channel": str(video.get("channel") or "").strip(),
+            "youtube_account": str(video.get("account") or "").strip(),
+        }
+        existing = by_video_id.get(video_id)
+        if existing is not None:
+            linked += 1
+            for field, value in metadata.items():
+                if value and existing.get(field) != value:
+                    existing[field] = value
+                    changed += 1
+            continue
+        if title.casefold() in local_titles:
+            conflicts += 1
+            continue
+        if target is None:
+            target = {"name": category_name, "items": []}
+            data["categories"].append(target)
+        item = {cfg["primary"]: title, cfg["status"]: False, **metadata}
+        target["items"].append(item)
+        by_video_id[video_id] = item
+        local_titles.add(title.casefold())
+        added += 1
+        changed += 1
+    return added, linked, conflicts, changed
+
+
+def _youtube_link_fields(value: str) -> dict[str, str]:
+    video_id = youtube_api.video_id_from_url(value)
+    return {
+        "youtube_video_id": video_id,
+        "youtube_url": youtube_api.video_url(video_id),
+    }
+
+
+def _active_youtube_video_ids(data: dict, cfg: dict) -> list[str]:
+    """Return distinct explicitly linked videos still active in the local queue."""
+
+    video_ids: list[str] = []
+    seen: set[str] = set()
+    for category in data["categories"]:
+        for item in category["items"]:
+            video_id = str(item.get("youtube_video_id") or "").strip()
+            if item.get(cfg["status"]) or not video_id or video_id in seen:
+                continue
+            seen.add(video_id)
+            video_ids.append(video_id)
+    return video_ids
+
+
 def _render_simple_list(key: str):
     cfg = _simple_list_config(key)
     data = load_simple_list(key)
@@ -5223,6 +5318,9 @@ def _render_simple_list(key: str):
                     key=lambda i: -float(i.get("allocation_pct") or 0),
                 )
     invest_rows = _invest_row_anchors(data) if key == "invest" else ({}, {}, {})
+    youtube_accounts = youtube_api.settings_list_from_env() if key in {"watch", "listen"} else []
+    youtube_state = youtube_api.public_status(youtube_accounts) if youtube_accounts else {}
+    youtube_playlists = youtube_api.playlist_links(youtube_accounts, key)
     return render_template(
         "to-list.html",
         cfg=cfg,
@@ -5245,6 +5343,9 @@ def _render_simple_list(key: str):
         invest_category_totals=invest_category_totals,
         ollama_available=_ollama_available(),
         watch_available=WATCH_DIR.exists(),
+        youtube_status=youtube_state.get(key, {}),
+        youtube_account_count=youtube_state.get("account_count", 0),
+        youtube_playlists=youtube_playlists,
     )
 
 
@@ -5318,6 +5419,133 @@ def to_read():
 @app.get("/to-listen")
 def to_listen():
     return _render_simple_list("listen")
+
+
+@app.get("/api/youtube")
+def youtube_status():
+    """Report local integration readiness without reading or returning secrets."""
+
+    return jsonify(
+        {
+            "ok": True,
+            "youtube": youtube_api.public_status(youtube_api.settings_list_from_env()),
+            "csrf_token": _csrf_token(),
+        }
+    )
+
+
+@app.post("/<page>/sync-youtube")
+def simple_list_sync_youtube(page):
+    key = _simple_list_key_from_page(page)
+    if key not in {"watch", "listen"}:
+        abort(404)
+    cfg = _simple_list_config(key)
+    try:
+        accounts = youtube_api.settings_list_from_env()
+    except youtube_api.YouTubeError as exc:
+        flash(f"YouTube sync failed: {exc}", "error")
+        return redirect(url_for(_simple_list_endpoint(key)))
+    configured = [account for account in accounts if account.playlist_id(key)]
+    if not configured:
+        flash(
+            f"YouTube sync failed: no account has a To {key.title()} playlist configured", "error"
+        )
+        return redirect(url_for(_simple_list_endpoint(key)))
+    data = load_simple_list(key)
+    added = linked = conflicts = changed = playlist_total = pushed = 0
+    failures: list[str] = []
+    categories: list[str] = []
+    remote_video_ids: dict[str, set[str]] = {}
+    for account in configured:
+        try:
+            videos = youtube_api.playlist_videos(account, key)
+        except (youtube_api.YouTubeError, OSError, RuntimeError) as exc:
+            failures.append(f"{account.name}: {exc}")
+            continue
+        remote_video_ids[account.name] = {
+            str(video.get("video_id") or "").strip()
+            for video in videos
+            if str(video.get("video_id") or "").strip()
+        }
+        result = _merge_youtube_playlist(data, cfg, videos, account.category(key))
+        added += result[0]
+        linked += result[1]
+        conflicts += result[2]
+        changed += result[3]
+        playlist_total += len(videos)
+        categories.append(account.category(key))
+    if changed:
+        save_simple_list(key, data)
+    if not categories:
+        flash(f"YouTube sync failed: {'; '.join(failures)}", "error")
+        return redirect(url_for(_simple_list_endpoint(key)))
+
+    local_video_ids = _active_youtube_video_ids(data, cfg)
+    for account in configured:
+        existing = remote_video_ids.get(account.name)
+        if existing is None:
+            continue
+        for video_id in local_video_ids:
+            if video_id in existing:
+                continue
+            try:
+                youtube_api.add_video_to_playlist(account, key, video_id)
+            except (youtube_api.YouTubeError, OSError, RuntimeError) as exc:
+                failures.append(f"{account.name} / {video_id}: {exc}")
+                continue
+            existing.add(video_id)
+            pushed += 1
+
+    detail = (
+        f"accounts={len(categories)}, added={added}, linked={linked}, conflicts={conflicts}, "
+        f"playlist={playlist_total}, pushed={pushed}, failed={len(failures)}"
+    )
+    _log_event(cfg["history_file"], "sync-youtube", detail=detail)
+    message = (
+        f"YouTube sync checked {len(categories)} account(s), added {added}; "
+        f"{linked} linked; {pushed} pushed."
+    )
+    if conflicts:
+        message += f" {conflicts} exact-title conflict(s) were left unchanged."
+    flash(message, "success")
+    if failures:
+        flash(f"Some YouTube accounts failed: {'; '.join(failures)}", "error")
+    return redirect(url_for(_simple_list_endpoint(key)) + f"#{_slug(categories[0])}")
+
+
+@app.post("/youtube/create-playlists")
+def youtube_create_playlists():
+    """Create only the missing private To Watch and To Listen playlists."""
+
+    try:
+        accounts = youtube_api.settings_list_from_env()
+    except youtube_api.YouTubeError as exc:
+        flash(f"YouTube playlist creation failed: {exc}", "error")
+        return redirect(_return_path("/to-watch"))
+    created = linked = 0
+    failures: list[str] = []
+    for account in accounts:
+        for key, title in (("watch", "To Watch"), ("listen", "To Listen")):
+            if account.playlist_id(key):
+                continue
+            try:
+                playlist_id, was_created = youtube_api.ensure_private_playlist(account, title)
+                youtube_api.set_playlist_id(account.name, key, playlist_id)
+            except (youtube_api.YouTubeError, OSError, RuntimeError) as exc:
+                failures.append(f"{account.name} / {title}: {exc}")
+                continue
+            created += int(was_created)
+            linked += int(not was_created)
+    if created or linked:
+        flash(
+            f"YouTube playlists ready: created {created}, linked {linked} existing.",
+            "success",
+        )
+    if failures:
+        flash(f"Some YouTube playlists were not created: {'; '.join(failures)}", "error")
+    if not created and not linked and not failures:
+        flash("All configured YouTube playlists are already ready.", "success")
+    return redirect(_return_path("/to-watch"))
 
 
 @app.get("/to-invest")
@@ -5554,6 +5782,13 @@ def simple_list_add_item(page):
         flash(f'{cfg["name_label"]} "{category}" not found.', "error")
         return redirect(url_for(_simple_list_endpoint(key)))
     item = _parse_simple_item(raw, cfg)
+    youtube_url = request.form.get("youtube_url", "").strip()
+    if youtube_url and key in {"watch", "listen"}:
+        try:
+            item.update(_youtube_link_fields(youtube_url))
+        except youtube_api.YouTubeError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for(_simple_list_endpoint(key)) + f"#{_slug(category)}")
     if key == "code":
         if not repo:
             flash("Repository name cannot be empty.", "error")
@@ -5583,6 +5818,35 @@ def simple_list_add_item(page):
             "its share of the holding.",
             "success",
         )
+    return redirect(url_for(_simple_list_endpoint(key)) + f"#{_slug(category)}")
+
+
+@app.post("/<page>/link-youtube")
+def simple_list_link_youtube(page):
+    key = _simple_list_key_from_page(page)
+    if key not in {"watch", "listen"}:
+        abort(404)
+    cfg = _simple_list_config(key)
+    category = request.form.get("category", "").strip()
+    value = request.form.get("item", "").strip()
+    try:
+        fields = _youtube_link_fields(request.form.get("youtube_url", ""))
+    except youtube_api.YouTubeError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for(_simple_list_endpoint(key)) + f"#{_slug(category)}")
+    data = load_simple_list(key)
+    cat = _find_simple_category(data, category)
+    item = _find_simple_item(cat, value, cfg) if cat else None
+    if item is None:
+        flash(f'"{value}" was not found in {category}.', "error")
+        return redirect(url_for(_simple_list_endpoint(key)))
+    if item.get("youtube_video_id") != fields["youtube_video_id"]:
+        for field in ("youtube_playlist_item_id", "youtube_channel", "youtube_account"):
+            item.pop(field, None)
+    item.update(fields)
+    save_simple_list(key, data)
+    _log_event(cfg["history_file"], "link-youtube", item=value, category=category)
+    flash(f'Linked "{value}" to YouTube. Sync YouTube to push it.', "success")
     return redirect(url_for(_simple_list_endpoint(key)) + f"#{_slug(category)}")
 
 
@@ -6143,6 +6407,12 @@ def api_simple_add_item(list_key):
     if cat is None:
         return jsonify({"ok": False, "error": f'{cfg["name_label"]} "{category}" not found'}), 404
     item = _parse_simple_item(raw, cfg)
+    youtube_url = str(payload.get("youtube_url") or "").strip()
+    if youtube_url and key in {"watch", "listen"}:
+        try:
+            item.update(_youtube_link_fields(youtube_url))
+        except youtube_api.YouTubeError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
     repo = str(payload.get("repo") or "").strip()
     if key == "code":
         if not repo:
