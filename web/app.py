@@ -47,6 +47,8 @@ try:
         code_age,
         code_triage,
         finances,
+        grandmaster,
+        home_cards,
         media_library,
         placeholders,
         read_sources,
@@ -74,6 +76,8 @@ except ModuleNotFoundError:
     import code_age
     import code_triage
     import finances
+    import grandmaster
+    import home_cards
     import media_library
     import personal_library as personal_media
     import placeholders
@@ -1462,47 +1466,43 @@ def toggle_job():
     return redirect(url_for("index"))
 
 
+def do_restart(job: dict) -> list[tuple[str, int, str]]:
+    unit = primary_unit(job)
+    scope = job.get("scope", "user")
+    if _scheduler_backend() == "launchd":
+        if scope != "user":
+            return [
+                (
+                    "launchctl kickstart",
+                    78,
+                    "system-scope launchd jobs are unsupported and were refused",
+                )
+            ]
+        service = _launchd_service(unit)
+        rc, out = _launchctl("kickstart", "-k", service, scope=scope)
+        return [(f"launchctl kickstart -k {service}", rc, out)]
+    if _scheduler_backend() == "systemd":
+        rc, out = _systemctl("restart", unit, scope=scope)
+        return [(f"systemctl restart {unit}", rc, out)]
+    return [("scheduler restart", 78, "unsupported scheduler backend; no action taken")]
+
+
+def _find_job(mpath: str, jname: str) -> tuple[str, dict] | None:
+    for repo_name, repo in scan_repos().items():
+        for manifest in repo["manifests"]:
+            if manifest["path"] != mpath:
+                continue
+            for job in manifest["jobs"]:
+                if job["name"] == jname:
+                    return repo_name, job
+    return None
+
+
 @app.post("/restart/job")
 def restart_job():
-    mpath = request.form["manifest_path"]
-    jname = request.form["job_name"]
-    repos = scan_repos()
-    job_data = next(
-        (
-            j
-            for repo in repos.values()
-            for m in repo["manifests"]
-            if m["path"] == mpath
-            for j in m["jobs"]
-            if j["name"] == jname
-        ),
-        None,
-    )
-    if job_data:
-        unit = primary_unit(job_data)
-        scope = job_data.get("scope", "user")
-        if _scheduler_backend() == "launchd":
-            if scope != "user":
-                _flash_results(
-                    [
-                        (
-                            "launchctl kickstart",
-                            78,
-                            "system-scope launchd jobs are unsupported and were refused",
-                        )
-                    ]
-                )
-            else:
-                service = _launchd_service(unit)
-                rc, out = _launchctl("kickstart", "-k", service, scope=scope)
-                _flash_results([(f"launchctl kickstart -k {service}", rc, out)])
-        elif _scheduler_backend() == "systemd":
-            rc, out = _systemctl("restart", unit, scope=scope)
-            _flash_results([(f"systemctl restart {unit}", rc, out)])
-        else:
-            _flash_results(
-                [("scheduler restart", 78, "unsupported scheduler backend; no action taken")]
-            )
+    found = _find_job(request.form["manifest_path"], request.form["job_name"])
+    if found:
+        _flash_results(do_restart(found[1]))
     return redirect(url_for("index"))
 
 
@@ -1988,6 +1988,201 @@ def _publish_site_chrome_forever(interval: float = 300.0) -> None:
 @app.get("/api/site-nav")
 def api_site_nav():
     return jsonify(_site_nav_document(request.host_url))
+
+
+def _grandmaster_rows() -> list[dict]:
+    state = load_state()
+    self_unit = _self_unit()
+    hidden = _home_hidden_services()
+    card_names = {card["name"] for _, cards in _load_portal_groups() for card in cards}
+    rows = []
+    for repo_name, repo in scan_repos().items():
+        for manifest in repo["manifests"]:
+            for job in manifest["jobs"]:
+                if not grandmaster.is_app(job):
+                    continue
+                job["scheduler_id"] = primary_unit(job)
+                rows.append(
+                    grandmaster.app_row(
+                        repo_name,
+                        manifest["path"],
+                        job,
+                        unit_status(job["scheduler_id"], scope=job.get("scope", "user")),
+                        job_enabled(state, manifest["path"], job["name"]),
+                        bool(self_unit and job["scheduler_id"] == self_unit),
+                        home_card := grandmaster.home_card_name(job["name"], card_names),
+                        home_card in hidden if home_card else False,
+                    )
+                )
+    return rows
+
+
+def _grandmaster_apply(action: str, mpath: str, jname: str) -> dict:
+    """Run one action on one app; returns {ok, steps, status}. Never touches the running UI."""
+    found = _find_job(mpath, jname)
+    if found is None or not grandmaster.is_app(found[1]):
+        return {"ok": False, "name": jname, "steps": [["lookup", 404, "no such app"]]}
+    job = found[1]
+    unit = primary_unit(job)
+    if _self_unit() and unit == _self_unit():
+        return {
+            "ok": False,
+            "name": jname,
+            "steps": [[action, 409, "this is the running web UI; change it from a terminal"]],
+        }
+    state = load_state()
+    if action == "enable":
+        results = do_enable(_resolve_manifest_path(mpath), job, job_target(state, mpath, jname))
+    elif action == "disable":
+        results = do_disable(job)
+    else:
+        results = do_restart(job)
+    ok = _results_succeeded(results)
+    if ok and action in ("enable", "disable"):
+        state.setdefault("jobs", {}).setdefault(f"{mpath}:{jname}", {})["enabled"] = (
+            action == "enable"
+        )
+        save_state(state)
+    return {"ok": ok, "name": jname, "steps": [list(step) for step in results]}
+
+
+def _home_card_kind(card: dict) -> str:
+    if card.get("placeholder"):
+        return "placeholder"
+    if card.get("link"):
+        return "link"
+    return "page" if str(card.get("url", "")).startswith("/") else "service"
+
+
+def _grandmaster_home_cards() -> list[dict]:
+    hidden = _home_hidden_services()
+    rows = []
+    for group, cards in _load_portal_groups():
+        for card in cards:
+            kind = _home_card_kind(card)
+            rows.append(
+                {
+                    "group": group,
+                    "name": card["name"],
+                    "display": card.get("display", card["name"]),
+                    "icon": card.get("icon", ""),
+                    "url": card.get("url", ""),
+                    "kind": kind,
+                    "hidden": card["name"] in hidden,
+                    "removable": kind in ("link", "placeholder"),
+                    "pinned": card["name"] in home_cards.ALWAYS_SHOWN,
+                }
+            )
+    return rows
+
+
+def _home_cards_response(status: int = 200, **extra):
+    return jsonify({"ok": status < 400, "cards": _grandmaster_home_cards(), **extra}), status
+
+
+@app.get("/api/grandmaster/home")
+def api_grandmaster_home():
+    return jsonify({"cards": _grandmaster_home_cards()})
+
+
+@app.post("/api/grandmaster/home/hide")
+def api_grandmaster_home_hide():
+    """Body: {"name": card name, "hidden": bool}. Home only; the Services menu is unchanged."""
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or not isinstance(body.get("hidden"), bool):
+        return _home_cards_response(400, error="send {name, hidden}")
+    try:
+        home_cards.set_hidden(
+            str(body.get("name") or ""), body["hidden"], default=_home_hidden_default()
+        )
+    except home_cards.HomeCardError as exc:
+        return _home_cards_response(400, error=str(exc))
+    return _home_cards_response()
+
+
+@app.post("/api/grandmaster/home/links")
+def api_grandmaster_home_links_add():
+    body = request.get_json(silent=True)
+    try:
+        taken = {card["name"] for _, cards in _load_portal_groups() for card in cards}
+        card = home_cards.add_link(home_cards.prepare_link(body, taken))
+    except home_cards.HomeCardError as exc:
+        return _home_cards_response(400, error=str(exc))
+    return _home_cards_response(card=card)
+
+
+@app.post("/api/grandmaster/home/remove")
+def api_grandmaster_home_remove():
+    """Body: {"name": card name}. Removes a link or placeholder card, never a real service."""
+    body = request.get_json(silent=True)
+    name = str(body.get("name") or "") if isinstance(body, dict) else ""
+    try:
+        if name.startswith("link-"):
+            removed = home_cards.remove_link(name.removeprefix("link-"))
+        elif name.startswith("placeholder-"):
+            match = next(
+                (
+                    c
+                    for c in placeholders.load(strict=True)
+                    if "placeholder-" + c["id"].strip("/").replace("/", "-") == name
+                ),
+                None,
+            )
+            if match is None:
+                raise home_cards.HomeCardError("no placeholder card with that name")
+            removed = placeholders.remove(match["id"])
+        else:
+            raise home_cards.HomeCardError(
+                "only link and placeholder cards can be removed; hide a service instead"
+            )
+    except (home_cards.HomeCardError, placeholders.PlaceholderError) as exc:
+        return _home_cards_response(400, error=str(exc))
+    return _home_cards_response(card=removed)
+
+
+@app.get("/api/grandmaster")
+def api_grandmaster():
+    return jsonify({"generated_at": time.time(), "apps": _grandmaster_rows()})
+
+
+@app.get("/grandmaster")
+def grandmaster_page():
+    groups = grandmaster.group_by_repo(_grandmaster_rows())
+    return render_template(
+        "grandmaster.html",
+        groups=groups,
+        home_groups=_placeholder_groups(),
+    )
+
+
+@app.post("/api/grandmaster/<action>")
+def api_grandmaster_action(action: str):
+    """Body: {"manifest_path", "name"} for one app, or {"all": true, "repo": optional}
+    for every app (those in ``repo`` when given). The running UI is always skipped."""
+    if action not in grandmaster.ACTIONS:
+        return jsonify({"error": f"unknown action {action!r}"}), 400
+    body = request.get_json(silent=True) or {}
+    if body.get("all"):
+        repo = body.get("repo")
+        targets = [
+            (r["manifest_path"], r["name"])
+            for r in _grandmaster_rows()
+            if (not repo or r["repo"] == repo) and not r["protected"]
+        ]
+        if action == "restart":  # restart only what is running; do not start what was stopped
+            running = {
+                (r["manifest_path"], r["name"])
+                for r in _grandmaster_rows()
+                if r["state"] == "running"
+            }
+            targets = [t for t in targets if t in running]
+        results = [_grandmaster_apply(action, mpath, name) for mpath, name in targets]
+        return jsonify({"ok": all(r["ok"] for r in results), "results": results})
+    mpath, name = body.get("manifest_path", ""), body.get("name", "")
+    if not mpath or not name:
+        return jsonify({"error": "manifest_path and name are required"}), 400
+    result = _grandmaster_apply(action, mpath, name)
+    return jsonify(result), (200 if result["ok"] else 502)
 
 
 @app.get("/api/schedule")
@@ -8030,6 +8225,16 @@ def _load_portal_groups(apply_labels: bool = True) -> list[tuple[str, list[dict]
     )
     groups["Clockwork"].append(
         {
+            "name": "clockwork-grandmaster",
+            "display": "Grandmaster Clock",
+            "url": "/grandmaster",
+            "hostname": "",
+            "access_mode": "shared-mtls",
+            "icon": "🎛️",
+        }
+    )
+    groups["Clockwork"].append(
+        {
             "name": "clockwork-ecu",
             "display": "Machine load",
             "url": "/ecu",
@@ -8102,6 +8307,19 @@ def _load_portal_groups(apply_labels: bool = True) -> list[tuple[str, list[dict]
             }
         )
 
+    for link in home_cards.load()["links"]:
+        groups.setdefault(link["group"], []).append(
+            {
+                "name": "link-" + link["id"],
+                "display": link["name"],
+                "url": link["url"],
+                "hostname": urlsplit(link["url"]).hostname or "",
+                "access_mode": "link",
+                "icon": link["icon"],
+                "link": True,
+            }
+        )
+
     mine = themes_admin.labels() if apply_labels else {}
     for cards in groups.values():
         for card in cards:
@@ -8115,15 +8333,17 @@ def _load_portal_groups(apply_labels: bool = True) -> list[tuple[str, list[dict]
     return [(g, cards) for g in ordered if (cards := groups.get(g))]
 
 
-def _home_hidden_services() -> set[str]:
-    """Services whose card is left off the Home page because Clockwork has its own card for the app.
-
-    The standalone Tradility service (``tradility-web``) is also reached through Clockwork's own
-    Tradility page, so showing both gives two Tradility cards. The service stays in the Services
-    menu. Set CLOCKWORK_HOME_HIDE_SERVICES (comma separated; empty shows every card) to change it.
-    """
+def _home_hidden_default() -> set[str]:
     raw = os.environ.get("CLOCKWORK_HOME_HIDE_SERVICES", "tradility-web")
     return {name.strip() for name in raw.split(",") if name.strip()}
+
+
+def _home_hidden_services() -> set[str]:
+    """Cards left off the Home page. The Grandmaster Clock saves the list in
+    ``config/home-cards.json``; until it has, CLOCKWORK_HOME_HIDE_SERVICES (comma separated,
+    default ``tradility-web``, which Clockwork's own Tradility card replaces) decides.
+    Hidden cards stay in the Services menu."""
+    return home_cards.hidden_names(_home_hidden_default())
 
 
 def _home_groups(
