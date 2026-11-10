@@ -2046,20 +2046,20 @@ def _grandmaster_apply(action: str, mpath: str, jname: str) -> dict:
     return {"ok": ok, "name": jname, "steps": [list(step) for step in results]}
 
 
+def _home_card_kind(card: dict) -> str:
+    if card.get("placeholder"):
+        return "placeholder"
+    if card.get("link"):
+        return "link"
+    return "page" if str(card.get("url", "")).startswith("/") else "service"
+
+
 def _grandmaster_home_cards() -> list[dict]:
     hidden = _home_hidden_services()
     rows = []
     for group, cards in _load_portal_groups():
         for card in cards:
-            kind = (
-                "placeholder"
-                if card.get("placeholder")
-                else "link"
-                if card.get("link")
-                else "page"
-                if str(card.get("url", "")).startswith("/")
-                else "service"
-            )
+            kind = _home_card_kind(card)
             rows.append(
                 {
                     "group": group,
