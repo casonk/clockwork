@@ -607,6 +607,13 @@ when it last ran, and the outcome of the service it starts (`ok`, `running`,
 returns the same rows as JSON. It reads `systemctl list-timers` and `show`, so it
 needs no elevation. macOS (launchd) hosts are not covered yet.
 
+Guardrails: the Grandmaster Clock never changes its own web UI or hides its own Home card;
+critical apps (`CLOCKWORK_GRANDMASTER_CRITICAL`, default `pit-box-guacd,pit-box-guacamole`)
+need their name typed to be disabled or restarted and are skipped by bulk changes; bulk
+changes preview their targets, run one at a time and are spaced 10 seconds apart; and every
+change is appended to `config/grandmaster-audit.jsonl` (owner-only, capped), shown on the
+page and at `GET /api/grandmaster/audit`.
+
 ### Machine load (`/ecu`)
 
 The Services menu links **Machine load**, which renders `ecu status --json`:

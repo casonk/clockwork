@@ -14,6 +14,28 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
+- Never aim a working-tree-changing git command at a checkout that holds someone else's
+  uncommitted work. `git apply` without `--cached` or `--check`, `reset --hard`,
+  `checkout -- <path>`, `restore`, `clean -f` and `stash` all rewrite it, and `git -C <path>`
+  runs them against whichever repository you name, not the directory you are standing in. To
+  split a mixed diff into a commit, build the result on a copy (or in a `git worktree` off
+  the target ref), hash it with `git hash-object -w`, and stage it with
+  `git update-index --cacheinfo`; then export the staged tree (`git checkout-index -a
+  --prefix=<dir>/`) and run the tests there. `scripts/guard_destructive_git.py` (wired in
+  `.claude/settings.json`) blocks these commands while the tree is dirty.
+- A commit made in a clone without the git hooks installed skips every check silently, and CI
+  then fails on style the hooks would have fixed. Run `scripts/install-git-hooks.sh` once per
+  clone. Black and ruff-format disagree on some layouts (a nested conditional expression is
+  one); write a small function instead of fighting both, and verify with the versions pinned
+  in `.pre-commit-config.yaml`, not whichever formatter is on the machine.
+- A test that publishes or renders through `themes_admin` reads the developer's own rendered
+  themes and passes in CI but fails locally. Stub `themes_admin.asset` (or point the themes
+  directory at `tmp_path`) in any test that compares output with the vendored files.
+- A control that can switch off the way back in must refuse to. The Grandmaster Clock never
+  disables or restarts its own web UI, never hides its own Home card, makes critical apps
+  (the remote-desktop path) need their name typed, skips them in bulk changes, runs one change
+  at a time, spaces bulk changes apart and writes every change to
+  `config/grandmaster-audit.jsonl`.
 - A portfolio portal should federate application-owned UIs rather than become
   the implementation home for every application's domain page. Give each app a
   complete loopback UI and stable API, then let the portal link or reverse

@@ -2017,7 +2017,28 @@ def _grandmaster_rows() -> list[dict]:
     return rows
 
 
-def _grandmaster_apply(action: str, mpath: str, jname: str) -> dict:
+_GRANDMASTER_GATE = grandmaster.ActionGate()
+
+
+def _grandmaster_actor() -> str:
+    return request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (
+        request.remote_addr or "unknown"
+    )
+
+
+def _grandmaster_audit(action: str, target: str, ok: bool, detail: str = "") -> None:
+    grandmaster.audit(
+        {
+            "action": action,
+            "target": target,
+            "ok": ok,
+            "detail": detail[:200],
+            "from": _grandmaster_actor(),
+        }
+    )
+
+
+def _grandmaster_apply(action: str, mpath: str, jname: str, confirm: object = "") -> dict:
     """Run one action on one app; returns {ok, steps, status}. Never touches the running UI."""
     found = _find_job(mpath, jname)
     if found is None or not grandmaster.is_app(found[1]):
@@ -2029,6 +2050,14 @@ def _grandmaster_apply(action: str, mpath: str, jname: str) -> dict:
             "ok": False,
             "name": jname,
             "steps": [[action, 409, "this is the running web UI; change it from a terminal"]],
+        }
+    problem = grandmaster.confirmation_problem(action, jname, confirm, grandmaster.critical_apps())
+    if problem:
+        return {
+            "ok": False,
+            "name": jname,
+            "steps": [[action, 409, problem]],
+            "needs_confirm": True,
         }
     state = load_state()
     if action == "enable":
@@ -2043,6 +2072,8 @@ def _grandmaster_apply(action: str, mpath: str, jname: str) -> dict:
             action == "enable"
         )
         save_state(state)
+    failure = next((out or cmd for cmd, rc, out in results if rc != 0), "")
+    _grandmaster_audit(action, jname, ok, failure)
     return {"ok": ok, "name": jname, "steps": [list(step) for step in results]}
 
 
@@ -2097,6 +2128,7 @@ def api_grandmaster_home_hide():
         )
     except home_cards.HomeCardError as exc:
         return _home_cards_response(400, error=str(exc))
+    _grandmaster_audit("home-hide" if body["hidden"] else "home-show", str(body.get("name")), True)
     return _home_cards_response()
 
 
@@ -2108,6 +2140,7 @@ def api_grandmaster_home_links_add():
         card = home_cards.add_link(home_cards.prepare_link(body, taken))
     except home_cards.HomeCardError as exc:
         return _home_cards_response(400, error=str(exc))
+    _grandmaster_audit("home-add-link", "link-" + card["id"], True, card["url"])
     return _home_cards_response(card=card)
 
 
@@ -2137,6 +2170,7 @@ def api_grandmaster_home_remove():
             )
     except (home_cards.HomeCardError, placeholders.PlaceholderError) as exc:
         return _home_cards_response(400, error=str(exc))
+    _grandmaster_audit("home-remove", name, True)
     return _home_cards_response(card=removed)
 
 
@@ -2157,32 +2191,71 @@ def grandmaster_page():
 
 @app.post("/api/grandmaster/<action>")
 def api_grandmaster_action(action: str):
-    """Body: {"manifest_path", "name"} for one app, or {"all": true, "repo": optional}
-    for every app (those in ``repo`` when given). The running UI is always skipped."""
+    """Body: {"manifest_path", "name", "confirm"?} for one app, or {"all": true, "repo"?, "dry_run"?}
+    for every app (those in ``repo`` when given).
+
+    Guardrails: the running UI is always skipped; critical apps need their name as ``confirm``
+    to be disabled or restarted and are skipped by bulk changes; one change runs at a time;
+    bulk changes are spaced apart; ``dry_run`` lists what a bulk change would touch; every
+    change is written to the audit log."""
     if action not in grandmaster.ACTIONS:
         return jsonify({"error": f"unknown action {action!r}"}), 400
     body = request.get_json(silent=True) or {}
     if body.get("all"):
+        critical = grandmaster.critical_apps()
         repo = body.get("repo")
-        targets = [
-            (r["manifest_path"], r["name"])
-            for r in _grandmaster_rows()
-            if (not repo or r["repo"] == repo) and not r["protected"]
-        ]
+        rows = _grandmaster_rows()
+        candidates = [r for r in rows if (not repo or r["repo"] == repo) and not r["protected"]]
         if action == "restart":  # restart only what is running; do not start what was stopped
-            running = {
-                (r["manifest_path"], r["name"])
-                for r in _grandmaster_rows()
-                if r["state"] == "running"
-            }
-            targets = [t for t in targets if t in running]
-        results = [_grandmaster_apply(action, mpath, name) for mpath, name in targets]
-        return jsonify({"ok": all(r["ok"] for r in results), "results": results})
+            candidates = [r for r in candidates if r["state"] == "running"]
+        skipped = []
+        if action in grandmaster.GUARDED_ACTIONS:
+            skipped = [
+                {"name": r["name"], "reason": "critical app: change it on its own row"}
+                for r in candidates
+                if r["name"] in critical
+            ]
+            candidates = [r for r in candidates if r["name"] not in critical]
+        if body.get("dry_run"):
+            return jsonify(
+                {"dry_run": True, "targets": [r["name"] for r in candidates], "skipped": skipped}
+            )
+        entered, why = _GRANDMASTER_GATE.try_enter(bulk=True)
+        if not entered:
+            return jsonify({"ok": False, "error": why}), 429
+        try:
+            results = [
+                _grandmaster_apply(action, r["manifest_path"], r["name"]) for r in candidates
+            ]
+        finally:
+            _GRANDMASTER_GATE.leave()
+        scope = f"all:{repo}" if repo else "all"
+        _grandmaster_audit(
+            f"bulk-{action}", scope, all(r["ok"] for r in results), f"{len(results)} app(s)"
+        )
+        return jsonify(
+            {"ok": all(r["ok"] for r in results), "results": results, "skipped": skipped}
+        )
     mpath, name = body.get("manifest_path", ""), body.get("name", "")
     if not mpath or not name:
         return jsonify({"error": "manifest_path and name are required"}), 400
-    result = _grandmaster_apply(action, mpath, name)
-    return jsonify(result), (200 if result["ok"] else 502)
+    entered, why = _GRANDMASTER_GATE.try_enter(bulk=False)
+    if not entered:
+        return jsonify({"ok": False, "name": name, "steps": [[action, 429, why]]}), 429
+    try:
+        result = _grandmaster_apply(action, mpath, name, body.get("confirm", ""))
+    finally:
+        _GRANDMASTER_GATE.leave()
+    return jsonify(result), (200 if result["ok"] else 409 if result.get("needs_confirm") else 502)
+
+
+@app.get("/api/grandmaster/audit")
+def api_grandmaster_audit():
+    try:
+        count = int(request.args.get("n", "50"))
+    except ValueError:
+        count = 50
+    return jsonify({"entries": grandmaster.audit_tail(count)})
 
 
 @app.get("/api/schedule")

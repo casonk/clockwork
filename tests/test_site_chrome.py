@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from web import site_chrome
+from web import site_chrome, themes_admin
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -64,7 +64,9 @@ def test_build_nav_makes_absolute_links_and_flags_services():
     assert local["url"] == "https://clock.example/local"
 
 
-def test_publish_writes_both_files_once_and_skips_a_missing_directory(tmp_path):
+def test_publish_writes_both_files_once_and_skips_a_missing_directory(tmp_path, monkeypatch):
+    # publish() prefers the developer's own rendered themes; the test is about the vendored files.
+    monkeypatch.setattr(themes_admin, "asset", lambda name: None)
     nav = site_chrome.build_nav("https://clock.example", [])
     assert site_chrome.publish(nav, tmp_path / "absent") is False
 

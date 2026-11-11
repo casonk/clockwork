@@ -58,11 +58,12 @@
       </div>
     </div>
     {% for a in apps %}
-    <div class="app" data-manifest="{{ a.manifest_path }}" data-name="{{ a.name }}"{% if a.home_card %} data-home-card="{{ a.home_card }}"{% endif %}>
+    <div class="app" data-manifest="{{ a.manifest_path }}" data-name="{{ a.name }}" data-critical="{{ 'true' if a.critical else 'false' }}"{% if a.home_card %} data-home-card="{{ a.home_card }}"{% endif %}>
       <div>
         <span class="name">{{ a.name }}</span>
         <span class="badge {{ a.state }}" data-state>{{ a.state }}</span>
         {% if a.scope == 'system' %}<span class="muted">system</span>{% endif %}
+        {% if a.critical %}<span class="badge failed" title="Disable and restart need its name typed to confirm; bulk actions skip it">critical</span>{% endif %}
         {% if a.description %}<div class="desc">{{ a.description }}</div>{% endif %}
         <a class="muted" href="/logs/{{ a.unit }}?scope={{ a.scope }}">logs</a>
       </div>
@@ -97,6 +98,7 @@
       <button type="submit">Add card</button>
     </form>
   </section>
+  <section><h2>Recent changes</h2><div id="audit" class="muted">Loading…</div></section>
   <section aria-live="polite"><h2>Activity</h2><div id="log" class="muted">Nothing yet.</div></section>
 </main>
 <script>
@@ -127,6 +129,18 @@
       if (badge) { badge.textContent = a.state; badge.className = 'badge ' + a.state; }
     }
   });
+  const auditEl = document.getElementById('audit');
+  const loadAudit = () => fetch('/api/grandmaster/audit?n=15').then(r => r.json()).then(d => {
+    auditEl.innerHTML = ''; auditEl.classList.remove('muted');
+    if (!d.entries.length) { auditEl.classList.add('muted'); auditEl.textContent = 'No changes recorded yet.'; return; }
+    for (const e of d.entries) {
+      const line = document.createElement('div'); line.className = 'name';
+      if (!e.ok) line.style.color = 'var(--red)';
+      line.textContent = `${e.ts.replace('T', ' ').replace('+00:00', 'Z')}  ${e.action} ${e.target}  ${e.ok ? 'ok' : 'FAILED ' + (e.detail || '')}  (${e.from})`;
+      auditEl.appendChild(line);
+    }
+  }).catch(() => { auditEl.textContent = 'Could not load the change log.'; });
+  loadAudit();
   const busy = (on) => document.querySelectorAll('button').forEach(b => b.disabled = on);
 
   // ---- Home page cards -------------------------------------------------
@@ -203,19 +217,32 @@
     busy(true);
     try {
       if (button.dataset.act && row) {
-        report(button.dataset.act, await post(button.dataset.act, {manifest_path: row.dataset.manifest, name: row.dataset.name}));
+        const act = button.dataset.act;
+        const body = {manifest_path: row.dataset.manifest, name: row.dataset.name};
+        if (row.dataset.critical === 'true' && (act === 'disable' || act === 'restart')) {
+          const typed = prompt(`${row.dataset.name} is a critical app (it can cut off remote access). Type its name to ${act} it:`);
+          if (typed !== row.dataset.name) { say(`${act} ${row.dataset.name}: cancelled`); return; }
+          body.confirm = typed;
+        }
+        report(act, await post(act, body));
       } else if (button.dataset.all) {
+        const action = button.dataset.all;
         const scope = button.dataset.repo || 'every app';
-        if (button.dataset.all === 'disable' && !confirm(`Disable ${scope}?`)) return;
-        const res = await post(button.dataset.all, {all: true, repo: button.dataset.repo || null});
-        (res.results || []).forEach(r => report(button.dataset.all, r));
-        if (!(res.results || []).length) say(`${button.dataset.all} ${scope}: nothing to do`);
+        const plan = await post(action, {all: true, repo: button.dataset.repo || null, dry_run: true});
+        const targets = plan.targets || [];
+        (plan.skipped || []).forEach(k => say(`${action} ${k.name}: skipped (${k.reason})`));
+        if (!targets.length) { say(`${action} ${scope}: nothing to do`); return; }
+        if (!confirm(`${action} ${targets.length} app(s) in ${scope}?\n\n${targets.join('\n')}`)) { say(`${action} ${scope}: cancelled`); return; }
+        const res = await post(action, {all: true, repo: button.dataset.repo || null});
+        if (res.error) { say(`${action} ${scope}: ${res.error}`, true); }
+        (res.results || []).forEach(r => report(action, r));
       }
     } catch (error) {
       say('request failed: ' + error, true);
     } finally {
       busy(false);
       refresh();
+      loadAudit();
     }
   });
 })();
