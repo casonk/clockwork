@@ -1,0 +1,55 @@
+{# Tells a long-lived page that Clockwork has been redeployed since it loaded.
+
+   A page that swaps content in place (library autoplay) keeps the script it first loaded, so a fix
+   never reaches an open tab. This asks /api/build every few minutes and when the tab comes back to
+   the foreground; on a newer build it shows a banner with a Reload button. It never reloads by
+   itself, so playback and position are not lost. Include it once at the end of the page body. #}
+<script>
+(function () {
+  const loaded = {{ build_id|tojson }};
+  const EVERY_MS = 5 * 60 * 1000;
+  let banner = null;
+  function show() {
+    if (banner) return;
+    banner = document.createElement("div");
+    banner.setAttribute("role", "status");
+    banner.style.cssText = "position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:1000;"
+      + "display:flex;gap:12px;align-items:center;max-width:calc(100vw - 32px);padding:10px 14px;"
+      + "border:1px solid var(--accent);border-radius:8px;background:var(--surface);color:var(--text);"
+      + "box-shadow:0 4px 18px rgba(0,0,0,.35);font-size:13px";
+    const text = document.createElement("span");
+    const video = document.getElementById("player");
+    text.textContent = video && !video.paused && !video.ended
+      ? "A newer version of Clockwork is ready. Reload when this ends."
+      : "A newer version of Clockwork is ready.";
+    const reload = document.createElement("button");
+    reload.type = "button";
+    reload.textContent = "Reload";
+    reload.style.cssText = "border:1px solid var(--accent);background:transparent;color:var(--accent);"
+      + "border-radius:6px;padding:4px 12px;font-weight:700;cursor:pointer";
+    reload.addEventListener("click", function () { window.location.reload(); });
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.setAttribute("aria-label", "Dismiss");
+    dismiss.textContent = "\u00d7";
+    dismiss.style.cssText = "border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:16px";
+    dismiss.addEventListener("click", function () { banner.remove(); });
+    banner.append(text, reload, dismiss);
+    document.body.appendChild(banner);
+  }
+  async function check() {
+    if (banner) return;
+    try {
+      const response = await fetch("/api/build", { cache: "no-store", credentials: "same-origin" });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data && data.build && data.build !== loaded) show();
+    } catch (_err) { /* offline or restarting: try again later */ }
+  }
+  setInterval(check, EVERY_MS);
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") check();
+  });
+  window.addEventListener("pageshow", function (event) { if (event.persisted) check(); });
+})();
+</script>
