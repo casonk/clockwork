@@ -6,11 +6,13 @@ on the same catalog (media_library.CATALOG_DB) and library root.
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import json
 import mimetypes
 import re
 import subprocess
+import threading
 from pathlib import Path
 
 from flask import (
@@ -299,8 +301,13 @@ def title_page(rel: str):
         if conn is not None:
             conn.close()
     snapshot = _ai_snapshot()
+    watched = watch_log.watched_by_rel(watch_log.read())
     for item in files:
         item["ai"] = _ai_state(item, item["height"], snapshot)
+        seen = watched.get(item["rel"])
+        item["watched"] = (
+            {"views": seen["views"], "ago": watch_log.ago(seen["ts"])} if seen else None
+        )
     match = re.match(r"^(?P<title>.+?)(?: \((?P<year>\d{4})\))?$", folder.name)
     kind = ml.SHOWS if _rel(folder).startswith(ml.SHOWS + "/") else ml.MOVIES
     seasons: dict[int, list[dict]] = {}
@@ -309,6 +316,16 @@ def title_page(rel: str):
             seasons.setdefault(item["season"] or 0, []).append(item)
         for items in seasons.values():
             items.sort(key=lambda f: (f["episode"] or 0, f["name"]))
+    resume = None
+    if kind == ml.SHOWS:
+        ordered = [e for _season, items in sorted(seasons.items()) for e in items]
+        upcoming = watch_log.next_episode(ordered, watched)
+        if upcoming and any(e["watched"] for e in ordered):
+            resume = {"label": "Continue", "item": upcoming}
+        elif any(e["watched"] for e in ordered) and ordered:
+            resume = {"label": "All watched. Rewatch from the start", "item": ordered[0]}
+    elif files and files[0]["watched"]:
+        resume = {"label": "Watched", "item": files[0]}
     extras = [
         {"name": v.name, "rel": _rel(v), "size": _format_size(v.stat().st_size)}
         for v in ml._video_files(folder, include_extras=True)
@@ -323,6 +340,7 @@ def title_page(rel: str):
         kind=kind,
         meta=meta,
         files=files,
+        resume=resume,
         seasons=sorted(seasons.items()),
         extras=extras,
         genre=genre,
@@ -479,6 +497,26 @@ def play_page(rel: str):
     )
 
 
+def _log_view(video: Path, position: float, duration: float, source: str = "viewer"):
+    conn = _catalog()
+    try:
+        info = _file_info(conn, video)
+    finally:
+        if conn is not None:
+            conn.close()
+    return watch_log.record(
+        watch_log.default_file(),
+        rel=_rel(video),
+        title=_title_dir(video).name,
+        filename=video.name,
+        position=position,
+        duration=duration,
+        season=info.get("season"),
+        episode=info.get("episode"),
+        source=source,
+    )
+
+
 @library_pages.post("/library/play/<path:rel>/watched")
 def log_watched(rel: str):
     """The viewer reports a (nearly) finished video; log it so the To Watch list can show it."""
@@ -490,22 +528,7 @@ def log_watched(rel: str):
         position, duration = float(payload.get("position", 0)), float(payload.get("duration", 0))
     except (TypeError, ValueError):
         abort(400)
-    conn = _catalog()
-    try:
-        info = _file_info(conn, video)
-    finally:
-        if conn is not None:
-            conn.close()
-    event = watch_log.record(
-        watch_log.default_file(),
-        rel=_rel(video),
-        title=_title_dir(video).name,
-        filename=video.name,
-        position=position,
-        duration=duration,
-        season=info.get("season"),
-        episode=info.get("episode"),
-    )
+    event = _log_view(video, position, duration)
     return jsonify({"logged": event is not None})
 
 
@@ -589,11 +612,40 @@ def stream_playlist(rel: str):
     )
 
 
+_SEGMENTS_SEEN: dict[str, set[int]] = {}
+_SEGMENTS_LOCK = threading.Lock()
+_FALLBACK_COVERAGE = (
+    0.85  # share of the segments that must have streamed, so a seek to the end is not a view
+)
+_FALLBACK_TAIL = 2  # only the last segments trigger it, long after the viewer's own 90% report
+
+
+def _note_segment(rel: str, index: int, duration: float) -> None:
+    """Server-side fallback for the viewer's report: log a view once the stream has run to the end.
+
+    The viewer reports at 90%; that report normally lands first and this one is then deduplicated
+    by ``watch_log.record``. It only counts when a stale or closed tab never sent its own.
+    """
+    total = streaming.segment_count(duration)
+    with _SEGMENTS_LOCK:
+        seen = _SEGMENTS_SEEN.setdefault(rel, set())
+        seen.add(index)
+        if len(_SEGMENTS_SEEN) > 32:
+            _SEGMENTS_SEEN.pop(next(iter(_SEGMENTS_SEEN)))
+        covered = len(seen) >= _FALLBACK_COVERAGE * total
+    if covered and index >= total - _FALLBACK_TAIL:
+        with contextlib.suppress(OSError):
+            _log_view(_resolve(rel), duration, duration, source="stream")
+
+
 @library_pages.get("/library/stream/<path:rel>/seg/<int:index>.ts")
 def stream_segment(rel: str, index: int):
-    segment = streaming.manager().segment(_stream_source(rel), index, _quality_arg())
+    source = _stream_source(rel)
+    quality = _quality_arg()
+    segment = streaming.manager().segment(source, index, quality)
     if segment is None:
         abort(503, description="The segment could not be transcoded in time.")
+    _note_segment(rel, index, streaming.manager().session(source, quality).info.duration)
     return send_file(segment, mimetype="video/mp2t", max_age=3600)
 
 

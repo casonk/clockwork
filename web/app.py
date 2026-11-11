@@ -5672,10 +5672,18 @@ def library_search():
     finally:
         conn.close()
     root = media_library.LIBRARY_ROOT
+    watch_stats = watch_log.stats_by_title(watch_log.read())
     for item in items:
         folder = Path(item.pop("folder"))
         item["folder_name"] = folder.name
         item["path"] = str(folder.relative_to(root)) if folder.is_relative_to(root) else None
+        row = watch_stats.get(watch_log.normalize_title(folder.name))
+        item["watch"] = (
+            {"badge": watch_log.badge(row), "ts": str(row["last"].get("ts", ""))} if row else None
+        )
+    if request.args.get("sort") == "watched":
+        items.sort(key=lambda i: (i["watch"] or {}).get("ts", ""), reverse=True)
+        items.sort(key=lambda i: i["watch"] is None)
     return jsonify({"available": True, "count": len(items), "items": items, "facets": facets})
 
 
