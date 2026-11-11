@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+import urllib.error
+from email.message import EmailMessage
 from pathlib import Path
 
 import pytest
@@ -102,6 +104,25 @@ class FakeProvider:
         return self.results.get(title)
 
 
+class _LimitedProvider:
+    def __init__(self, name="wikidata"):
+        self.name = name
+        self.calls = []
+
+    def search(self, title, year, kind):
+        self.calls.append(title)
+        raise ml.RateLimited(ml.RATE_LIMIT_COOLDOWN)
+
+
+def _clock():
+    state = {"now": 0.0}
+
+    def sleep(seconds):
+        state["now"] += seconds
+
+    return state, sleep
+
+
 def _touch(path: Path, size: int = 10) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"x" * size)
@@ -195,6 +216,61 @@ def test_organize_skips_seeding_and_multi_part(tmp_path):
     assert "several full-length" in plans["Some Movie (1999)"].skipped
     _batch, done = ml.apply_plans(plans.values(), tmp_path / "j.jsonl")
     assert done == 0
+    assert ml.link_seeding_shows(plans.values(), root) == 0
+
+
+def test_seeding_show_links_episodes_without_moving_the_pack(tmp_path):
+    root = tmp_path / "watch"
+    pack = root / "Joe.Pickett.S01.1080p.BluRay.x265"
+    episode = _touch(pack / "Joe.Pickett.S01E01.mkv")
+    subtitle = _touch(pack / "Joe.Pickett.S01E01.en.srt")
+    inode = episode.stat().st_ino
+    existing = _touch(
+        root
+        / "shows"
+        / "House of the Dragon (2022)"
+        / "Season 01"
+        / "House.of.the.Dragon.S01E01.mkv"
+    )
+    existing.write_bytes(b"kept")
+    hotd = root / "House of the Dragon (2022) S01"
+    _touch(hotd / "House.of.the.Dragon.S01E01.mkv")
+    new_episode = _touch(hotd / "House.of.the.Dragon.S01E02.mkv")
+    movie = root / "Gran Torino (2008) [1080p]"
+    _touch(movie / "Gran.Torino.mp4")
+
+    plans = ml.plan_library(
+        root,
+        prober=_prober,
+        tracked={pack.name, hotd.name, movie.name},
+    )
+    _batch, done = ml.apply_plans(plans, tmp_path / "j.jsonl")
+    linked = ml.link_seeding_shows(plans, root)
+
+    assert done == 0
+    assert linked == 2
+    assert episode.stat().st_ino == inode and not episode.is_symlink()
+    show = root / "shows" / "Joe Pickett" / "Season 01"
+    assert (show / episode.name).is_symlink()
+    assert (show / episode.name).resolve() == episode.resolve()
+    assert (show / subtitle.name).is_symlink()
+    assert (show / subtitle.name).resolve() == subtitle.resolve()
+    season = root / "shows" / "House of the Dragon (2022)" / "Season 01"
+    assert (season / "House.of.the.Dragon.S01E01.mkv").read_bytes() == b"kept"
+    assert not (season / "House.of.the.Dragon.S01E01.mkv").is_symlink()
+    assert (season / new_episode.name).is_symlink()
+    assert new_episode.exists() and not new_episode.is_symlink()
+    assert not (root / "movies").exists()
+
+    conn = ml.connect(tmp_path / "catalog.sqlite")
+    ml.scan_library(root, conn, providers=[], prober=_prober)
+    titles = {row["title"] for row in conn.execute("SELECT title, kind FROM titles")}
+    assert "Joe Pickett" in titles
+    row = conn.execute(
+        "SELECT season, episode FROM files WHERE path = ?",
+        (str(show / episode.name),),
+    ).fetchone()
+    assert (row["season"], row["episode"]) == (1, 1)
 
 
 def test_organize_splits_movie_collections_into_one_folder_per_title(tmp_path):
@@ -775,3 +851,129 @@ def test_sort_by_year_and_by_download_time(tmp_path):
     assert by_year == ["Hot Rod", "Napoleon Dynamite", "Network"]
     assert by_download == ["Napoleon Dynamite", "Hot Rod", "Network"]
     assert ml.search_catalog(conn, sort="downloaded")[0]["downloaded_at"] == 1_760_000_000
+
+
+def test_host_pacer_spaces_calls():
+    state, sleep = _clock()
+    pacer = ml.HostPacer(1.0, sleep=sleep, now=lambda: state["now"], jitter=lambda: 0)
+
+    pacer.acquire()
+    assert state["now"] == 0.0
+    pacer.acquire()
+
+    assert state["now"] == 1.0
+
+
+def test_guarded_json_opens_a_cooldown_on_429():
+    reply = EmailMessage()
+    reply["Retry-After"] = "5"
+    calls = []
+
+    def opener(url, *, headers=None, timeout=30):
+        calls.append(url)
+        raise urllib.error.HTTPError(url, 429, "Too Many Requests", reply, None)
+
+    pacer = ml.HostPacer(1.0, sleep=lambda _seconds: None, now=lambda: 0.0, jitter=lambda: 0)
+    with pytest.raises(ml.RateLimited) as caught:
+        ml.guarded_json("https://example.com/q", pacer=pacer, opener=opener)
+
+    assert caught.value.retry_after == ml.RATE_LIMIT_COOLDOWN
+    with pytest.raises(ml.RateLimited):
+        ml.guarded_json("https://example.com/q", pacer=pacer, opener=opener)
+    assert calls == ["https://example.com/q"]
+
+
+def test_guarded_json_retries_a_timeout_once():
+    state, sleep = _clock()
+    calls = {"n": 0}
+
+    def opener(url, *, headers=None, timeout=30):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise TimeoutError("timed out")
+        return {"ok": True}
+
+    pacer = ml.HostPacer(1.0, sleep=sleep, now=lambda: state["now"], jitter=lambda: 0)
+    assert ml.guarded_json("https://example.com/q", pacer=pacer, opener=opener) == {"ok": True}
+    assert calls["n"] == 2
+    assert state["now"] == 1.0
+    assert pacer.cooldown_until == 0.0
+
+    def always_down(url, *, headers=None, timeout=30):
+        raise TimeoutError("timed out")
+
+    pacer = ml.HostPacer(1.0, sleep=sleep, now=lambda: state["now"], jitter=lambda: 0)
+    with pytest.raises(TimeoutError):
+        ml.guarded_json("https://example.com/q", pacer=pacer, opener=always_down)
+    assert pacer.cooldown_until == 0.0
+
+
+def test_rate_limit_leaves_the_title_unchecked(tmp_path, capsys):
+    ml._RATE_LIMIT_ANNOUNCED.clear()
+    root = tmp_path / "watch"
+    _touch(root / "shows" / "Joe Pickett" / "Season 01" / "Joe_Pickett_S01E01_1080p.mkv")
+    conn = ml.connect(tmp_path / "lib.sqlite")
+    provider = _LimitedProvider()
+
+    stats = ml.scan_library(root, conn, providers=[provider], prober=_prober)
+
+    assert provider.calls == ["Joe Pickett"]
+    assert stats["looked_up"] == 0
+    row = conn.execute("SELECT sources, metadata_checked_at FROM titles").fetchone()
+    assert row["sources"] == "[]"
+    assert row["metadata_checked_at"] is None
+    assert "wikidata rate limited" in capsys.readouterr().err
+    stored = conn.execute(
+        "SELECT data FROM lookups WHERE key = ?", ("rate-limit:wikidata",)
+    ).fetchone()
+    pause = json.loads(stored["data"])
+
+    again = _LimitedProvider()
+    stats = ml.scan_library(root, conn, providers=[again], prober=_prober)
+    assert again.calls == []
+    assert stats["looked_up"] == 0
+    assert "wikidata rate limited" not in capsys.readouterr().err
+    stored_again = conn.execute(
+        "SELECT data FROM lookups WHERE key = ?", ("rate-limit:wikidata",)
+    ).fetchone()
+    assert json.loads(stored_again["data"])["until"] == pause["until"]
+    row = conn.execute("SELECT metadata_checked_at FROM titles").fetchone()
+    assert row["metadata_checked_at"] is None
+
+    refreshed = _LimitedProvider()
+    ml.scan_library(root, conn, providers=[refreshed], prober=_prober, refresh_metadata=True)
+    assert refreshed.calls == []
+
+
+def test_rate_limit_does_not_stop_filing(tmp_path, capsys):
+    ml._RATE_LIMIT_ANNOUNCED.clear()
+    root = tmp_path / "watch"
+    _touch(root / "Joe.Pickett.S01.1080p" / "Joe.Pickett.S01E01.mkv")
+    provider = _LimitedProvider()
+    cache = ml.connect(tmp_path / "lib.sqlite")
+
+    plans = ml.plan_library(root, providers=[provider], prober=_prober, tracked=set(), cache=cache)
+
+    plan = next(p for p in plans if p.entry.name.startswith("Joe.Pickett"))
+    assert plan.kind == "shows"
+    assert plan.skipped is None
+    assert plan.moves
+    assert provider.calls == ["Joe Pickett"]
+    assert "no metadata match" in plan.note
+    assert "wikidata rate limited" in capsys.readouterr().err
+
+
+def test_lookup_keeps_a_match_from_the_provider_that_answered(tmp_path):
+    ml._RATE_LIMIT_ANNOUNCED.clear()
+
+    class Answered:
+        name = "tmdb"
+
+        def search(self, title, year, kind):
+            return ml.Metadata(title=title, year=year, sources=["tmdb"])
+
+    cache = ml.connect(tmp_path / "lib.sqlite")
+    meta = ml.lookup_metadata("Joe Pickett", None, "shows", [_LimitedProvider(), Answered()], cache)
+
+    assert meta.sources == ["tmdb"]
+    assert meta.title == "Joe Pickett"
