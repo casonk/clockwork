@@ -222,6 +222,10 @@ LISTEN_LIST_HISTORY_FILE = Path(
         "CLOCKWORK_LISTEN_LIST_HISTORY_FILE", BASE_DIR / "config" / "to-listen-history.jsonl"
     )
 )
+EAT_LIST_FILE = Path(os.environ.get("CLOCKWORK_EAT_LIST_FILE", BASE_DIR / "config" / "to-eat.json"))
+EAT_LIST_HISTORY_FILE = Path(
+    os.environ.get("CLOCKWORK_EAT_LIST_HISTORY_FILE", BASE_DIR / "config" / "to-eat-history.jsonl")
+)
 INVEST_LIST_FILE = Path(
     os.environ.get("CLOCKWORK_INVEST_LIST_FILE", BASE_DIR / "config" / "to-invest.json")
 )
@@ -4412,6 +4416,24 @@ SIMPLE_LIST_CONFIGS = {
         ],
         "ollama": True,
     },
+    "eat": {
+        "page": "to-eat",
+        "file_var": "EAT_LIST_FILE",
+        "history_var": "EAT_LIST_HISTORY_FILE",
+        "title": "To Eat",
+        "icon": "🍽️",
+        "primary": "title",
+        "status": "visited",
+        "default_category": "Restaurants",
+        "default_categories": ["Restaurants", "Cafes", "Bars", "Takeout"],
+        "done_label": "been",
+        "todo_label": "to try",
+        "reset_label": "not yet",
+        "item_placeholder": "Add restaurant...",
+        "category_placeholder": "New list (e.g. Date night)...",
+        "name_label": "List",
+        "extras": ["cuisine", "place"],
+    },
     "invest": {
         "page": "to-invest",
         "file_var": "INVEST_LIST_FILE",
@@ -5799,6 +5821,11 @@ def to_listen():
     return _render_simple_list("listen")
 
 
+@app.get("/to-eat")
+def to_eat():
+    return _render_simple_list("eat")
+
+
 @app.get("/api/youtube")
 def youtube_status():
     """Report local integration readiness without reading or returning secrets."""
@@ -7047,6 +7074,7 @@ def _simple_list_endpoint(key: str) -> str:
         "watch": "to_watch",
         "read": "to_read",
         "listen": "to_listen",
+        "eat": "to_eat",
         "invest": "to_invest",
     }[key]
 
@@ -7153,8 +7181,9 @@ def api_simple_add_item(list_key):
         )
     if cfg["primary"] == "ticker" and payload.get("name"):
         item["name"] = str(payload["name"]).strip()
-    if payload.get("year") and "year" in cfg.get("extras", []):
-        item["year"] = str(payload["year"]).strip()
+    for field in ("year", "cuisine", "place"):
+        if payload.get(field) and field in cfg.get("extras", []):
+            item[field] = str(payload[field]).strip()[:120]
     if cfg["status"] in payload:
         item[cfg["status"]] = bool(payload[cfg["status"]])
     elif "done" in payload:
@@ -8767,6 +8796,16 @@ def _load_portal_groups(apply_labels: bool = True) -> list[tuple[str, list[dict]
             "hostname": "",
             "access_mode": "shared-mtls",
             "icon": "🎧",
+        }
+    )
+    groups["Clockwork"].append(
+        {
+            "name": "clockwork-to-eat",
+            "display": "To Eat",
+            "url": "/to-eat",
+            "hostname": "",
+            "access_mode": "shared-mtls",
+            "icon": "🍽️",
         }
     )
     groups["Clockwork"].append(

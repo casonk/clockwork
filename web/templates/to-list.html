@@ -383,6 +383,11 @@
                 {% if card %}<a class="item-link" href="{{ tradility_card_url|replace('{ticker}', card|urlencode) }}" title="Open {{ card }} in Tradility" aria-label="Open {{ card }} in Tradility">📈</a>{% endif %}
               {% endif %}
               {% if item.year %}<span class="item-meta">{{ item.year }}</span>{% endif %}
+              {% if cfg.key == "eat" %}
+                {% if item.cuisine %}<span class="item-meta">{{ item.cuisine }}</span>{% endif %}
+                {% if item.place %}<span class="item-meta">{{ item.place }}</span>{% endif %}
+                <a class="item-link" href="https://www.google.com/maps/search/?api=1&amp;query={{ (value ~ ' ' ~ (item.place or ''))|trim|urlencode }}" target="_blank" rel="noopener noreferrer" title="Find {{ value }} on a map" aria-label="Find {{ value }} on a map">📍</a>
+              {% endif %}
               {% if item.youtube_channel %}<span class="item-meta">{{ item.youtube_channel }}</span>{% endif %}
               {% if item.youtube_account %}<span class="item-meta" title="YouTube account">via {{ item.youtube_account }}</span>{% endif %}
               {% if cfg.key == "listen" %}
