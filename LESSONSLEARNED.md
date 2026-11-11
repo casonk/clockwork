@@ -36,6 +36,23 @@ should change how future sessions work in this repo.
   (the remote-desktop path) need their name typed, skips them in bulk changes, runs one change
   at a time, spaces bulk changes apart and writes every change to
   `config/grandmaster-audit.jsonl`.
+- Pace Wikidata to at least one request a second and TMDB to at least one
+  every 0.3 seconds, with jitter. On HTTP 429 or 503, pause that provider for
+  at least 15 minutes (honor a longer Retry-After, cap at six hours), store
+  the pause in the catalog, and keep filing. Leave `metadata_checked_at` unset
+  so the title is tried again after the pause. `HTTPError` is an `OSError`, so
+  a blanket connection retry sends the 429 again after a short sleep. Leave
+  Magneto and the local genre model unpaced; they are on localhost.
+- A user-scope interval timer that only has `OnBootSec` and `OnUnitActiveSec`
+  goes idle after the user manager restarts, and also after an `ExecCondition`
+  skip. `Persistent=` does not catch up monotonic timers, and `OnUnitActiveSec`
+  has no base until the service has actually become active. Give those jobs
+  `OnStartupSec` (same delay as `OnBootSec`) and `OnUnitInactiveSec` (same
+  interval as `OnUnitActiveSec`). After changing a timer that is already stuck,
+  start the service once; a past `OnStartupSec` does not fire on its own.
+- A finished download that Transmission is still seeding is registered by
+  linking episode files into `shows/<Title>/Season NN/`. Do not rename or move
+  the torrent data. Skip any destination that already exists.
 - A portfolio portal should federate application-owned UIs rather than become
   the implementation home for every application's domain page. Give each app a
   complete loopback UI and stable API, then let the portal link or reverse
@@ -371,3 +388,24 @@ should change how future sessions work in this repo.
 - **Commit after the last clean hook run, and re-stage first.** `pre-commit run` rewrites files after they were staged; committing without re-staging ships the unformatted versions, and CI (which runs the same hooks once) fails on a change a local "Passed" hid. Run the hooks until one run reports no change, then `git add -A`, then commit, and check `git status` is clean afterwards.
 - **Write test code in a form `ruff-format` and `black` both leave alone.** They disagree on a long `assert cond, msg  # comment` line and on `code = A + """..."""` spread over lines (ruff wraps it in parentheses, black unwraps it), so the two hooks undo each other on every run. Put the comment on its own line above the assert, and build a long string in its own statement. Keep a `# noqa` on the line ruff reports (or avoid the construct, such as a `lambda` assigned to a name).
 - **Dry-run a rule that creates rows on a copy of the real list before applying it.** The To Invest sync's first duplicate rule ("a ticker whose accounts carry two asset-class labels is two instruments") passed its tests and then added 15 rows on live data, because custodians label the same fund differently (VOO is ETFs at Schwab and Stocks at Fidelity). Run the new rule over a copy of `config/to-invest.json` and the holdings export, list exactly what it would add, back the live file up, and only then sync. A symbol is a true duplicate only when it is a different asset (crypto coin versus stock or fund: BTC, T); different labels for one instrument are folded into its single row.
+- **A "service is down" symptom can be a dead `systemd --user` manager, not the unit.** Check `journalctl -u user@<uid>` and whether `/run/user/<uid>/bus` accepts connections before debugging the app; `Restart=` does nothing when the manager itself is gone. Caddy then returns an empty 502 for every upstream, which some browsers download instead of rendering.
+- **Do not name a scratch script after a stdlib module.** `grp.py` re-ran itself recursively through Flask's `import grp` and fork-bombed the host (see traction-control `AGENTS.md`, Child Session Hygiene). `ecu watch` in central-ecu now logs the offending command lines.
+
+### 2026-11-08 — Import external playlists without surrendering local list authority
+
+- Key imported media by the provider's stable item identity, not its display
+  title. Make the first synchronization additive: preserve local categories and
+  completion state, do not mirror remote deletions, and leave title collisions
+  explicit instead of guessing. This makes a read-only provider grant useful
+  without turning an external playlist into the authority for local history.
+- In a multi-account OAuth flow, force the provider's account chooser and
+  verify the provider's stable account/channel ID after consent. Display names
+  can collide, and an existing browser session can silently authorize the
+  previously used account. Keep each account's sync failure isolated so an
+  expired grant does not block healthy accounts.
+- Make bidirectional playlist sync additive and identity-driven in both
+  directions. Pull each account's stable item IDs before pushing, insert only
+  explicit local provider IDs missing from that account, and never search by a
+  display title to guess the remote object. This keeps retries idempotent and
+  lets one local union safely synchronize across several accounts without
+  mirroring deletions.

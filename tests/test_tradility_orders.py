@@ -648,8 +648,10 @@ def test_the_holdings_route_forwards_and_the_page_shows_where_a_stock_is_held_pe
     monkeypatch.setattr(
         t,
         "call_trader",
-        lambda m, p, b=None: seen.append((m, p))
-        or (200, {"ok": True, "symbol": "CAT", "accounts": [], "statements": []}),
+        lambda m, p, b=None: (
+            seen.append((m, p))
+            or (200, {"ok": True, "symbol": "CAT", "accounts": [], "statements": []})
+        ),
     )
     assert c.get("/api/tradility-trade/holdings/cat").get_json()["symbol"] == "CAT"
     assert seen == [("GET", "/holdings/CAT")]

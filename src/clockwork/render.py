@@ -173,8 +173,12 @@ def render_timer_unit(job: JobSpec) -> str:
     else:
         if job.timer.on_boot_sec:
             lines.append(f"OnBootSec={job.timer.on_boot_sec}")
+        if job.timer.on_startup_sec:
+            lines.append(f"OnStartupSec={job.timer.on_startup_sec}")
         if job.timer.on_unit_active_sec:
             lines.append(f"OnUnitActiveSec={job.timer.on_unit_active_sec}")
+        if job.timer.on_unit_inactive_sec:
+            lines.append(f"OnUnitInactiveSec={job.timer.on_unit_inactive_sec}")
     lines.append(f"Persistent={_format_bool(job.timer.persistent)}")
     lines.append(f"Unit={unit_name}")
     if job.timer.accuracy_sec:

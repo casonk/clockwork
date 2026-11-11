@@ -18,7 +18,7 @@ user LaunchAgents.
 
 - concrete `systemd` services and timers for user or system scope
 - owner-only macOS user LaunchAgents with deterministic labels and plist output
-- interval timers (`OnBootSec` / `OnUnitActiveSec`) and calendar timers
+- interval timers (`OnBootSec` / `OnStartupSec` / `OnUnitActiveSec` / `OnUnitInactiveSec`) and calendar timers
 - cron examples rendered from the same manifest shape
 - safe file installation into a unit directory or crontab snippet file
 - a Flask web UI for browsing, enabling, and disabling jobs across all example manifests
@@ -178,12 +178,22 @@ python3 web/media_library.py search --director fincher --year-from 1990
 - Titles, years and canonical names come from Wikidata (no key needed). With
   `CLOCKWORK_TMDB_API_KEY` set, TMDB adds plots, ratings and fills any gaps.
   Only parsed titles and years are sent to either service. Lookups are cached
-  in the catalog; titles with no match are retried weekly.
+  in the catalog; titles with no match are retried weekly. Wikidata calls stay
+  at least a second apart and TMDB calls at least a third of a second apart.
+  A 429 or 503 pauses that provider for at least 15 minutes (or its
+  Retry-After, up to six hours). The pause is stored in the catalog so the
+  next sync waits it out, and filing continues. A paused lookup stays
+  unchecked and is tried again after the pause.
 - Resolution, codecs, channels, runtime and stream languages come from local
   `ffprobe`; quality labels count widescreen crops (1920x800) as 1080p.
 - Entries Transmission still tracks (asked through Magneto's `/api/torrents`)
-  are never renamed, since that would break seeding. If Magneto is
-  unreachable, anything owned by the `transmission` user is skipped instead.
+  are never renamed, since that would break seeding. A show pack is linked
+  into `shows/Title (Year)/Season NN/` while it seeds: each episode video and
+  the subtitles beside it become a symlink, and a file already in that season
+  is left alone. The pack stays where Transmission put it. Movies stay at the
+  watch root until the torrent is removed. If Magneto is unreachable, anything
+  owned by the `transmission` user is skipped the same way, and a show pack in
+  that state is linked rather than renamed.
 - Every title gets its own folder. Multi-movie packs are split into one
   folder per film, and feature films inside a show pack (`S05M01 ...`) are
   filed under `movies/`. Subtitles and external audio tracks (`.ac3`, `.dts`,
@@ -209,6 +219,10 @@ matching stems, leaves Transmission's source files in place for seeding, and
 skips incomplete torrents and episodes already filed. It uses each completed
 torrent's current directory, including files Magneto moved to its configured
 library directory. The action is explicit and does not move or rename data.
+The scheduled library sync does the same for any finished show pack
+Transmission is still seeding. It keys off the release name (`S01`, `S01E01`),
+including a pack that was added from the Movies category, and it does not mark
+the list item watched.
 
 Library pages (`web/library_pages.py`):
 
@@ -607,6 +621,21 @@ when it last ran, and the outcome of the service it starts (`ok`, `running`,
 returns the same rows as JSON. It reads `systemctl list-timers` and `show`, so it
 needs no elevation. macOS (launchd) hosts are not covered yet.
 
+### Grandmaster Clock (`/grandmaster`)
+
+The Services menu links **Grandmaster Clock**, the orchestration page for long-running
+apps (manifest jobs with no timer or cron that are not one-shots). Each app shows
+running, failed, stopped or disabled, with Enable, Disable and Restart buttons per app
+and per repository, plus Enable all, Disable all and Restart running. It uses the same
+install, `systemctl` and sudo paths as the main page. The web UI's own unit is never
+disabled or restarted from it. `POST /api/grandmaster/<enable|disable|restart>` takes
+`{"manifest_path", "name"}` or `{"all": true, "repo": "..."}`.
+
+Grandmaster Clock also manages the Home page cards: hide or show any card, add link
+cards (`https://…` or `/path`), and remove link or placeholder cards. Real services can
+only be hidden, not removed, and hiding affects Home only. State lives in the gitignored
+`config/home-cards.json`.
+
 Guardrails: the Grandmaster Clock never changes its own web UI or hides its own Home card;
 critical apps (`CLOCKWORK_GRANDMASTER_CRITICAL`, default `pit-box-guacd,pit-box-guacamole`)
 need their name typed to be disabled or restarted and are skipped by bulk changes; bulk
@@ -628,21 +657,6 @@ Clockwork's **To Code** list is available from `/home` and the Lists menu at
 `/to-code`. It groups backlog items by repository family and repository, with
 an explicit family selector when adding an item. Its default store is the
 gitignored `config/to-code.json`; `CLOCKWORK_CODE_LIST_FILE` and
-### Grandmaster Clock (`/grandmaster`)
-
-The Services menu links **Grandmaster Clock**, the orchestration page for long-running
-apps (manifest jobs with no timer or cron that are not one-shots). Each app shows
-running, failed, stopped or disabled, with Enable, Disable and Restart buttons per app
-and per repository, plus Enable all, Disable all and Restart running. It uses the same
-install, `systemctl` and sudo paths as the main page. The web UI's own unit is never
-disabled or restarted from it. `POST /api/grandmaster/<enable|disable|restart>` takes
-`{"manifest_path", "name"}` or `{"all": true, "repo": "..."}`.
-
-Grandmaster Clock also manages the Home page cards: hide or show any card, add link
-cards (`https://…` or `/path`), and remove link or placeholder cards. Real services can
-only be hidden, not removed, and hiding affects Home only. State lives in the gitignored
-`config/home-cards.json`.
-
 `CLOCKWORK_CODE_LIST_HISTORY_FILE` can point to other local files. Importing
 repo `BACKLOG.md` entries is a one-time local snapshot. Keep each repo's tracked
 `BACKLOG.md` current when completing an item; the page does not write back to
@@ -686,6 +700,13 @@ entry per minute with no hour, so it repeats every hour. Windows renders it as
 a daily trigger repeating every step, and refuses a step that does not divide
 60, where a fixed repetition would drift from systemd's hourly restart.
 Supported interval jobs use `on_unit_active_sec` without `on_boot_sec`.
+`on_startup_sec` and `on_unit_inactive_sec` are extra systemd triggers: the
+first fires after the service manager starts (for a user timer, that is the
+user manager, not machine boot), and the second fires after the service stops
+or an `ExecCondition=` skip. `Persistent=` does not catch up monotonic timers,
+so a user timer with only `OnBootSec` and `OnUnitActiveSec` stays idle after
+the user manager restarts. launchd and Task Scheduler keep the portable cadence
+from `on_unit_active_sec` and do not render those two triggers.
 
 ## Manifest Shape
 
