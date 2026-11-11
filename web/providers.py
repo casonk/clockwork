@@ -1,7 +1,7 @@
 """A small provider framework for the To Watch / To Listen integrations.
 
-A *provider* is an outside service a list item can be linked to (Spotify, YouTube, Apple Music, and
-later Apple TV). Each one is a ``Provider`` subclass registered in ``REGISTRY``; the list pages, the
+A *provider* is an outside service a list item can be linked to (Spotify, YouTube, Apple Music and
+Apple TV). Each one is a ``Provider`` subclass registered in ``REGISTRY``; the list pages, the
 playlist browser and the copy flow talk only to this interface, so a new service is one subclass.
 
 What a provider can do is declared in ``capabilities``:
@@ -72,6 +72,7 @@ class Provider:
     item_fields: tuple[str, ...] = ()  # every item field this provider stores
     url_field = ""  # the item field holding the link shown on the item
     link_placeholder = ""
+    icon = "🔗"  # shown on an item that has a link
 
     def can(self, capability: str) -> bool:
         return capability in self.capabilities
@@ -260,6 +261,7 @@ class AppleMusicProvider(Provider):
     item_fields = ("apple_music_kind", "apple_music_id", "apple_music_url")
     url_field = "apple_music_url"
     link_placeholder = "https://music.apple.com/us/album/..."
+    icon = "🍎"
 
     def parse_link(self, value: str) -> dict[str, str]:
         text = str(value or "").strip()
@@ -291,7 +293,58 @@ class AppleMusicProvider(Provider):
         return {"apple_music_kind": kind, "apple_music_id": apple_id, "apple_music_url": url}
 
 
-REGISTRY: tuple[Provider, ...] = (SpotifyProvider(), YouTubeProvider(), AppleMusicProvider())
+# --- Apple TV (links only: Apple publishes no watchlist / Up Next API) -------------------------
+
+_TV_KINDS = ("movie", "show", "episode", "season")
+_TV_ID = re.compile(r"umc\.[a-z]{3}\.[a-z0-9]{10,40}")
+
+
+class AppleTVProvider(Provider):
+    """Links to the Apple TV app/site. There is no public watchlist API, so nothing syncs.
+
+    ``tv.apple.com/<storefront>/<movie|show|episode|season>/<slug>/umc.<xxx>.<id>`` links are
+    parsed and canonicalised; an episode keeps its ``showId`` so the link opens in context.
+    """
+
+    id = "apple-tv"
+    label = "Apple TV"
+    field = "apple_tv_id"
+    pages = ("watch",)
+    capabilities = frozenset({LINK})
+    item_fields = ("apple_tv_kind", "apple_tv_id", "apple_tv_url")
+    url_field = "apple_tv_url"
+    link_placeholder = "https://tv.apple.com/us/movie/..."
+    icon = "🍎"
+
+    def parse_link(self, value: str) -> dict[str, str]:
+        text = str(value or "").strip()
+        if not text:
+            raise ProviderError("Apple TV link cannot be empty")
+        parsed = urllib.parse.urlsplit(text if "://" in text else f"https://{text}")
+        host = (parsed.hostname or "").casefold().rstrip(".")
+        parts = [p for p in parsed.path.split("/") if p] if host == "tv.apple.com" else []
+        storefront = ""
+        if parts and re.fullmatch(r"[a-z]{2}", parts[0]):
+            storefront, parts = parts[0], parts[1:]
+        if not storefront or len(parts) < 2 or parts[0] not in _TV_KINDS:
+            raise ProviderError("Enter a valid tv.apple.com link (movie, show, season or episode)")
+        kind, tv_id = parts[0], parts[-1]
+        if not _TV_ID.fullmatch(tv_id):
+            raise ProviderError("That tv.apple.com link has no recognizable ID")
+        slug_part = parts[1] if len(parts) >= 3 else "-"
+        url = f"https://tv.apple.com/{storefront}/{kind}/{slug_part}/{tv_id}"
+        show = urllib.parse.parse_qs(parsed.query).get("showId", [""])[0]
+        if kind == "episode" and _TV_ID.fullmatch(show):
+            url += f"?showId={show}"
+        return {"apple_tv_kind": kind, "apple_tv_id": tv_id, "apple_tv_url": url}
+
+
+REGISTRY: tuple[Provider, ...] = (
+    SpotifyProvider(),
+    YouTubeProvider(),
+    AppleMusicProvider(),
+    AppleTVProvider(),
+)
 
 
 def get(provider_id: str) -> Provider | None:
