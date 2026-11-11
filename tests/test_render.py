@@ -60,6 +60,8 @@ def test_notify_and_library_timers_rearm_after_the_user_manager_restarts():
         ),
     ]
     for path, name, startup, interval in cases:
+        if not path.exists():  # *.local.toml is gitignored; only this machine has it
+            continue
         manifest = load_manifest(path)
         job = next(item for item in manifest.jobs if item.name == name)
         assert job.timer is not None
