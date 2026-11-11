@@ -406,11 +406,19 @@ def ensure_private_playlist(settings: Settings, title: str) -> tuple[str, bool]:
 
 
 def add_video_to_playlist(settings: Settings, key: str, video_id: str) -> str:
-    """Add one explicitly identified video and return its playlist-item ID."""
+    """Add one explicitly identified video to the configured list playlist; returns the item ID."""
 
     playlist_id = settings.playlist_id(key)
     if not playlist_id:
         raise YouTubeError(f"No YouTube playlist is configured for To {key.title()}")
+    return add_video_to_playlist_id(settings, playlist_id, video_id)
+
+
+def add_video_to_playlist_id(settings: Settings, playlist_id: str, video_id: str) -> str:
+    """Add one video to any playlist the account can edit and return its playlist-item ID."""
+
+    if not re.fullmatch(r"[A-Za-z0-9_-]{6,64}", str(playlist_id or "")):
+        raise YouTubeError("YouTube playlist ID is invalid")
     if not can_create_playlists(settings.oauth_file):
         raise YouTubeError(f"{settings.name} must be reauthorized with playlist edit permission")
     video_url(video_id)  # Validate before contacting Google.
@@ -430,6 +438,29 @@ def add_video_to_playlist(settings: Settings, key: str, video_id: str) -> str:
     if not playlist_item_id:
         raise YouTubeError(f"YouTube added no usable playlist item for {settings.name}")
     return playlist_item_id
+
+
+def create_private_playlist(settings: Settings, title: str, description: str = "") -> str:
+    """Always create a new private playlist and return its ID (``ensure_private_playlist`` reuses)."""
+
+    if not can_create_playlists(settings.oauth_file):
+        raise YouTubeError(
+            f"{settings.name} must be reauthorized with playlist creation permission"
+        )
+    token = access_token(load_credentials(settings.oauth_file))
+    created = _api_post(
+        "playlists",
+        token,
+        {
+            "snippet": {"title": title[:150], "description": description[:5000]},
+            "status": {"privacyStatus": "private"},
+        },
+        part="snippet,status",
+    )
+    playlist_id = str(created.get("id") or "").strip()
+    if not playlist_id:
+        raise YouTubeError(f"YouTube created no usable playlist for {settings.name}")
+    return playlist_id
 
 
 def _write_owner_json(path: Path, payload: dict[str, Any]) -> None:
