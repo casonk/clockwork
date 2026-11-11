@@ -32,6 +32,8 @@ def list_files(tmp_path, monkeypatch):
         "WATCH_LIST_HISTORY_FILE": tmp_path / "to-watch-history.jsonl",
         "READ_LIST_FILE": tmp_path / "to-read.json",
         "READ_LIST_HISTORY_FILE": tmp_path / "to-read-history.jsonl",
+        "EAT_LIST_FILE": tmp_path / "to-eat.json",
+        "EAT_LIST_HISTORY_FILE": tmp_path / "to-eat-history.jsonl",
         "LISTEN_LIST_FILE": tmp_path / "to-listen.json",
         "LISTEN_LIST_HISTORY_FILE": tmp_path / "to-listen-history.jsonl",
         "INVEST_LIST_FILE": tmp_path / "to-invest.json",
@@ -616,6 +618,7 @@ def test_tradility_list_omits_history_and_ticker_detail_returns_it(client, list_
         ("to-watch", "/api/watch", "Movies", {"title": "Brazil", "year": 1985}, "watched"),
         ("to-read", "/api/read", "Books", {"title": "The Dispossessed"}, "watched"),
         ("to-listen", "/api/listen", "Albums", {"title": "Kind of Blue"}, "watched"),
+        ("to-eat", "/api/eat", "Restaurants", {"title": "Pizzeria Bianco"}, "visited"),
         (
             "to-invest",
             "/api/invest",
@@ -2527,3 +2530,23 @@ def test_home_groups_drop_hidden_services_and_empty_groups_and_can_be_switched_o
     assert web_app._home_hidden_services() == set()  # an empty setting shows every card
     monkeypatch.delenv("CLOCKWORK_HOME_HIDE_SERVICES")
     assert web_app._home_hidden_services() == {"tradility-web"}
+
+
+def test_to_eat_keeps_cuisine_and_place_and_links_a_map(client, list_files):
+    csrf = _csrf(client, "/api/eat")
+    response = client.post(
+        "/api/eat/add-item",
+        json={
+            "category": "Restaurants",
+            "title": "Pizzeria Bianco",
+            "cuisine": "Pizza",
+            "place": "Phoenix, AZ",
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert response.status_code == 200
+    item = response.get_json()["data"]["categories"][0]["items"][0]
+    assert item["cuisine"] == "Pizza" and item["place"] == "Phoenix, AZ"
+    html = client.get("/to-eat").get_data(as_text=True)
+    assert "To Eat" in html and "google.com/maps/search" in html
+    assert "Pizza" in html and "Phoenix, AZ" in html
