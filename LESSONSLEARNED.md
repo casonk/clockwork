@@ -409,3 +409,17 @@ should change how future sessions work in this repo.
   display title to guess the remote object. This keeps retries idempotent and
   lets one local union safely synchronize across several accounts without
   mirroring deletions.
+- A page that swaps its content in place (autoplay loading the next video without a reload) keeps
+  running the script it first loaded. Keep per-item state (the URL to report to, an "already sent"
+  flag) in variables that follow the current location and reset on each swap, never baked in at
+  render time, and add a server-side fallback for events that matter. A tab left open across a
+  deploy also keeps the old script, so a fix is not proven by a tab that was never reloaded.
+- Prefer a public-client (PKCE) OAuth flow when the provider offers one: there is no client secret to
+  store, fetch from a vault or leak, and refresh sends only the client ID. When a sibling repo
+  already has a registered app and loopback redirect, reuse it rather than asking for a new setup.
+- A command run through the agent's `!` shell has no standard input, so a script that prompts exits
+  at end-of-file (silently under `set -e`). Detect `[[ -t 0 ]]`, accept arguments and environment
+  variables, and print the exact command to run instead of failing quietly.
+- Put each external service behind one small provider interface (`web/providers.py`: link, browse,
+  write capabilities) so pages and flows ask what a provider can do instead of branching on its
+  name. A link-only service then costs one class and needs no credentials.
