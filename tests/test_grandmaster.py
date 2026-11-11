@@ -35,6 +35,8 @@ def test_state_label(status, enabled, label):
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
     monkeypatch.setattr(web_app, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(grandmaster, "AUDIT_FILE", tmp_path / "audit.jsonl")
+    monkeypatch.setattr(web_app, "_GRANDMASTER_GATE", grandmaster.ActionGate(cooldown=0))
     monkeypatch.setattr(web_app, "_self_unit", lambda: "me.service")
     monkeypatch.setattr(
         web_app,
@@ -311,3 +313,121 @@ def test_home_card_aliases():
         == "pit-box-remote-desktop"
     )
     assert grandmaster.home_card_name("x", {"y"}) is None
+
+
+# ---- Guardrails -------------------------------------------------------------
+
+
+def test_critical_apps_default_and_env_override(monkeypatch):
+    monkeypatch.delenv("CLOCKWORK_GRANDMASTER_CRITICAL", raising=False)
+    assert grandmaster.critical_apps() == grandmaster.CRITICAL_DEFAULT
+    monkeypatch.setenv("CLOCKWORK_GRANDMASTER_CRITICAL", "a, b ,")
+    assert grandmaster.critical_apps() == {"a", "b"}
+    monkeypatch.setenv("CLOCKWORK_GRANDMASTER_CRITICAL", "")
+    assert grandmaster.critical_apps() == frozenset()
+
+
+def test_confirmation_is_needed_only_to_disable_or_restart_a_critical_app():
+    critical = frozenset({"x"})
+    assert grandmaster.confirmation_problem("disable", "x", "", critical)
+    assert grandmaster.confirmation_problem("restart", "x", "nope", critical)
+    assert not grandmaster.confirmation_problem("restart", "x", "x", critical)
+    assert not grandmaster.confirmation_problem("enable", "x", "", critical)
+    assert not grandmaster.confirmation_problem("disable", "y", "", critical)
+
+
+def test_a_critical_app_is_not_changed_without_its_name_and_the_attempt_is_not_logged_as_a_change(
+    client, monkeypatch
+):
+    monkeypatch.setenv("CLOCKWORK_GRANDMASTER_CRITICAL", "other")
+    payload = {"manifest_path": "r/m.toml", "name": "other"}
+    refused = client.post("/api/grandmaster/disable", json=payload)
+    assert refused.status_code == 409 and refused.get_json()["needs_confirm"]
+    assert (
+        client.post("/api/grandmaster/restart", json={**payload, "confirm": "wrong"}).status_code
+        == 409
+    )
+    assert client.calls == []
+    assert client.post("/api/grandmaster/enable", json=payload).status_code == 200
+    assert (
+        client.post("/api/grandmaster/disable", json={**payload, "confirm": "other"}).status_code
+        == 200
+    )
+    assert client.calls == [("enable", "other"), ("disable", "other")]
+    rows = {a["name"]: a for a in client.get("/api/grandmaster").get_json()["apps"]}
+    assert rows["other"]["critical"] and not rows["me"]["critical"]
+
+
+def test_bulk_changes_skip_critical_apps_and_dry_run_changes_nothing(client, monkeypatch):
+    monkeypatch.setenv("CLOCKWORK_GRANDMASTER_CRITICAL", "other")
+    plan = client.post("/api/grandmaster/disable", json={"all": True, "dry_run": True}).get_json()
+    assert plan["dry_run"] and plan["targets"] == []
+    assert plan["skipped"] == [
+        {"name": "other", "reason": "critical app: change it on its own row"}
+    ]
+    done = client.post("/api/grandmaster/disable", json={"all": True}).get_json()
+    assert done["results"] == [] and client.calls == []
+    # enabling is harmless, so a bulk enable includes it
+    plan = client.post("/api/grandmaster/enable", json={"all": True, "dry_run": True}).get_json()
+    assert plan["targets"] == ["other"] and plan["skipped"] == []
+
+
+def test_action_gate_allows_one_change_at_a_time_and_spaces_bulk_changes():
+    now = [100.0]
+    gate = grandmaster.ActionGate(cooldown=10, clock=lambda: now[0])
+    assert gate.try_enter(bulk=False) == (True, "")
+    busy, why = gate.try_enter(bulk=False)
+    assert not busy and "in progress" in why
+    gate.leave()
+    assert gate.try_enter(bulk=True) == (True, "")
+    gate.leave()
+    now[0] = 103.0
+    refused, why = gate.try_enter(bulk=True)
+    assert not refused and "wait 7s" in why
+    assert gate.try_enter(bulk=False) == (True, "")  # a single change is not rate limited
+    gate.leave()
+    now[0] = 111.0
+    assert gate.try_enter(bulk=True) == (True, "")
+    gate.leave()
+
+
+def test_bulk_changes_are_rate_limited_over_http(client, monkeypatch):
+    monkeypatch.setattr(web_app, "_GRANDMASTER_GATE", grandmaster.ActionGate(cooldown=60))
+    assert client.post("/api/grandmaster/restart", json={"all": True}).status_code == 200
+    again = client.post("/api/grandmaster/restart", json={"all": True})
+    assert again.status_code == 429 and "wait" in again.get_json()["error"]
+
+
+def test_every_change_is_written_to_the_audit_log(cards):
+    payload = {"manifest_path": "r/m.toml", "name": "other"}
+    cards.post("/api/grandmaster/restart", json=payload)
+    cards.post("/api/grandmaster/home/hide", json={"name": "magneto-web", "hidden": True})
+    cards.post("/api/grandmaster/restart", json={"all": True})
+    entries = cards.get("/api/grandmaster/audit").get_json()["entries"]
+    assert [(e["action"], e["target"], e["ok"]) for e in entries][:4] == [
+        ("bulk-restart", "all", True),
+        ("restart", "other", True),
+        ("home-hide", "magneto-web", True),
+        ("restart", "other", True),
+    ]
+    assert all("ts" in e and "from" in e for e in entries)
+
+
+def test_audit_log_is_owner_only_bounded_and_tolerates_junk(tmp_path, monkeypatch):
+    path = tmp_path / "log" / "audit.jsonl"
+    monkeypatch.setattr(grandmaster, "AUDIT_MAX_BYTES", 400)
+    monkeypatch.setattr(grandmaster, "AUDIT_KEEP_LINES", 3)
+    for number in range(20):
+        grandmaster.audit({"action": "restart", "target": f"app-{number}", "ok": True}, path)
+    assert oct(path.stat().st_mode & 0o777) == "0o600"
+    assert len(path.read_text().splitlines()) <= 4
+    assert grandmaster.audit_tail(10, path)[0]["target"] == "app-19"
+    path.write_text("not json\n[1]\n" + path.read_text())
+    assert [e["target"] for e in grandmaster.audit_tail(2, path)] == ["app-19", "app-18"]
+    assert grandmaster.audit_tail(5, tmp_path / "missing.jsonl") == []
+
+
+def test_audit_never_raises_when_the_log_cannot_be_written(tmp_path):
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    grandmaster.audit({"action": "restart"}, blocker / "audit.jsonl")  # parent is a file

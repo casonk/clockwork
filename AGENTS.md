@@ -112,6 +112,15 @@ Agents will never be able to run `sudo` commands in this environment. If a task 
 
 Always require the user to run those commands instead of retrying `sudo`; do not claim a sudo-backed live change was applied until the user shares the result.
 
+## Working Tree Safety
+
+This checkout often holds uncommitted work that is not yours. A Claude Code hook
+(`.claude/settings.json` -> `scripts/guard_destructive_git.py`) blocks `git apply` without
+`--cached`/`--check`, `reset --hard`, `checkout -- <path>`, `restore`, `clean -f` and `stash`
+while the target repository has uncommitted changes. Build changes on a copy or in a
+`git worktree` instead (see `LESSONSLEARNED.md`). Run `scripts/install-git-hooks.sh` once per
+clone so commits and pushes run the same checks as CI.
+
 ## Local CI Verification
 
 Run before every push:

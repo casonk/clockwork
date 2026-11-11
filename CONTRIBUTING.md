@@ -9,6 +9,13 @@
 - Update the README and examples when the manifest schema changes.
 - Keep tests aligned with real downstream scheduler patterns from the portfolio.
 
+## Git Hooks
+
+Run `scripts/install-git-hooks.sh` once in each clone. It installs the pre-commit hooks
+(whitespace, ruff, ruff-format, black, gitleaks) and a pre-push stage that runs them again on
+what you are pushing and then runs `pytest`. A clone without the hooks installed skips every
+check silently, and CI then fails on style it would have fixed for you.
+
 ## Local Validation
 
 ```bash
