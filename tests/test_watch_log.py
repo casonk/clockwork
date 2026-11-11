@@ -200,3 +200,26 @@ def test_stream_fallback_logs_only_a_stream_that_ran_to_the_end(
     # A viewer report that already landed makes the fallback a no-op.
     library_pages._note_segment(rel, total - 1, 1500)
     assert len(watch_log.read(log)) == 1
+
+
+def test_the_player_watches_for_a_newer_build(client, library, monkeypatch):
+    monkeypatch.setattr(
+        library_pages.streaming,
+        "probe_media",
+        lambda _path: streaming.MediaInfo(
+            duration=1500,
+            container=".mkv",
+            video_codec="h264",
+            pixel_format="yuv420p",
+            audio_codec="aac",
+            height=1080,
+        ),
+    )
+    build = client.get("/api/build")
+    assert build.get_json() == {"build": web_app.BUILD_ID}
+    assert build.headers["Cache-Control"] == "no-store"
+    html = client.get("/library/play" + EP).get_data(as_text=True)
+    assert f'const loaded = "{web_app.BUILD_ID}"' in html  # the build this page was rendered by
+    assert 'fetch("/api/build"' in html
+    assert "window.location.reload()" in html  # only on the button: never automatically
+    assert "setInterval(check" in html

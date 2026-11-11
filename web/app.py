@@ -335,9 +335,21 @@ def _has_valid_csrf_token() -> bool:
     return bool(expected and provided and secrets.compare_digest(expected, provided))
 
 
+# Changes on every start of the web service, so a page left open across a deploy can tell that
+# its scripts are out of date (see templates/_build_watch.html).
+BUILD_ID = secrets.token_hex(4)
+
+
 @app.context_processor
 def _inject_csrf_token() -> dict[str, object]:
-    return {"csrf_token": _csrf_token()}
+    return {"csrf_token": _csrf_token(), "build_id": BUILD_ID}
+
+
+@app.get("/api/build")
+def api_build():
+    response = jsonify({"build": BUILD_ID})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.context_processor
