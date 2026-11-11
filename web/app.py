@@ -6879,6 +6879,30 @@ def _tradility_card_tickers() -> frozenset[str]:
     return _tradility_card_cache["tickers"]
 
 
+def _tradility_held_quantities() -> dict[str, float]:
+    """Total shares held per ticker from the holdings export (empty when it is unreadable)."""
+    try:
+        rows = _load_invest_holdings_payload()["holdings"]
+    except (OSError, ValueError):
+        return {}
+    held: dict[str, float] = {}
+    rows = [r for r in rows if isinstance(r, dict)]
+    plain = {
+        str(r.get("ticker", "")).strip().upper() for r in rows if r.get("asset_class") != "Crypto"
+    }
+    for row in rows:
+        try:
+            quantity = float(row.get("total_quantity") or 0)
+        except (TypeError, ValueError):
+            continue
+        ticker = str(row.get("ticker", "")).strip().upper()
+        if row.get("asset_class") == "Crypto" and ticker in plain:
+            ticker = f"{ticker}-USD"  # a coin sharing a stock's symbol is T-USD in the analysis
+        if ticker and quantity > 0:
+            held[ticker] = held.get(ticker, 0.0) + quantity
+    return held
+
+
 @app.get("/api/tradility-analysis")
 def api_tradility_analysis():
     """Return the latest tradility technical analysis JSON.
@@ -6900,6 +6924,7 @@ def api_tradility_analysis():
         data = _read_tradility_analysis()
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 500
+    held = _tradility_held_quantities()
     for ticker in data.get("tickers", []):
         if not isinstance(ticker, dict):
             continue
@@ -6908,6 +6933,13 @@ def api_tradility_analysis():
         profile = ticker.pop("company_profile", {})
         ticker["detail_available"] = bool(history)
         ticker["profile_available"] = bool(isinstance(profile, dict) and profile.get("available"))
+        if isinstance(profile, dict):
+            # what the Sectors / Industries tabs and the benchmark indicator group by
+            for key in ("sector", "industry", "category"):
+                ticker[key] = str(profile.get(key) or "")
+        quantity = held.get(str(ticker.get("ticker", "")).strip().upper())
+        if quantity:
+            ticker["held_quantity"] = quantity  # sizes the portfolio-weighted performance
     generated_at = str(data.get("generated_at", "")).strip()
     age_seconds = None
     if generated_at:
