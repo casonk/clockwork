@@ -146,12 +146,10 @@ def test_the_play_page_wires_the_report(client, library, monkeypatch):
         ),
     )
     html = client.get("/library/play" + EP).get_data(as_text=True)
-    import re
-
-    assert re.search(
-        r'fetch\("/library/play/shows/[^"]*Breaking_Bad_S01E01_1080p\.mkv/watched"', html
-    )
-    assert 'addEventListener("ended", report)' in html
+    # The URL comes from the live location so autoplay's in-place page swap logs the right episode.
+    assert 'window.location.pathname.replace(/\\/$/, "") + "/watched"' in html
+    assert 'addEventListener("ended", reportWatched)' in html
+    assert "watchSent = false;" in html
 
 
 @pytest.mark.parametrize("name", ["config/watch-log.jsonl"])
@@ -162,3 +160,43 @@ def test_the_watch_log_is_gitignored(name):
     root = Path(__file__).resolve().parents[1]
     result = subprocess.run(["git", "-C", str(root), "check-ignore", "-q", name])
     assert result.returncode == 0, "personal viewing data must not be committable"
+
+
+def test_normalize_title_links_release_names_and_articles():
+    key = watch_log.normalize_title
+    assert key("Joe.Pickett.S01.1080p.BluRay.x265[eztv.re]") == key("Joe Pickett")
+    assert key("A Clockwork Orange (1971)") == key("clockwork orange")
+    assert key("Rick.and.Morty.S05E01.720p") == "rick and morty"
+
+
+def test_next_episode_continues_after_the_latest_watched():
+    eps = [{"rel": f"s/e{n}", "season": 1, "episode": n} for n in range(1, 5)]
+    watched = {
+        "s/e1": {"views": 1, "ts": "2026-11-01T10:00:00"},
+        "s/e3": {"views": 1, "ts": "2026-11-02T10:00:00"},
+    }
+    assert watch_log.next_episode(eps, watched)["rel"] == "s/e4"
+    assert watch_log.next_episode(eps, {})["rel"] == "s/e1"
+    done = {e["rel"]: {"views": 1, "ts": f"2026-11-0{e['episode']}T10:00:00"} for e in eps}
+    assert watch_log.next_episode(eps, done) is None
+
+
+def test_stream_fallback_logs_only_a_stream_that_ran_to_the_end(
+    client, library, tmp_path, monkeypatch
+):
+    log = tmp_path / "w.jsonl"
+    monkeypatch.setenv("CLOCKWORK_WATCH_LOG_FILE", str(log))
+    library_pages._SEGMENTS_SEEN.clear()
+    rel = EP.lstrip("/")
+    total = streaming.segment_count(1500)
+    # Seeking straight to the end is not a view.
+    library_pages._note_segment(rel, total - 1, 1500)
+    assert watch_log.read(log) == []
+    # Streaming through is.
+    for index in range(total):
+        library_pages._note_segment(rel, index, 1500)
+    (event,) = watch_log.read(log)
+    assert (event["source"], event["season"], event["episode"]) == ("stream", 1, 1)
+    # A viewer report that already landed makes the fallback a no-op.
+    library_pages._note_segment(rel, total - 1, 1500)
+    assert len(watch_log.read(log)) == 1

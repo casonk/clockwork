@@ -27,9 +27,24 @@ def default_file() -> Path:
     return Path(os.environ.get("CLOCKWORK_WATCH_LOG_FILE", base / "config" / "watch-log.jsonl"))
 
 
+_RELEASE_JUNK = re.compile(
+    r"[\s._-](?:s\d{1,2}(?:[ ._-]?e\d{1,3})?|\d{1,2}x\d{2,3}|(?:480|720|1080|2160)p|4k|uhd"
+    r"|blu-?ray|web-?dl|webrip|hdtv|dvdrip|brrip|x26[45]|h\.?26[45]|hevc|complete|season[ ._-]?\d+)"
+    r"(?:[\s._\-\[(].*)?$",
+    re.IGNORECASE,
+)
+_ARTICLE = re.compile(r"^(?:the|a|an) ")
+
+
 def normalize_title(name: str) -> str:
-    """A comparison key: no year, no punctuation, lower case."""
-    return re.sub(r"[^a-z0-9]+", " ", _YEAR.sub("", name).lower()).strip()
+    """A comparison key: no year, release tags, leading article or punctuation; lower case.
+
+    "Joe.Pickett.S01.1080p.BluRay[eztv]" and "joe pickett" share a key, as do
+    "A Clockwork Orange (1971)" and "clockwork orange".
+    """
+    name = _RELEASE_JUNK.sub("", _YEAR.sub("", name))
+    key = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+    return _ARTICLE.sub("", key)
 
 
 def parse_episode(filename: str) -> tuple[int, int] | None:
@@ -71,6 +86,7 @@ def record(
     season: int | None = None,
     episode: int | None = None,
     now: datetime.datetime | None = None,
+    source: str = "viewer",
 ) -> dict[str, Any] | None:
     """Log a finished view; None when it does not count (too short, not far enough, or a repeat)."""
     now = now or datetime.datetime.now()
@@ -100,7 +116,7 @@ def record(
         "rel": rel,
         "fraction": round(fraction, 3),
         "duration": round(duration),
-        "source": "viewer",
+        "source": source,
     }
     if event["kind"] == "episode":
         event["season"], event["episode"] = season, episode
@@ -150,3 +166,51 @@ def badge(row: dict[str, Any], now: datetime.datetime | None = None) -> str:
         days = seconds // 86400
         ago = f"{days} day{'s' if days != 1 else ''} ago"
     return f"▶ {what} · {ago}"
+
+
+def watched_by_rel(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Per library file: how many times it was watched and when last."""
+    out: dict[str, dict[str, Any]] = {}
+    for event in events:
+        rel = event.get("rel")
+        if event.get("event") != "watched" or not rel:
+            continue
+        row = out.setdefault(str(rel), {"views": 0, "ts": ""})
+        row["views"] += 1
+        row["ts"] = max(row["ts"], str(event.get("ts", "")))
+    return out
+
+
+def ago(ts: str, now: datetime.datetime | None = None) -> str:
+    """``just now`` / ``12 min ago`` / ``3 h ago`` / ``2 days ago`` for an ISO timestamp."""
+    now = now or datetime.datetime.now()
+    try:
+        seconds = max(int((now - datetime.datetime.fromisoformat(ts)).total_seconds()), 0)
+    except ValueError:
+        return ""
+    if seconds < 3600:
+        return "just now" if seconds < 120 else f"{seconds // 60} min ago"
+    if seconds < 86400:
+        return f"{seconds // 3600} h ago"
+    days = seconds // 86400
+    return f"{days} day{'s' if days != 1 else ''} ago"
+
+
+def next_episode(
+    episodes: list[dict[str, Any]], watched: dict[str, dict[str, Any]]
+) -> dict[str, Any] | None:
+    """The episode to continue with: the first one after the most recently watched, else the first unwatched.
+
+    ``episodes`` are library files with ``rel``/``season``/``episode`` in playing order.
+    """
+    ordered = [e for e in episodes if e.get("episode") is not None]
+    seen = [(watched[e["rel"]]["ts"], i) for i, e in enumerate(ordered) if e["rel"] in watched]
+    if seen:
+        last = max(seen)[1]
+        for e in ordered[last + 1 :]:
+            if e["rel"] not in watched:
+                return e
+    for e in ordered:
+        if e["rel"] not in watched:
+            return e
+    return None

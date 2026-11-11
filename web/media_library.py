@@ -23,11 +23,13 @@ import datetime
 import json
 import os
 import pwd
+import random
 import re
 import sqlite3
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -60,6 +62,14 @@ TMDB_API_KEY = os.environ.get("CLOCKWORK_TMDB_API_KEY", "").strip()
 OLLAMA_URL = os.environ.get("CREW_CHIEF_URL", "http://localhost:11434")
 GENRE_MODEL = os.environ.get("CLOCKWORK_GENRE_MODEL", "qwen3:14b")
 USER_AGENT = "clockwork-media-library/0.1 (https://github.com/casonk/clockwork)"
+# Wikidata's query service answers a burst with 429. Stay under one call a
+# second. TMDB's published window is 40 calls per 10 seconds.
+WIKIDATA_MIN_INTERVAL = 1.0
+TMDB_MIN_INTERVAL = 0.3
+# A 429 pauses the provider for at least this long, even when Retry-After is
+# shorter, so the next scheduled sync does not walk into the same limit.
+RATE_LIMIT_COOLDOWN = 15 * 60
+RATE_LIMIT_COOLDOWN_MAX = 6 * 3600
 
 MOVIES = "movies"
 SHOWS = "shows"
@@ -400,10 +410,147 @@ class Metadata:
         self.sources.extend(s for s in other.sources if s not in self.sources)
 
 
+class RateLimited(Exception):
+    """A metadata host asked us to stop. ``retry_after`` is seconds to wait."""
+
+    def __init__(self, retry_after: float) -> None:
+        self.retry_after = retry_after
+        super().__init__(f"rate limited for {retry_after:.0f}s")
+
+
+class HostPacer:
+    """Space calls to one host, then stop for a cooldown after a 429 or 503."""
+
+    def __init__(
+        self,
+        min_interval: float,
+        *,
+        sleep: Callable[[float], None] = time.sleep,
+        now: Callable[[], float] = time.monotonic,
+        jitter: Callable[[], float] | None = None,
+    ) -> None:
+        self.min_interval = min_interval
+        self._sleep = sleep
+        self._now = now
+        self._jitter = jitter or (lambda: random.uniform(0, min_interval * 0.25))
+        self._next = 0.0
+        self.cooldown_until = 0.0
+
+    def acquire(self) -> None:
+        now = self._now()
+        if self.cooldown_until > now:
+            raise RateLimited(self.cooldown_until - now)
+        wait = self._next - now
+        if wait > 0:
+            self._sleep(wait)
+            now = self._now()
+        self._next = now + self.min_interval + max(0.0, self._jitter())
+
+    def defer(self, seconds: float) -> None:
+        """Push the next call out without opening the cooldown."""
+        self._next = max(self._next, self._now() + max(0.0, seconds))
+
+    def penalize(self, seconds: float) -> None:
+        self.cooldown_until = max(self.cooldown_until, self._now() + max(0.0, seconds))
+
+
 def _http_json(url: str, *, headers: dict[str, str] | None = None, timeout: int = 30) -> Any:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    try:
+        response = urllib.request.urlopen(request, timeout=timeout)
+    except urllib.error.HTTPError as exc:
+        exc.close()
+        raise
+    with response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def _retry_after(exc: urllib.error.HTTPError) -> float:
+    raw = ""
+    if exc.headers is not None:
+        raw = str(exc.headers.get("Retry-After") or "").strip()
+    try:
+        seconds = float(raw) if raw else 0.0
+    except ValueError:
+        seconds = 0.0
+    if seconds < 0:
+        seconds = 0.0
+    return min(max(seconds, RATE_LIMIT_COOLDOWN), RATE_LIMIT_COOLDOWN_MAX)
+
+
+def guarded_json(
+    url: str,
+    *,
+    pacer: HostPacer,
+    headers: dict[str, str] | None = None,
+    timeout: int = 30,
+    opener: Callable[..., Any] = _http_json,
+) -> Any:
+    """Fetch JSON through ``pacer``. A 429 or 503 opens the cooldown immediately.
+
+    A timeout or connection error is tried once more after the normal gap.
+    """
+    attempt = 0
+    while True:
+        pacer.acquire()
+        try:
+            return opener(url, headers=headers, timeout=timeout)
+        except urllib.error.HTTPError as exc:
+            if exc.code in (429, 503):
+                delay = _retry_after(exc)
+                pacer.penalize(delay)
+                raise RateLimited(delay) from exc
+            raise
+        except OSError:
+            if attempt >= 1:
+                raise
+            pacer.defer(pacer.min_interval)
+            attempt += 1
+
+
+_RATE_LIMIT_ANNOUNCED: set[str] = set()
+
+
+def _rate_limit_key(name: str) -> str:
+    return f"rate-limit:{name}"
+
+
+def _cooldown_remaining(cache: sqlite3.Connection | None, name: str) -> float:
+    if cache is None:
+        return 0.0
+    row = cache.execute(
+        "SELECT data FROM lookups WHERE key = ?", (_rate_limit_key(name),)
+    ).fetchone()
+    if row is None:
+        return 0.0
+    until = float(json.loads(row["data"]).get("until") or 0)
+    return max(0.0, until - time.time())
+
+
+def _announce_rate_limit(name: str, seconds: float) -> None:
+    if name in _RATE_LIMIT_ANNOUNCED:
+        return
+    _RATE_LIMIT_ANNOUNCED.add(name)
+    minutes = max(1, round(seconds / 60))
+    print(f"{name} rate limited; pausing lookups for {minutes} min", file=sys.stderr)
+
+
+def _remember_rate_limit(cache: sqlite3.Connection | None, provider: Any, seconds: float) -> None:
+    seconds = min(max(seconds, RATE_LIMIT_COOLDOWN), RATE_LIMIT_COOLDOWN_MAX)
+    pacer = getattr(provider, "pacer", None)
+    if isinstance(pacer, HostPacer) and pacer.cooldown_until <= pacer._now():
+        pacer.penalize(seconds)
+    if cache is not None:
+        cache.execute(
+            "INSERT OR REPLACE INTO lookups (key, data, at) VALUES (?, ?, ?)",
+            (
+                _rate_limit_key(provider.name),
+                json.dumps({"until": time.time() + seconds}),
+                time.time(),
+            ),
+        )
+        cache.commit()
+    _announce_rate_limit(provider.name, seconds)
 
 
 def _norm(text: str) -> str:
@@ -465,18 +612,23 @@ class WikidataProvider:
     name = "wikidata"
     endpoint = "https://query.wikidata.org/sparql"
 
-    def __init__(self, fetch: Callable[[str], Any] | None = None) -> None:
+    def __init__(
+        self,
+        fetch: Callable[[str], Any] | None = None,
+        pacer: HostPacer | None = None,
+    ) -> None:
+        self.pacer = pacer or HostPacer(WIKIDATA_MIN_INTERVAL)
         self._fetch = fetch or (
-            lambda url: _http_json(url, headers={"Accept": "application/sparql-results+json"})
+            lambda url: guarded_json(
+                url,
+                pacer=self.pacer,
+                headers={"Accept": "application/sparql-results+json"},
+            )
         )
 
     def _query(self, sparql: str) -> list[dict[str, str]]:
         url = f"{self.endpoint}?{urllib.parse.urlencode({'query': sparql, 'format': 'json'})}"
-        try:
-            data = self._fetch(url)
-        except OSError:  # the public endpoint times out now and then; retry once
-            time.sleep(2)
-            data = self._fetch(url)
+        data = self._fetch(url)
         bindings = data["results"]["bindings"]
         return [{k: v["value"] for k, v in row.items()} for row in bindings]
 
@@ -569,9 +721,15 @@ class TmdbProvider:
     name = "tmdb"
     base = "https://api.themoviedb.org/3"
 
-    def __init__(self, api_key: str, fetch: Callable[[str], Any] | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        fetch: Callable[[str], Any] | None = None,
+        pacer: HostPacer | None = None,
+    ) -> None:
         self.api_key = api_key
-        self._fetch = fetch or _http_json
+        self.pacer = pacer or HostPacer(TMDB_MIN_INTERVAL)
+        self._fetch = fetch or (lambda url: guarded_json(url, pacer=self.pacer))
 
     def _get(self, path: str, **params: Any) -> Any:
         query = urllib.parse.urlencode({"api_key": self.api_key, **params})
@@ -634,6 +792,8 @@ def lookup_metadata(
     kind: str,
     providers: Iterable[Any],
     cache: sqlite3.Connection | None = None,
+    *,
+    use_cache: bool = True,
 ) -> Metadata:
     """Ask every provider and merge; the first match sets the canonical title.
 
@@ -645,14 +805,27 @@ def lookup_metadata(
         return Metadata()
     names = ",".join(p.name for p in providers)
     key = json.dumps([_norm(title), year, kind, names])
-    if cache is not None:
+    if cache is not None and use_cache:
         row = cache.execute("SELECT data FROM lookups WHERE key = ?", (key,)).fetchone()
         if row:
             return Metadata(**json.loads(row["data"]))
     merged = Metadata()
+    limited = False
     for provider in providers:
+        remaining = _cooldown_remaining(cache, provider.name)
+        pacer = getattr(provider, "pacer", None)
+        if isinstance(pacer, HostPacer) and pacer.cooldown_until > pacer._now():
+            remaining = max(remaining, pacer.cooldown_until - pacer._now())
+        if remaining > 0:
+            _announce_rate_limit(provider.name, remaining)
+            limited = True
+            continue
         try:
             found = provider.search(title, year, kind)
+        except RateLimited as exc:
+            _remember_rate_limit(cache, provider, exc.retry_after)
+            limited = True
+            continue
         except Exception as exc:  # noqa: BLE001 - one provider failing must not stop the rest
             print(f"{provider.name} lookup failed for {title!r}: {exc}", file=sys.stderr)
             continue
@@ -668,6 +841,8 @@ def lookup_metadata(
             [(k, data, time.time()) for k in keys],
         )
         cache.commit()
+    if limited and not merged.sources:
+        raise RateLimited(RATE_LIMIT_COOLDOWN)
     return merged
 
 
@@ -1235,7 +1410,10 @@ def plan_library(
     providers = list(providers)
 
     def lookup(title: str, year: int | None, kind: str) -> Metadata:
-        return lookup_metadata(title, year, kind, providers, cache)
+        try:
+            return lookup_metadata(title, year, kind, providers, cache)
+        except RateLimited:
+            return Metadata()
 
     plans: list[EntryPlan] = _plan_genre_folders(root, lookup, genre_of)
     for entry in sorted(root.iterdir(), key=lambda p: p.name.lower()):
@@ -1432,6 +1610,95 @@ def apply_plans(plans: Iterable[EntryPlan], journal: Path = RENAME_JOURNAL) -> t
     return batch, done
 
 
+def _seeding_skip(reason: str | None) -> bool:
+    return reason == "still seeding" or (reason or "").startswith("may still be seeding")
+
+
+def _link_episode(video: Path, season_dir: Path, *, apply: bool) -> bool:
+    """Symlink one episode into a season folder. Existing destinations stay put."""
+    target = season_dir / video.name
+    if os.path.lexists(target):
+        return False
+    if not apply:
+        return True
+    season_dir.mkdir(parents=True, exist_ok=True)
+    target.symlink_to(Path(os.path.relpath(video.resolve(), start=season_dir)))
+    for companion in video.parent.glob(f"{video.stem}.*"):
+        if companion.resolve() == video.resolve() or companion.is_symlink():
+            continue
+        if companion.suffix.lower() not in COMPANION_EXTS:
+            continue
+        companion_target = season_dir / companion.name
+        if os.path.lexists(companion_target):
+            continue
+        companion_target.symlink_to(Path(os.path.relpath(companion.resolve(), start=season_dir)))
+    return True
+
+
+def link_seeding_shows(plans: Iterable[EntryPlan], root: Path, *, apply: bool = True) -> int:
+    """Link episode files from a show pack Transmission is still seeding.
+
+    The pack stays where it is, so the torrent keeps seeding. A season file
+    that is already present is left alone, which keeps an organized show from
+    being overwritten by a second copy of the same episode.
+    """
+    linked = 0
+    show_root = root / SHOWS
+    for plan in plans:
+        if not _seeding_skip(plan.skipped) or plan.kind != SHOWS or plan.entry.is_symlink():
+            continue
+        try:
+            if plan.entry.resolve().is_relative_to(show_root.resolve()):
+                continue
+            videos: list[Path] = []
+            if plan.entry.is_file():
+                if plan.entry.suffix.lower() in VIDEO_EXTS:
+                    videos = [plan.entry]
+            elif plan.entry.is_dir():
+                videos = _video_files(plan.entry)
+        except OSError as exc:
+            print(f"link failed, left in place: {plan.entry}: {exc}", file=sys.stderr)
+            continue
+        folder = show_root / title_folder(plan.title, plan.year)
+        occupied: dict[int, set[int]] = {}
+        for video in videos:
+            if video.is_symlink():
+                continue
+            found = _episode_of(video, plan.entry)
+            if not found:
+                continue
+            season, episode, episode_end = found
+            numbers = set(range(episode, (episode_end or episode) + 1))
+            taken = occupied.get(season)
+            if taken is None:
+                taken = set()
+                season_dir = folder / f"Season {season:02d}"
+                if season_dir.is_dir():
+                    for current in season_dir.iterdir():
+                        if current.suffix.lower() not in VIDEO_EXTS:
+                            continue
+                        parsed = parse_release_name(current.name)
+                        if parsed.episode is None:
+                            continue
+                        taken.update(
+                            range(parsed.episode, (parsed.episode_end or parsed.episode) + 1)
+                        )
+                occupied[season] = taken
+            if taken & numbers:
+                continue
+            season_dir = folder / f"Season {season:02d}"
+            try:
+                created = _link_episode(video, season_dir, apply=apply)
+            except OSError as exc:
+                print(f"link failed, left in place: {video}: {exc}", file=sys.stderr)
+                continue
+            if created or os.path.lexists(season_dir / video.name):
+                taken.update(numbers)
+            if created:
+                linked += 1
+    return linked
+
+
 def _prune_empty_dirs(plan: EntryPlan) -> None:
     top = plan.prune
     if not top or not top.is_dir():
@@ -1594,29 +1861,40 @@ def scan_library(
             not json.loads(row["sources"]) and now() - checked > METADATA_RETRY_SECONDS
         )
         if providers and (refresh_metadata or stale):
-            meta = lookup_metadata(title, year, kind, providers, None if refresh_metadata else conn)
-            conn.execute(
-                """UPDATE titles SET wikidata_id = ?, imdb_id = ?, tmdb_id = ?, directors = ?,
-                cast_members = ?, genres = ?, countries = ?, languages = ?, runtime_min = ?,
-                plot = ?, rating = ?, sources = ?, metadata_checked_at = ? WHERE folder = ?""",
-                (
-                    meta.wikidata_id,
-                    meta.imdb_id,
-                    meta.tmdb_id,
-                    json.dumps(meta.directors),
-                    json.dumps(meta.cast),
-                    json.dumps(meta.genres),
-                    json.dumps(meta.countries),
-                    json.dumps(meta.languages),
-                    meta.runtime_min,
-                    meta.plot,
-                    meta.rating,
-                    json.dumps(meta.sources),
-                    now(),
-                    key,
-                ),
-            )
-            stats["looked_up"] += 1
+            try:
+                meta = lookup_metadata(
+                    title,
+                    year,
+                    kind,
+                    providers,
+                    conn,
+                    use_cache=not refresh_metadata,
+                )
+            except RateLimited:
+                meta = None
+            if meta is not None:
+                conn.execute(
+                    """UPDATE titles SET wikidata_id = ?, imdb_id = ?, tmdb_id = ?, directors = ?,
+                    cast_members = ?, genres = ?, countries = ?, languages = ?, runtime_min = ?,
+                    plot = ?, rating = ?, sources = ?, metadata_checked_at = ? WHERE folder = ?""",
+                    (
+                        meta.wikidata_id,
+                        meta.imdb_id,
+                        meta.tmdb_id,
+                        json.dumps(meta.directors),
+                        json.dumps(meta.cast),
+                        json.dumps(meta.genres),
+                        json.dumps(meta.countries),
+                        json.dumps(meta.languages),
+                        meta.runtime_min,
+                        meta.plot,
+                        meta.rating,
+                        json.dumps(meta.sources),
+                        now(),
+                        key,
+                    ),
+                )
+                stats["looked_up"] += 1
         _summarize_title(conn, key, folder.name, now())
         conn.commit()
     for (folder,) in conn.execute("SELECT folder FROM titles").fetchall():
@@ -1876,11 +2154,16 @@ def needs_attention(
         for entry in sorted(root.iterdir()):
             if entry.name.startswith(".") or entry.name in (MOVIES, SHOWS):
                 continue
-            reason = (
-                "still seeding in Transmission; filed once the torrent is removed"
-                if tracked and entry.name in tracked
-                else "not organized yet; the next sync files it"
-            )
+            if tracked and entry.name in tracked:
+                if parse_release_name(entry.name).kind == SHOWS:
+                    reason = (
+                        "still seeding; episodes are linked into the library "
+                        "and the pack stays put until the torrent is removed"
+                    )
+                else:
+                    reason = "still seeding in Transmission; filed once the torrent is removed"
+            else:
+                reason = "not organized yet; the next sync files it"
             items.append({"title": entry.name, "path": entry.name, "reason": reason})
     for kind, folder, _category in _title_dirs(root):
         if kind != MOVIES:
@@ -1976,13 +2259,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if args.command in ("organize", "sync"):
+    if args.command in ("organize", "sync", "scan"):
+        # One provider list for a sync, so a cooldown opened while organizing
+        # is still in force for the scan that follows.
         offline = getattr(args, "offline", False)
+        providers = [] if offline else default_providers()
+    if args.command in ("organize", "sync"):
         tracked, error = tracked_names(args.root)
         cache = connect(args.db)
         plans = plan_library(
             args.root,
-            providers=[] if offline else default_providers(),
+            providers=providers,
             tracked=None if error else tracked,
             tracked_error=error,
             cache=cache,
@@ -1993,10 +2280,16 @@ def main(argv: list[str] | None = None) -> int:
             plans = [p for p in plans if p.entry.name in only]
         if args.command == "organize" and not args.apply:
             _print_plans(plans + plan_file_names(args.root, cache), args.root)
+            would_link = link_seeding_shows(plans, args.root, apply=False)
+            if would_link:
+                print(f"\nwould link {would_link} seeding episode(s)")
             print("\ndry run; add --apply to rename")
             return 0
         batch, done = apply_plans(plans, args.journal)
         print(f"organize batch {batch}: {done} rename(s)")
+        linked = link_seeding_shows(plans, args.root)
+        if linked:
+            print(f"linked {linked} seeding episode(s)")
         if args.command == "organize":
             _apply_file_names(args.root, cache, args.journal)
             return 0
@@ -2005,7 +2298,7 @@ def main(argv: list[str] | None = None) -> int:
         stats = scan_library(
             args.root,
             conn,
-            providers=[] if getattr(args, "offline", False) else default_providers(),
+            providers=providers,
             refresh_metadata=getattr(args, "refresh_metadata", False),
         )
         print("scan " + " ".join(f"{k}={v}" for k, v in stats.items()))

@@ -20,6 +20,7 @@
     <td>
       {% if item.season is not none and item.episode is not none %}<b>S{{ "%02d"|format(item.season) }}E{{ "%02d"|format(item.episode) }}</b><br>{% endif %}
       <span class="small">{{ item.name }}</span>
+      {% if item.watched %}<span class="badge quality" title="Watched {{ item.watched.views }}×">✓ watched {{ item.watched.ago }}</span>{% endif %}
       {% if item.companions %}
         <div class="small muted">
           {% for c in item.companions %}{% if not loop.first %} · {% endif %}{{ "🔊" if c.kind == "audio" else "💬" }} {{ c.label }}{% endfor %}
@@ -98,6 +99,13 @@
 </div>
 {% endif %}
 
+{% if resume %}
+  <section class="panel" id="resume">
+    <h2>{{ resume.label }}{% if resume.item.season is not none and resume.item.episode is not none %} · S{{ "%02d"|format(resume.item.season) }}E{{ "%02d"|format(resume.item.episode) }}{% endif %}</h2>
+    <p class="small muted">{% if resume.item.watched %}Last watched {{ resume.item.watched.ago }}.{% else %}Next up after what you last watched.{% endif %}
+      <a class="btn primary" href="{{ url_for('library_pages.play_page', rel=resume.item.rel) }}?autoplay=1">▶ {{ "Play" if resume.label == "Continue" else "Play again" }}</a></p>
+  </section>
+{% endif %}
 {% if kind == "shows" %}
   <section class="panel" id="episode-guide" data-api="{{ url_for('library_pages.show_episodes', rel=rel) }}" data-title="{{ title }}" data-year="{{ year or '' }}">
     <h2>Episode guide</h2>

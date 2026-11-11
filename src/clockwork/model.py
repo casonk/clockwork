@@ -16,7 +16,14 @@ class TimerSpec:
     kind: str
     on_calendar: str | None = None
     on_boot_sec: str | None = None
+    # OnStartupSec is relative to the service manager start. For a user timer
+    # that is the user manager, so a restart schedules the job again. OnBootSec
+    # stays relative to machine boot and does not.
+    on_startup_sec: str | None = None
     on_unit_active_sec: str | None = None
+    # OnUnitInactiveSec still elapses when the service is skipped by
+    # ExecCondition (it never becomes active, so OnUnitActiveSec has no base).
+    on_unit_inactive_sec: str | None = None
     unit: str | None = None
     persistent: bool = False
     accuracy_sec: str | None = None
@@ -28,8 +35,16 @@ class TimerSpec:
             raise ValueError(f"Unsupported timer kind: {self.kind!r}")
         if self.kind == "calendar" and not self.on_calendar:
             raise ValueError("calendar timers require on_calendar")
-        if self.kind == "interval" and not (self.on_boot_sec or self.on_unit_active_sec):
-            raise ValueError("interval timers require on_boot_sec and/or on_unit_active_sec")
+        if self.kind == "interval" and not (
+            self.on_boot_sec
+            or self.on_startup_sec
+            or self.on_unit_active_sec
+            or self.on_unit_inactive_sec
+        ):
+            raise ValueError(
+                "interval timers require on_boot_sec, on_startup_sec, "
+                "on_unit_active_sec, and/or on_unit_inactive_sec"
+            )
 
 
 @dataclass(frozen=True)

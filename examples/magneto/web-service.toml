@@ -30,7 +30,9 @@ standard_error = "journal"
 [jobs.timer]
 kind = "interval"
 on_boot_sec = "2m"
+on_startup_sec = "2m"
 on_unit_active_sec = "5m"
+on_unit_inactive_sec = "5m"
 persistent = true
 
 [jobs.cron]

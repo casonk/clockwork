@@ -8,10 +8,11 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root { --surface3: color-mix(in srgb, var(--bg) 50%, var(--surface)); }
     body { background:var(--bg); color:var(--text); font-family: var(--font); font-size: var(--font-size); line-height:1.55; min-height:100vh; }
-    header { background:var(--surface); border-bottom:1px solid var(--border); padding:14px 20px; display:flex; align-items:center; justify-content:space-between; gap:12px; position:sticky; top:0; z-index:100; }
-    .header-left { display:flex; align-items:center; gap:12px; }
-    .back-link { font-size:20px; text-decoration:none; opacity:.75; }
-    .back-link:hover { opacity:1; }
+    header { background:var(--surface); border-bottom:1px solid var(--border); padding:14px 20px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; position:sticky; top:0; z-index:100; }
+    .header-left { display:flex; align-items:center; gap:12px; min-width:0; }
+    .list-nav { display:flex; align-items:center; gap:6px; flex-wrap:wrap; min-width:0; }
+    .list-nav a { color:var(--muted); font-size:12px; font-weight:600; text-decoration:none; padding:4px 8px; border:1px solid var(--border); border-radius:6px; background:var(--surface2); white-space:nowrap; }
+    .list-nav a:hover { color:var(--text); border-color:var(--muted); }
     h1 { font-size:17px; font-weight:700; }
     .subtitle { color:var(--muted); font-size:12px; }
     .actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
@@ -22,6 +23,7 @@
       color:var(--muted); font-size:12px; font-weight:600; cursor:pointer; text-decoration:none;
     }
     .action-btn:hover, .restore-btn:hover:not(:disabled) { color:var(--text); border-color:var(--muted); }
+    .action-btn:disabled { opacity:.45; cursor:not-allowed; }
     .reset-btn:hover { color:var(--yellow); border-color:var(--yellow); }
     .restore-btn:disabled { opacity:.35; cursor:not-allowed; }
     .progress-bar { height:3px; background:var(--border); }
@@ -31,7 +33,7 @@
     .flash.success { background:var(--green-dim); color:var(--green); border-color:var(--green); }
     .flash.error { background:var(--red-dim); color:var(--red); border-color:var(--red); }
     main { max-width:760px; margin:0 auto; padding:18px 14px 100px; }
-    .category { background:var(--surface); border:1px solid var(--border); border-radius:8px; margin-bottom:14px; overflow:hidden; }
+    .category { background:var(--surface); border:1px solid var(--border); border-radius:8px; margin-bottom:14px; overflow:hidden; scroll-margin-top:148px; }
     .category-header { display:flex; align-items:center; gap:10px; padding:12px 14px; border-bottom:1px solid var(--border); background:var(--surface2); }
     .category-name { font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:.7px; color:var(--muted); flex:1; }
     .category-count { font-size:11px; padding:2px 8px; border-radius:99px; background:var(--surface); color:var(--muted); border:1px solid var(--border); white-space:nowrap; }
@@ -179,8 +181,6 @@
 {% include "_site_nav.html" %}
 <header>
   <div class="header-left">
-    <a href="/home" class="back-link" title="Home">🏠</a>
-    <a href="/" class="back-link" title="Clockwork">⏰</a>
     <div>
       <h1>{{ cfg.icon }} {{ cfg.title }}</h1>
       <div class="subtitle">
@@ -188,6 +188,13 @@
       </div>
     </div>
   </div>
+  {% if data.categories %}
+  <nav class="list-nav" aria-label="Top-level lists">
+    {% for cat in data.categories %}
+      <a href="#{{ cat.name|lower|replace(' ', '-') }}">{{ cat.name }}</a>
+    {% endfor %}
+  </nav>
+  {% endif %}
   <div class="actions">
     {% if cfg.key == "watch" %}
       <button class="action-btn lib-check-btn" type="button" id="lib-check-btn" title="Check which titles are already in the watch folder">📚 Check Library</button>

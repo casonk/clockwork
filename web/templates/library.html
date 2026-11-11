@@ -74,7 +74,7 @@
     <label>Quality<select name="quality" id="quality-select"><option value="">Any</option></select></label>
     <label>Codec<select name="codec" id="codec-select"><option value="">Any</option></select></label>
     <label>Year<span class="years"><input type="number" name="year_from" placeholder="From" min="1880" max="2100"><input type="number" name="year_to" placeholder="To" min="1880" max="2100"></span></label>
-    <label>Sort<select name="sort"><option value="title">Title (A–Z)</option><option value="year">Year (newest first)</option><option value="downloaded">Recently downloaded</option><option value="rating">Rating</option><option value="size">Size</option></select></label>
+    <label>Sort<select name="sort"><option value="title">Title (A–Z)</option><option value="year">Year (newest first)</option><option value="downloaded">Recently downloaded</option><option value="watched">Recently watched</option><option value="rating">Rating</option><option value="size">Size</option></select></label>
     <datalist id="director-list"></datalist>
     <datalist id="actor-list"></datalist>
   </form>
@@ -172,6 +172,7 @@
     if (item.edition) head.appendChild(el("span", "badge", item.edition));
     if (item.video_codec) head.appendChild(el("span", "badge", item.video_codec));
     if (item.rating) head.appendChild(el("span", "badge", "★ " + Number(item.rating).toFixed(1)));
+    if (item.watch) head.appendChild(el("span", "badge quality", item.watch.badge));
     node.appendChild(head);
 
     const meta = el("div", "card-meta");

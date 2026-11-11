@@ -295,6 +295,7 @@
     if (!play) { window.location.href = url; return; }
 
     const nextUrl = url + (url.indexOf("?") === -1 ? "?" : "&") + "autoplay=1";
+    reportWatched();  // the episode being left, while the URL still names it
     try {
       const response = await fetch(url, { headers: { Accept: "text/html" } });
       if (!response.ok) throw new Error("Could not load the next video page");
@@ -332,6 +333,7 @@
       restoreAutoplay();
 
       window.history.pushState({ autoplay: true }, "", nextUrl);
+      watchSent = false;
       video.pause();
       video.currentTime = 0;
       autoStartPending = true;
@@ -396,23 +398,26 @@
     show("");
   });
   // Tell Clockwork when this video has (nearly) been watched, so the To Watch list can show it.
-  (function () {
-    let sent = false;
-    function report() {
-      if (sent || !video.duration || video.currentTime / video.duration < 0.9) return;
-      sent = true;
-      fetch({{ url_for('library_pages.log_watched', rel=info.rel)|tojson }}, {
-        method: "POST",
-        credentials: "same-origin",
-        keepalive: true,
-        headers: { "Content-Type": "application/json", "X-CSRF-Token": {{ csrf_token|tojson }} },
-        body: JSON.stringify({ position: video.currentTime, duration: video.duration }),
-      }).catch(function () { sent = false; });
-    }
-    video.addEventListener("timeupdate", report);
-    video.addEventListener("ended", report);
-    window.addEventListener("pagehide", report);
-  })();
+  // Autoplay swaps the page in place (see go()), so the URL and the "already sent" flag must follow
+  // the video that is actually playing, not the one this page was first rendered for.
+  let watchSent = false;
+  function watchedUrl() {
+    return window.location.pathname.replace(/\/$/, "") + "/watched";
+  }
+  function reportWatched() {
+    if (watchSent || !video.duration || video.currentTime / video.duration < 0.9) return;
+    watchSent = true;
+    fetch(watchedUrl(), {
+      method: "POST",
+      credentials: "same-origin",
+      keepalive: true,
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": {{ csrf_token|tojson }} },
+      body: JSON.stringify({ position: video.currentTime, duration: video.duration }),
+    }).catch(function () { watchSent = false; });
+  }
+  video.addEventListener("timeupdate", reportWatched);
+  video.addEventListener("ended", reportWatched);
+  window.addEventListener("pagehide", reportWatched);
   window.addEventListener("popstate", function () { window.location.reload(); });
   select.addEventListener("change", function () {
     remember(select.value);

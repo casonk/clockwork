@@ -1179,6 +1179,30 @@ def test_watch_check_get_describes_endpoint(client, tmp_path, monkeypatch):
     assert body["usage"].startswith("POST")
 
 
+def test_list_header_links_top_level_categories(client, list_files):
+    list_files["WATCH_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {"name": "Movies", "items": []},
+                    {"name": "TV Shows", "items": []},
+                ]
+            }
+        )
+    )
+
+    html = client.get("/to-watch").get_data(as_text=True)
+    header = html.split("<header>", 1)[1].split("</header>", 1)[0]
+
+    assert 'class="list-nav"' in header
+    assert 'href="#movies"' in header
+    assert 'href="#tv-shows"' in header
+    assert 'title="Home"' not in header
+    assert 'title="Clockwork"' not in header
+    assert 'href="/"' not in header
+    assert 'aria-label="Home"' in html
+
+
 def test_to_watch_renders_torrent_and_library_controls(client, list_files):
     list_files["WATCH_LIST_FILE"].write_text(
         json.dumps(
