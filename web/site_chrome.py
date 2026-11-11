@@ -34,6 +34,7 @@ DEFAULT_CHROME_DIR = Path(os.environ.get("CLOCKWORK_CHROME_DIR", "/srv/portfolio
 LISTS_MENU = (
     ("Groceries", "🛒", "/groceries"),
     ("Shopping", "🛍️", "/shopping"),
+    ("To Eat", "🍽️", "/to-eat"),
     ("To Do", "✅", "/to-do"),
     ("To Code", "💻", "/to-code"),
     ("To Invest", "📈", "/to-invest"),
