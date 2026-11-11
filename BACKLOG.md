@@ -10,6 +10,18 @@ Mark items `[x]` when complete and move them to Done.
 
 ## Pending
 
+- [ ] [manual:2026-11-11] **Apple Music playlist sync** — Apple Music is link-only today. A
+  `MusicKit` adapter in `web/providers.py` (`accounts`/`playlists`/`entries` and
+  `create_playlist`/`add` against `api.music.apple.com/v1/me/library`, then `BROWSE`/`WRITE` in
+  its capabilities) needs an Apple Developer Program membership for the developer token and an
+  Apple Music subscription for the user token, which is re-issued about every six months. Blocked
+  until there is a subscription. Apple TV stays link-only (no public watchlist or Up Next API).
+
+- [ ] [manual:2026-11-11] **Cross-service playlist copy with a preview** — copying is limited to
+  one service (Spotify to Spotify, YouTube account to YouTube account). Copying between services
+  needs title and artist matching, so build it as a preview the user approves before anything is
+  added; never add a guessed match silently.
+
 - [ ] [manual:2026-11-05] **Fix the failing `tests/test_site_chrome.py` test** —
   `test_publish_writes_both_files_once_and_skips_a_missing_directory` fails on `main`
   (an assertion at line 73); it predates this month's work and is the only red test in
