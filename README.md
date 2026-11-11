@@ -621,27 +621,6 @@ when it last ran, and the outcome of the service it starts (`ok`, `running`,
 returns the same rows as JSON. It reads `systemctl list-timers` and `show`, so it
 needs no elevation. macOS (launchd) hosts are not covered yet.
 
-Guardrails: the Grandmaster Clock never changes its own web UI or hides its own Home card;
-critical apps (`CLOCKWORK_GRANDMASTER_CRITICAL`, default `pit-box-guacd,pit-box-guacamole`)
-need their name typed to be disabled or restarted and are skipped by bulk changes; bulk
-changes preview their targets, run one at a time and are spaced 10 seconds apart; and every
-change is appended to `config/grandmaster-audit.jsonl` (owner-only, capped), shown on the
-page and at `GET /api/grandmaster/audit`.
-
-### Machine load (`/ecu`)
-
-The Services menu links **Machine load**, which renders `ecu status --json`:
-the held lease with its priority, mode and GPU size, GPU memory and processes,
-and whether each guarded timer job would run or defer. `/api/ecu` returns the
-same document (503 with an `error` when unavailable). The page finds `ecu` via
-`CLOCKWORK_ECU_BIN`, then `PATH`, then `~/.local/bin/ecu`.
-
-### Optional external personal-list authority
-
-Clockwork's **To Code** list is available from `/home` and the Lists menu at
-`/to-code`. It groups backlog items by repository family and repository, with
-an explicit family selector when adding an item. Its default store is the
-gitignored `config/to-code.json`; `CLOCKWORK_CODE_LIST_FILE` and
 ### Grandmaster Clock (`/grandmaster`)
 
 The Services menu links **Grandmaster Clock**, the orchestration page for long-running
@@ -656,6 +635,13 @@ Grandmaster Clock also manages the Home page cards: hide or show any card, add l
 cards (`https://…` or `/path`), and remove link or placeholder cards. Real services can
 only be hidden, not removed, and hiding affects Home only. State lives in the gitignored
 `config/home-cards.json`.
+
+Guardrails: the Grandmaster Clock never changes its own web UI or hides its own Home card;
+critical apps (`CLOCKWORK_GRANDMASTER_CRITICAL`, default `pit-box-guacd,pit-box-guacamole`)
+need their name typed to be disabled or restarted and are skipped by bulk changes; bulk
+changes preview their targets, run one at a time and are spaced 10 seconds apart; and every
+change is appended to `config/grandmaster-audit.jsonl` (owner-only, capped), shown on the
+page and at `GET /api/grandmaster/audit`.
 
 ### Machine load (`/ecu`)
 
