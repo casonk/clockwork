@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -95,6 +96,12 @@ def test_the_target_repository_is_the_one_given_with_dash_c():
     assert seen == ["/clean", "/dirty"]
 
 
+def _clean_env() -> dict[str, str]:
+    """The environment without GIT_*: git hooks export GIT_DIR and friends, which would point
+    these test repositories at the real one."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
 def run_hook(command: str, project: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "guard_destructive_git.py")],
@@ -106,7 +113,7 @@ def run_hook(command: str, project: Path) -> subprocess.CompletedProcess:
 
 
 def test_the_hook_exits_2_in_a_dirty_repository_and_0_otherwise(tmp_path):
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, env=_clean_env())
     (tmp_path / "f.txt").write_text("x")
     dirty = run_hook("git reset --hard", tmp_path)
     assert dirty.returncode == 2 and "Blocked" in dirty.stderr
@@ -127,8 +134,9 @@ def test_the_hook_exits_2_in_a_dirty_repository_and_0_otherwise(tmp_path):
             "x",
         ],
         check=True,
+        env=_clean_env(),
     )
-    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "-A"], check=True, env=_clean_env())
     subprocess.run(
         [
             "git",
@@ -144,6 +152,7 @@ def test_the_hook_exits_2_in_a_dirty_repository_and_0_otherwise(tmp_path):
             "y",
         ],
         check=True,
+        env=_clean_env(),
     )
     assert run_hook("git reset --hard", tmp_path).returncode == 0  # clean now
 
