@@ -42,6 +42,34 @@ def test_render_system_scope_interval_timer_for_snowbridge_example():
     assert "Group=service-group" in rendered["snowbridge-wireguard-endpoint-monitor.service"]
     assert "OnBootSec=5m" in rendered["snowbridge-wireguard-endpoint-monitor.timer"]
     assert "OnUnitActiveSec=15m" in rendered["snowbridge-wireguard-endpoint-monitor.timer"]
+    assert "OnStartupSec" not in rendered["snowbridge-wireguard-endpoint-monitor.timer"]
+    assert "OnUnitInactiveSec" not in rendered["snowbridge-wireguard-endpoint-monitor.timer"]
+
+
+def test_notify_and_library_timers_rearm_after_the_user_manager_restarts():
+    root = Path(__file__).resolve().parent.parent
+    cases = [
+        (root / "examples/magneto/web-service.toml", "magneto-notify", "2m", "5m"),
+        (root / "examples/magneto/web-service.local.toml", "magneto-notify", "2m", "5m"),
+        (root / "examples/clockwork/media-library.toml", "clockwork-media-library", "10m", "30m"),
+        (
+            root / "examples/clockwork/media-library.local.toml",
+            "clockwork-media-library",
+            "10m",
+            "30m",
+        ),
+    ]
+    for path, name, startup, interval in cases:
+        manifest = load_manifest(path)
+        job = next(item for item in manifest.jobs if item.name == name)
+        assert job.timer is not None
+        assert job.timer.on_startup_sec == startup
+        assert job.timer.on_unit_inactive_sec == interval
+        text = render_target(manifest, "systemd-user")[f"{name}.timer"]
+        assert f"OnStartupSec={startup}" in text
+        assert f"OnUnitInactiveSec={interval}" in text
+        assert "OnBootSec=" in text
+        assert "OnUnitActiveSec=" in text
 
 
 def test_render_fedora_debugg_interval_timer_and_cron_example():

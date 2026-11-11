@@ -19,7 +19,9 @@ CLOCKWORK_WATCH_DIR = "%h/watch"
 [jobs.timer]
 kind = "interval"
 on_boot_sec = "10m"
+on_startup_sec = "10m"
 on_unit_active_sec = "30m"
+on_unit_inactive_sec = "30m"
 persistent = true
 
 [jobs.cron]
