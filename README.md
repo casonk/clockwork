@@ -394,7 +394,7 @@ interface, so a new service is one subclass plus its item fields in `_simple_lis
 | Spotify | To Listen | link, browse, write | live |
 | YouTube | To Watch, To Listen | link, browse, write | live |
 | Apple Music | To Listen | link | links only: playlist sync needs a MusicKit developer token (Apple Developer Program) and a user token |
-| Apple TV | To Watch | not started | Apple publishes no watchlist API; links only when added |
+| Apple TV | To Watch | link | links only: Apple publishes no watchlist or Up Next API, so nothing can sync |
 
 A link-only provider needs no credentials: its 🍎 link and "Link <service>" form appear on the
 item automatically, and it is saved through `POST /<page>/link-provider/<provider id>`.

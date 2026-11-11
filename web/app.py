@@ -4362,6 +4362,9 @@ SIMPLE_LIST_CONFIGS = {
             "youtube_url",
             "youtube_channel",
             "youtube_account",
+            "apple_tv_kind",
+            "apple_tv_id",
+            "apple_tv_url",
         ],
     },
     "read": {

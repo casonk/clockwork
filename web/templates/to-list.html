@@ -372,7 +372,7 @@
               <span class="item-title {% if item[cfg.status] %}done{% endif %}">{{ value }}</span>
               {% if item.youtube_url %}<a class="item-link" href="{{ item.youtube_url }}" target="_blank" rel="noopener noreferrer" title="Open on YouTube" aria-label="Open {{ value }} on YouTube">▶</a>{% endif %}
               {% if item.spotify_url %}<a class="item-link" href="{{ item.spotify_url }}" target="_blank" rel="noopener noreferrer" title="Open on Spotify ({{ item.spotify_kind }})" aria-label="Open {{ value }} on Spotify">🎵</a>{% endif %}
-              {% for lp in link_providers %}{% set lp_url = item.get(lp.url_field) %}{% if lp_url %}<a class="item-link" href="{{ lp_url }}" target="_blank" rel="noopener noreferrer" title="Open on {{ lp.label }}" aria-label="Open {{ value }} on {{ lp.label }}">🍎</a>{% endif %}{% endfor %}
+              {% for lp in link_providers %}{% set lp_url = item.get(lp.url_field) %}{% if lp_url %}<a class="item-link" href="{{ lp_url }}" target="_blank" rel="noopener noreferrer" title="Open on {{ lp.label }}" aria-label="Open {{ value }} on {{ lp.label }}">{{ lp.icon }}</a>{% endif %}{% endfor %}
               {% if cfg.key == "invest" %}
                 {% set row_key = cat.name ~ "|" ~ value %}
                 {% set dups = invest_duplicates.get(row_key) %}
