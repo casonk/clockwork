@@ -215,10 +215,25 @@
         <button class="action-btn" type="submit"{% if not youtube_account_count %} disabled{% endif %}
                 title="Create only missing private To Watch and To Listen playlists for authorized accounts">＋ YouTube Lists</button>
       </form>
+      <a class="action-btn" href="/{{ cfg.page }}/playlist" title="Browse the linked playlists here, next to what is already in this list">📋 Playlists</a>
       {% for playlist in youtube_playlists %}
         <a class="action-btn" href="{{ playlist.url }}" target="_blank" rel="noopener noreferrer"
            title="Open this list's private YouTube playlist ({{ playlist.account }})">▶ Playlist{% if youtube_playlists|length > 1 %} · {{ playlist.account }}{% endif %}</a>
       {% endfor %}
+    {% endif %}
+    {% if cfg.key == "listen" %}
+      <form method="post" action="/to-listen/sync-spotify">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="action-btn" type="submit"{% if not spotify_status.configured %} disabled{% endif %}
+                title="{% if spotify_status.configured %}Pull playlist tracks into Clockwork and push linked tracks and episodes that are still to listen{% else %}Authorize Spotify (scripts/authorize_spotify.py --write) and create the playlist first{% endif %}">↔ Sync Spotify</button>
+      </form>
+      <form method="post" action="/spotify/create-playlist">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="next" value="/{{ cfg.page }}">
+        <button class="action-btn" type="submit"{% if not spotify_status.credential_file_present %} disabled{% endif %}
+                title="Create (or adopt) a private To Listen playlist on Spotify">＋ Spotify List</button>
+      </form>
+      {% if spotify_playlist_url %}<a class="action-btn" href="{{ spotify_playlist_url }}" target="_blank" rel="noopener noreferrer" title="Open the private To Listen playlist on Spotify">🎵 Spotify Playlist</a>{% endif %}
     {% endif %}
     {% if cfg.get("holdings_sync") %}
       <form method="post" action="/to-invest/sync-holdings">
@@ -356,6 +371,8 @@
             <div class="item-body">
               <span class="item-title {% if item[cfg.status] %}done{% endif %}">{{ value }}</span>
               {% if item.youtube_url %}<a class="item-link" href="{{ item.youtube_url }}" target="_blank" rel="noopener noreferrer" title="Open on YouTube" aria-label="Open {{ value }} on YouTube">▶</a>{% endif %}
+              {% if item.spotify_url %}<a class="item-link" href="{{ item.spotify_url }}" target="_blank" rel="noopener noreferrer" title="Open on Spotify ({{ item.spotify_kind }})" aria-label="Open {{ value }} on Spotify">🎵</a>{% endif %}
+              {% for lp in link_providers %}{% set lp_url = item.get(lp.url_field) %}{% if lp_url %}<a class="item-link" href="{{ lp_url }}" target="_blank" rel="noopener noreferrer" title="Open on {{ lp.label }}" aria-label="Open {{ value }} on {{ lp.label }}">🍎</a>{% endif %}{% endfor %}
               {% if cfg.key == "invest" %}
                 {% set row_key = cat.name ~ "|" ~ value %}
                 {% set dups = invest_duplicates.get(row_key) %}
@@ -368,6 +385,30 @@
               {% if item.year %}<span class="item-meta">{{ item.year }}</span>{% endif %}
               {% if item.youtube_channel %}<span class="item-meta">{{ item.youtube_channel }}</span>{% endif %}
               {% if item.youtube_account %}<span class="item-meta" title="YouTube account">via {{ item.youtube_account }}</span>{% endif %}
+              {% if cfg.key == "listen" %}
+                <details class="youtube-linker">
+                  <summary>{{ "Change Spotify link" if item.spotify_url else "Link Spotify" }}</summary>
+                  <form class="youtube-link-form" method="post" action="/to-listen/link-spotify">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="category" value="{{ cat.name }}">
+                    <input type="hidden" name="item" value="{{ value }}">
+                    <input type="url" name="spotify_url" value="{{ item.spotify_url or '' }}" placeholder="https://open.spotify.com/track/..." aria-label="Spotify link for {{ value }}" required>
+                    <button class="add-btn" type="submit">Link</button>
+                  </form>
+                </details>
+              {% endif %}
+              {% for lp in link_providers %}
+                <details class="youtube-linker">
+                  <summary>{{ "Change " ~ lp.label ~ " link" if item.get(lp.url_field) else "Link " ~ lp.label }}</summary>
+                  <form class="youtube-link-form" method="post" action="/{{ cfg.page }}/link-provider/{{ lp.id }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="category" value="{{ cat.name }}">
+                    <input type="hidden" name="item" value="{{ value }}">
+                    <input type="url" name="link" value="{{ item.get(lp.url_field) or '' }}" placeholder="{{ lp.link_placeholder }}" aria-label="{{ lp.label }} link for {{ value }}" required>
+                    <button class="add-btn" type="submit">Link</button>
+                  </form>
+                </details>
+              {% endfor %}
               {% if cfg.key in ("watch", "listen") %}
                 <details class="youtube-linker">
                   <summary>{{ "Change YouTube link" if item.youtube_url else "Link YouTube video" }}</summary>
@@ -441,6 +482,7 @@
         <input type="hidden" name="category" value="{{ cat.name }}">
         <input type="text" name="item" placeholder="{{ cfg.item_placeholder }}" autocomplete="off">
         {% if cfg.key in ("watch", "listen") %}<input type="url" name="youtube_url" placeholder="YouTube URL (optional)" autocomplete="off">{% endif %}
+        {% if cfg.key == "listen" %}<input type="url" name="spotify_url" placeholder="Spotify link (optional)" autocomplete="off">{% endif %}
         <button class="add-btn" type="submit">+ Add</button>
       </form>
     </section>

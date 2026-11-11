@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -51,9 +52,11 @@ try:
         home_cards,
         media_library,
         placeholders,
+        providers,
         read_sources,
         release_sources,
         site_chrome,
+        spotify_api,
         themes_admin,
         tradility_orders,
         watch_log,
@@ -81,9 +84,11 @@ except ModuleNotFoundError:
     import media_library
     import personal_library as personal_media
     import placeholders
+    import providers
     import read_sources
     import release_sources
     import site_chrome
+    import spotify_api
     import themes_admin
     import tradility_orders
     import watch_log
@@ -4396,6 +4401,14 @@ SIMPLE_LIST_CONFIGS = {
             "youtube_url",
             "youtube_channel",
             "youtube_account",
+            "spotify_kind",
+            "spotify_id",
+            "spotify_uri",
+            "spotify_url",
+            "spotify_artist",
+            "apple_music_kind",
+            "apple_music_id",
+            "apple_music_url",
         ],
         "ollama": True,
     },
@@ -5486,6 +5499,87 @@ def _active_youtube_video_ids(data: dict, cfg: dict) -> list[str]:
     return video_ids
 
 
+def _spotify_link_fields(value: str) -> dict[str, str]:
+    link = spotify_api.parse_link(value)
+    return {k: v for k, v in link.items() if k != "spotify_artist"}
+
+
+def _merge_spotify_playlist(
+    data: dict, cfg: dict, tracks: list[dict[str, str]], category_name: str
+) -> tuple[int, int, int, int]:
+    """Add new playlist tracks/episodes without deleting, moving, or title-matching local rows.
+
+    Same contract as ``_merge_youtube_playlist``: returns ``(added, linked, conflicts, changed)``
+    and leaves an exact-title collision alone.
+    """
+
+    by_uri: dict[str, dict] = {}
+    local_titles: set[str] = set()
+    for category in data["categories"]:
+        for item in category["items"]:
+            local_titles.add(_simple_item_value(item, cfg).casefold())
+            uri = str(item.get("spotify_uri") or "").strip()
+            if uri:
+                by_uri.setdefault(uri, item)
+
+    target = _find_simple_category(data, category_name)
+    added = linked = conflicts = changed = 0
+    for track in tracks:
+        uri = str(track.get("spotify_uri") or "").strip()
+        title = str(track.get("title") or "").strip()
+        if not uri or not title:
+            continue
+        metadata = {
+            key: str(track.get(key) or "").strip()
+            for key in (
+                "spotify_kind",
+                "spotify_id",
+                "spotify_uri",
+                "spotify_url",
+                "spotify_artist",
+            )
+        }
+        existing = by_uri.get(uri)
+        if existing is not None:
+            linked += 1
+            for field, value in metadata.items():
+                if value and existing.get(field) != value:
+                    existing[field] = value
+                    changed += 1
+            continue
+        if title.casefold() in local_titles:
+            conflicts += 1
+            continue
+        if target is None:
+            target = {"name": category_name, "items": []}
+            data["categories"].append(target)
+        item = {cfg["primary"]: title, cfg["status"]: False, **metadata}
+        target["items"].append(item)
+        by_uri[uri] = item
+        local_titles.add(title.casefold())
+        added += 1
+        changed += 1
+    return added, linked, conflicts, changed
+
+
+def _active_spotify_uris(data: dict, cfg: dict) -> list[str]:
+    """Distinct linked tracks/episodes still active locally (albums etc. cannot be playlist items)."""
+
+    uris: list[str] = []
+    for category in data["categories"]:
+        for item in category["items"]:
+            uri = str(item.get("spotify_uri") or "").strip()
+            if (
+                item.get(cfg["status"])
+                or not uri
+                or item.get("spotify_kind") not in spotify_api.PUSHABLE_KINDS
+                or uri in uris
+            ):
+                continue
+            uris.append(uri)
+    return uris
+
+
 def _render_simple_list(key: str):
     cfg = _simple_list_config(key)
     data = load_simple_list(key)
@@ -5589,6 +5683,7 @@ def _render_simple_list(key: str):
     youtube_accounts = youtube_api.settings_list_from_env() if key in {"watch", "listen"} else []
     youtube_state = youtube_api.public_status(youtube_accounts) if youtube_accounts else {}
     youtube_playlists = youtube_api.playlist_links(youtube_accounts, key)
+    spotify_settings = spotify_api.settings_from_env() if key == "listen" else None
     return render_template(
         "to-list.html",
         cfg=cfg,
@@ -5614,6 +5709,13 @@ def _render_simple_list(key: str):
         youtube_status=youtube_state.get(key, {}),
         youtube_account_count=youtube_state.get("account_count", 0),
         youtube_playlists=youtube_playlists,
+        link_providers=[
+            p for p in providers.for_page(key, providers.LINK) if p.id not in {"youtube", "spotify"}
+        ],
+        spotify_status=spotify_api.public_status(spotify_settings) if spotify_settings else {},
+        spotify_playlist_url=(
+            spotify_api.playlist_link(spotify_settings) if spotify_settings else ""
+        ),
     )
 
 
@@ -6065,6 +6167,13 @@ def simple_list_add_item(page):
         except youtube_api.YouTubeError as exc:
             flash(str(exc), "error")
             return redirect(url_for(_simple_list_endpoint(key)) + f"#{_slug(category)}")
+    spotify_url = request.form.get("spotify_url", "").strip()
+    if spotify_url and key == "listen":
+        try:
+            item.update(_spotify_link_fields(spotify_url))
+        except spotify_api.SpotifyError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for(_simple_list_endpoint(key)) + f"#{_slug(category)}")
     if key == "code":
         if not repo:
             flash("Repository name cannot be empty.", "error")
@@ -6095,6 +6204,350 @@ def simple_list_add_item(page):
             "success",
         )
     return redirect(url_for(_simple_list_endpoint(key)) + f"#{_slug(category)}")
+
+
+_PLAYLIST_CACHE: dict[str, tuple[float, object]] = {}
+_PLAYLIST_CACHE_SECONDS = 60.0
+
+
+def _playlist_cached(cache_key: str, refresh: bool, build):
+    """``(value, error)``; fetches are cached briefly and a provider failure never raises."""
+    now = time.monotonic()
+    hit = _PLAYLIST_CACHE.get(cache_key)
+    if hit and not refresh and now - hit[0] < _PLAYLIST_CACHE_SECONDS:
+        return hit[1], ""
+    try:
+        value = build()
+    except (youtube_api.YouTubeError, spotify_api.SpotifyError, OSError, RuntimeError) as exc:
+        return None, str(exc)
+    _PLAYLIST_CACHE[cache_key] = (now, value)
+    return value, ""
+
+
+def _playlist_providers(key: str) -> list[providers.Account]:
+    """Connected accounts that can be browsed from a list page (see ``providers.py``)."""
+    return providers.accounts_for(key, providers.BROWSE)
+
+
+def _provider_playlists(account: providers.Account, key: str, refresh: bool):
+    return _playlist_cached(
+        f"pl:{account.id}", refresh, lambda: account.provider.playlists(account, key)
+    )
+
+
+def _provider_entries(account: providers.Account, key: str, playlist_id: str, refresh: bool):
+    return _playlist_cached(
+        f"it:{account.id}:{playlist_id}",
+        refresh,
+        lambda: account.provider.entries(account, key, playlist_id),
+    )
+
+
+@app.get("/<page>/playlist")
+def simple_list_playlist(page):
+    """Browse every playlist on the linked Spotify/YouTube accounts, beside local list state."""
+    key = _simple_list_key_from_page(page)
+    if key not in {"watch", "listen"}:
+        abort(404)
+    cfg = _simple_list_config(key)
+    refresh = request.args.get("refresh") == "1"
+    accounts = _playlist_providers(key)
+    chosen = next(
+        (a for a in accounts if a.id == request.args.get("source")),
+        accounts[0] if accounts else None,
+    )
+    view: dict = {}
+    if chosen is not None:
+        playlists, list_error = _provider_playlists(chosen, key, refresh)
+        playlists = playlists or []
+        known = {row["id"] for row in playlists}
+        # Only playlists the account itself lists can be opened (never an arbitrary id).
+        wanted = request.args.get("playlist", "")
+        if wanted not in known:
+            wanted = chosen.queue if chosen.queue in known or not playlists else ""
+            wanted = wanted or (playlists[0]["id"] if playlists else "")
+        current = next((row for row in playlists if row["id"] == wanted), None)
+        entries, entry_error = ([], "")
+        if current is not None:
+            entries, entry_error = _provider_entries(chosen, key, current["id"], refresh)
+            entries = [dict(e) for e in entries or []]
+        data = load_simple_list(key)
+        local: dict[tuple[str, str], dict] = {}
+        for category in data["categories"]:
+            for item in category["items"]:
+                if item.get(chosen.field):
+                    local.setdefault(
+                        (chosen.field, str(item[chosen.field])),
+                        {
+                            "category": category["name"],
+                            "done": bool(item.get(cfg["status"])),
+                            "pushable": item.get("spotify_kind", "track")
+                            in spotify_api.PUSHABLE_KINDS,
+                        },
+                    )
+        remote = {e["match"] for e in entries}
+        for entry in entries:
+            entry["local"] = local.get(entry["match"])
+        is_queue = current is not None and current["id"] == chosen.queue
+        view = {
+            "playlists": playlists,
+            "list_error": list_error,
+            "current": current,
+            "entries": entries,
+            "entry_error": entry_error,
+            "is_queue": is_queue,
+            "imported": sum(1 for e in entries if e["local"]),
+            "unpushed": (
+                sum(
+                    1
+                    for k, state in local.items()
+                    if k not in remote and not state["done"] and state["pushable"]
+                )
+                if is_queue
+                else 0
+            ),
+        }
+    destinations: list[dict] = []
+    if chosen is not None:
+        for account in accounts:
+            if account.field != chosen.field or not account.provider.can(providers.WRITE):
+                continue
+            lists, error = _provider_playlists(account, key, False)
+            destinations.append({"provider": account, "playlists": lists or [], "error": error})
+    return render_template(
+        "to-playlist.html",
+        cfg=cfg,
+        destinations=destinations,
+        providers=accounts,
+        chosen=chosen,
+        view=view,
+        done_label=cfg["done_label"],
+    )
+
+
+@app.post("/<page>/playlist/copy")
+def simple_list_playlist_copy(page):
+    """Copy chosen items, or a whole playlist, into another playlist (or a new one) of the same service.
+
+    Nothing is removed from the source. Items already in the destination are skipped, and only
+    ids that the source playlist really contains can be copied.
+    """
+    key = _simple_list_key_from_page(page)
+    if key not in {"watch", "listen"}:
+        abort(404)
+    cfg = _simple_list_config(key)
+    form = request.form
+    here = url_for("simple_list_playlist", page=cfg["page"])
+
+    def back(source: str = "", playlist: str = ""):
+        query = urllib.parse.urlencode({"source": source, "playlist": playlist})
+        return redirect(f"{here}?{query}")
+
+    accounts = {a.id: a for a in _playlist_providers(key)}
+    src = accounts.get(form.get("source", ""))
+    dest_provider_id, _, dest_playlist = form.get("dest", "").partition("|")
+    dst = accounts.get(dest_provider_id)
+    if (
+        src is None
+        or dst is None
+        or src.field != dst.field
+        or not dst.provider.can(providers.WRITE)
+    ):
+        flash("Pick a destination on the same service as the source playlist.", "error")
+        return back(form.get("source", ""), form.get("playlist", ""))
+    source_lists, error = _provider_playlists(src, key, False)
+    source = next((p for p in source_lists or [] if p["id"] == form.get("playlist", "")), None)
+    if source is None:
+        flash(f"That playlist is not on {src.label}: {error or 'not found'}", "error")
+        return back(src.id)
+    entries, error = _provider_entries(src, key, source["id"], True)
+    if error or entries is None:
+        flash(f"Could not read {source['title']}: {error}", "error")
+        return back(src.id, source["id"])
+    if form.get("mode") == "selected":
+        wanted = set(form.getlist("item"))
+        entries = [e for e in entries if e["match"][1] in wanted]
+    if not entries:
+        flash("Nothing selected to copy.", "error")
+        return back(src.id, source["id"])
+
+    created = False
+    if dest_playlist == "new":
+        title = form.get("new_name", "").strip() or f"{source['title']} (copy)"
+        try:
+            dest_playlist = dst.provider.create_playlist(dst, key, title)
+        except (OSError, RuntimeError) as exc:
+            flash(f"Could not create the playlist: {exc}", "error")
+            return back(src.id, source["id"])
+        created = True
+        dest_name = title
+    else:
+        dest_lists, error = _provider_playlists(dst, key, False)
+        target = next((p for p in dest_lists or [] if p["id"] == dest_playlist), None)
+        if target is None:
+            flash(f"That destination playlist is not on {dst.label}.", "error")
+            return back(src.id, source["id"])
+        if dst.id == src.id and dest_playlist == source["id"]:
+            flash("Pick a different playlist than the one you are copying from.", "error")
+            return back(src.id, source["id"])
+        dest_name = target["title"]
+        existing, error = _provider_entries(dst, key, dest_playlist, True)
+        if error or existing is None:
+            flash(f"Could not read {dest_name}: {error}", "error")
+            return back(src.id, source["id"])
+        have = {e["match"] for e in existing}
+        entries = [e for e in entries if e["match"] not in have]
+    skipped_total = len(entries)
+    added, problems = dst.provider.add(dst, key, dest_playlist, entries)
+    _PLAYLIST_CACHE.clear()
+    _log_event(
+        cfg["history_file"],
+        "copy-playlist",
+        detail=(
+            f"{src.id}:{source['id']} -> {dst.id}:{dest_playlist}, added={added}, "
+            f"created={created}, failed={len(problems)}"
+        ),
+    )
+    verb = "Created" if created else "Added to"
+    message = f"{verb} {dest_name}: {added} item{'' if added == 1 else 's'} copied."
+    if not entries and not created:
+        message = f"Nothing to copy: {dest_name} already has every selected item."
+    if (
+        dst.field == "youtube_video_id"
+        and skipped_total > providers.YOUTUBE_COPY_LIMIT
+        and not problems
+    ):
+        message += (
+            f" YouTube caps this at {providers.YOUTUBE_COPY_LIMIT} per run (daily API quota): "
+            "copy again for the rest."
+        )
+    flash(message, "success" if added or not problems else "error")
+    if problems:
+        flash(f"Stopped after {added} item(s): {'; '.join(problems)}", "error")
+    return back(dst.id, dest_playlist)
+
+
+@app.post("/to-listen/sync-spotify")
+def listen_sync_spotify():
+    cfg = _simple_list_config("listen")
+    back = url_for(_simple_list_endpoint("listen"))
+    settings = spotify_api.settings_from_env()
+    if not settings.ready():
+        flash("Spotify sync failed: authorize Spotify and create the playlist first", "error")
+        return redirect(back)
+    data = load_simple_list("listen")
+    failures: list[str] = []
+    try:
+        tracks = spotify_api.playlist_items(settings)
+    except (spotify_api.SpotifyError, OSError, RuntimeError) as exc:
+        flash(f"Spotify sync failed: {exc}", "error")
+        return redirect(back)
+    added, linked, conflicts, changed = _merge_spotify_playlist(
+        data, cfg, tracks, settings.category
+    )
+    if changed:
+        save_simple_list("listen", data)
+    remote = {t["spotify_uri"] for t in tracks}
+    pushed = 0
+    to_push = [u for u in _active_spotify_uris(data, cfg) if u not in remote]
+    if to_push:
+        try:
+            pushed = spotify_api.add_items(settings, to_push)
+        except (spotify_api.SpotifyError, OSError, RuntimeError) as exc:
+            failures.append(str(exc))
+    _log_event(
+        cfg["history_file"],
+        "sync-spotify",
+        detail=(
+            f"added={added}, linked={linked}, conflicts={conflicts}, playlist={len(tracks)}, "
+            f"pushed={pushed}, failed={len(failures)}"
+        ),
+    )
+    message = f"Spotify sync added {added}; {linked} linked; {pushed} pushed."
+    if conflicts:
+        message += f" {conflicts} exact-title conflict(s) were left unchanged."
+    flash(message, "success")
+    if failures:
+        flash(f"Spotify push failed: {'; '.join(failures)}", "error")
+    return redirect(back + f"#{_slug(settings.category)}")
+
+
+@app.post("/spotify/create-playlist")
+def spotify_create_playlist():
+    """Create (or adopt an existing private) To Listen playlist and remember its id."""
+
+    settings = spotify_api.settings_from_env()
+    try:
+        playlist_id, created = spotify_api.ensure_playlist(settings)
+    except (spotify_api.SpotifyError, OSError, RuntimeError) as exc:
+        flash(f"Spotify playlist creation failed: {exc}", "error")
+        return redirect(_return_path("/to-listen"))
+    flash(
+        (
+            "Spotify To Listen playlist created."
+            if created
+            else "Linked your existing private Spotify To Listen playlist."
+        ),
+        "success",
+    )
+    return redirect(_return_path("/to-listen"))
+
+
+@app.post("/to-listen/link-spotify")
+def listen_link_spotify():
+    cfg = _simple_list_config("listen")
+    category = request.form.get("category", "").strip()
+    value = request.form.get("item", "").strip()
+    back = url_for(_simple_list_endpoint("listen")) + f"#{_slug(category)}"
+    try:
+        fields = _spotify_link_fields(request.form.get("spotify_url", ""))
+    except spotify_api.SpotifyError as exc:
+        flash(str(exc), "error")
+        return redirect(back)
+    data = load_simple_list("listen")
+    cat = _find_simple_category(data, category)
+    item = _find_simple_item(cat, value, cfg) if cat else None
+    if item is None:
+        flash(f'"{value}" was not found in {category}.', "error")
+        return redirect(url_for(_simple_list_endpoint("listen")))
+    if item.get("spotify_uri") != fields["spotify_uri"]:
+        item.pop("spotify_artist", None)
+    item.update(fields)
+    save_simple_list("listen", data)
+    _log_event(cfg["history_file"], "link-spotify", item=value, category=category)
+    flash(f'Linked "{value}" to Spotify. Sync Spotify to push it.', "success")
+    return redirect(back)
+
+
+@app.post("/<page>/link-provider/<provider_id>")
+def simple_list_link_provider(page, provider_id):
+    """Attach a link from any registered provider that supports linking (see ``providers.py``)."""
+    key = _simple_list_key_from_page(page)
+    provider = providers.get(provider_id)
+    if key not in {"watch", "listen"} or provider is None:
+        abort(404)
+    if key not in provider.pages or not provider.can(providers.LINK):
+        abort(404)
+    cfg = _simple_list_config(key)
+    category = request.form.get("category", "").strip()
+    value = request.form.get("item", "").strip()
+    back = url_for(_simple_list_endpoint(key)) + f"#{_slug(category)}"
+    try:
+        fields = provider.parse_link(request.form.get("link", ""))
+    except RuntimeError as exc:
+        flash(str(exc), "error")
+        return redirect(back)
+    data = load_simple_list(key)
+    cat = _find_simple_category(data, category)
+    item = _find_simple_item(cat, value, cfg) if cat else None
+    if item is None:
+        flash(f'"{value}" was not found in {category}.', "error")
+        return redirect(url_for(_simple_list_endpoint(key)))
+    item.update(fields)
+    save_simple_list(key, data)
+    _log_event(cfg["history_file"], f"link-{provider.id}", item=value, category=category)
+    flash(f'Linked "{value}" to {provider.label}.', "success")
+    return redirect(back)
 
 
 @app.post("/<page>/link-youtube")
