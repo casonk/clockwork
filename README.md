@@ -381,6 +381,45 @@ Clockwork does not use YouTube Watch Later or watch history, which the Data API
 does not expose. It cannot upload, comment, edit videos, or delete playlists.
 See `config/youtube.env.example` for the complete environment template.
 
+### Provider framework
+
+`web/providers.py` is the one place that knows about outside services. Each service is a
+`Provider` subclass in `REGISTRY` that declares its `capabilities`: `link` (parse a pasted URL
+into item fields), `browse` (list an account's playlists and their entries) and `write` (create
+playlists and add entries). The list pages, the playlist browser and the copy flow only use that
+interface, so a new service is one subclass plus its item fields in `_simple_list_config`.
+
+| Provider | Pages | Capabilities | Status |
+|---|---|---|---|
+| Spotify | To Listen | link, browse, write | live |
+| YouTube | To Watch, To Listen | link, browse, write | live |
+| Apple Music | To Listen | link | links only: playlist sync needs a MusicKit developer token (Apple Developer Program) and a user token |
+| Apple TV | To Watch | not started | Apple publishes no watchlist API; links only when added |
+
+A link-only provider needs no credentials: its 🍎 link and "Link <service>" form appear on the
+item automatically, and it is saved through `POST /<page>/link-provider/<provider id>`.
+
+### Spotify (To Listen)
+
+To Listen can link items to Spotify and keep a private **To Listen** playlist in sync.
+
+1. Create an app in the Spotify developer dashboard and register the redirect URI
+   `http://127.0.0.1:8765/callback` (Spotify rejects `localhost`).
+2. Run `SPOTIFY_CLIENT_SECRET=... python3 scripts/authorize_spotify.py --client-id ... --write`.
+   The grant (read and `playlist-modify-private`) is stored in owner-only
+   `~/.config/clockwork/spotify-oauth.json`; the refresh token is never printed.
+3. Point the web service at it with `CLOCKWORK_SPOTIFY_OAUTH_FILE` (see
+   `config/spotify.env.example`), restart it, then press **＋ Spotify List** on To Listen to create
+   (or adopt) the private playlist. Its id is saved beside the grant.
+
+**↔ Sync Spotify** is additive like the YouTube sync: playlist tracks and episodes are imported by
+stable Spotify URI into a local `Spotify` category, and active linked **tracks and episodes** are
+pushed. Albums, artists, shows and playlists can be linked on an item (🎵) but Spotify playlists
+cannot hold them, so they are never pushed. Nothing is ever removed on either side, and exact-title
+collisions are left alone. Since Spotify's February 2026 API changes, development-mode apps can
+need a Premium owner and may be refused write access; a refused push is reported on the page and
+the read-only link and import still work.
+
 weak-denoise twin (`CLOCKWORK_UPSCALE_DENOISE`, default 0.5) so film grain and
 skin texture survive. The queue runs lowest resolution first, newest downloads
 first within that.

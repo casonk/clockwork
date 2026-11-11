@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ cfg.title }} playlists - Clockwork</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background:var(--bg); color:var(--text); font-family: var(--font); font-size: var(--font-size); line-height:1.55; min-height:100vh; }
+    main { max-width: 900px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+    h1 { font-size: 18px; }
+    .muted { color: var(--muted); }
+    .small { font-size: 12px; }
+    .bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .bar .grow { flex:1; }
+    .tabs { display:flex; gap:6px; flex-wrap:wrap; }
+    .tabs a, .btn { color:var(--text); text-decoration:none; border:1px solid var(--border); border-radius:99px; padding:3px 12px; font-size:13px; background:transparent; }
+    .tabs a[aria-current="page"] { border-color:var(--accent); color:var(--accent); }
+    .btn:hover, .tabs a:hover { border-color:var(--accent); }
+    section { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:6px 16px; }
+    .row { display:flex; gap:10px; align-items:baseline; padding:8px 0; border-bottom:1px solid color-mix(in srgb, var(--border) 50%, transparent); flex-wrap:wrap; }
+    .row:last-child { border-bottom:none; }
+    .row a.title { color:var(--text); text-decoration:none; font-weight:600; flex:1; min-width:200px; overflow-wrap:anywhere; }
+    .row a.title:hover { color:var(--accent); text-decoration:underline; }
+    .tag { font-size:11px; padding:1px 8px; border-radius:99px; border:1px solid var(--border); color:var(--muted); white-space:nowrap; }
+    .tag.in { border-color:var(--green); color:var(--green); }
+    .tag.done { border-color:var(--accent); color:var(--accent); }
+    .error { border-color:var(--red); color:var(--red); padding:12px 16px; }
+    .empty { padding:14px 0; color:var(--muted); }
+    .copybar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:8px 0; }
+    .copybar .grow { flex:1; }
+    .copybar select, .copybar input[type=text] { background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:4px 8px; max-width:220px; }
+    .copybar [hidden] { display:none; }
+    .btn:disabled { opacity:.5; cursor:not-allowed; }
+    .row input[type=checkbox] { accent-color:var(--accent); }
+    .flashes { display:grid; gap:6px; }
+    .flash { padding:8px 12px; border-radius:7px; font-size:12px; border:1px solid var(--border); }
+    .flash.success { color:var(--green); border-color:var(--green); }
+    .flash.error { color:var(--red); border-color:var(--red); }
+    h2 { font-size:13px; color:var(--muted); font-weight:600; margin-bottom:6px; }
+    .layout { display:grid; grid-template-columns:260px 1fr; gap:14px; align-items:start; }
+    .content { display:grid; gap:10px; min-width:0; }
+    .plist { padding:4px 6px; max-height:70vh; overflow:auto; }
+    .pl { display:flex; flex-direction:column; padding:6px 8px; border-radius:6px; text-decoration:none; color:var(--text); }
+    .pl:hover { background:color-mix(in srgb, var(--accent) 10%, transparent); }
+    .pl.current { background:color-mix(in srgb, var(--accent) 18%, transparent); }
+    .pl-name { overflow-wrap:anywhere; }
+    @media (max-width: 720px) { .layout { grid-template-columns:1fr; } .plist { max-height:240px; } }
+  </style>
+  {% include "_theme_head.html" %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
+</head>
+<body>
+{% include "_site_nav.html" %}
+<main>
+  {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}
+    <div class="flashes">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>
+  {% endif %}{% endwith %}
+  <div class="bar">
+    <h1>{{ cfg.icon }} {{ cfg.title }}: playlists</h1>
+    <span class="grow"></span>
+    <a class="btn" href="/{{ cfg.page }}">← Back to the list</a>
+  </div>
+
+  {% if not providers %}
+    <section><p class="empty">No account is connected yet. Authorize Spotify or YouTube (see the README), then come back.</p></section>
+  {% else %}
+    <nav class="tabs" aria-label="Accounts">
+      {% for p in providers %}
+        <a href="/{{ cfg.page }}/playlist?source={{ p.id }}"{% if p.id == chosen.id %} aria-current="page"{% endif %}>{{ p.label }}</a>
+      {% endfor %}
+    </nav>
+    {% if view.list_error %}
+      <section class="error">{{ chosen.label }} playlists could not be read: {{ view.list_error }}</section>
+    {% elif not view.playlists %}
+      <section><p class="empty">No playlists found on this account.</p></section>
+    {% else %}
+      <div class="layout">
+        <aside>
+          <h2>Your playlists · {{ view.playlists|length }}</h2>
+          <section class="plist">
+            {% for pl in view.playlists %}
+              <a class="pl{% if view.current and pl.id == view.current.id %} current{% endif %}" href="/{{ cfg.page }}/playlist?source={{ chosen.id }}&playlist={{ pl.id }}">
+                <span class="pl-name">{{ pl.title }}</span>
+                <span class="small muted">{% if pl.count %}{{ pl.count }} · {% endif %}{% if pl.id == chosen.queue %}queue{% elif pl.private %}private{% endif %}</span>
+              </a>
+            {% endfor %}
+          </section>
+        </aside>
+        <div class="content">
+          {% if view.current %}
+            <div class="bar small muted">
+              <strong style="color:var(--text)">{{ view.current.title }}</strong>
+              <span>{{ view.entries|length }} item{{ '' if view.entries|length == 1 else 's' }} · {{ view.imported }} already in your list{% if view.unpushed %} · {{ view.unpushed }} linked item{{ '' if view.unpushed == 1 else 's' }} not yet pushed (Sync){% endif %}</span>
+              <span class="grow"></span>
+              {% if view.current.url %}<a href="{{ view.current.url }}" target="_blank" rel="noopener noreferrer">Open on {{ chosen.label.split(' ')[0] }} ↗</a>{% endif %}
+              <a href="/{{ cfg.page }}/playlist?source={{ chosen.id }}&playlist={{ view.current.id }}&refresh=1" title="Fetch again (cached for a minute)">⟳ Refresh</a>
+            </div>
+            {% if view.entry_error %}
+              <section class="error">Could not read this playlist: {{ view.entry_error }}</section>
+            {% else %}
+              <form method="post" action="/{{ cfg.page }}/playlist/copy" id="copy-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="source" value="{{ chosen.id }}">
+                <input type="hidden" name="playlist" value="{{ view.current.id }}">
+                {% if view.entries %}
+                <div class="copybar">
+                  <label class="small"><input type="checkbox" id="pick-all"> Select all</label>
+                  <span class="small muted" id="picked">0 selected</span>
+                  <span class="grow"></span>
+                  <select name="dest" id="dest" aria-label="Copy to">
+                    {% for d in destinations %}
+                      <optgroup label="{{ d.provider.label }}">
+                        <option value="{{ d.provider.id }}|new">＋ New playlist…</option>
+                        {% for pl in d.playlists %}
+                          {% if not (d.provider.id == chosen.id and pl.id == view.current.id) %}
+                            <option value="{{ d.provider.id }}|{{ pl.id }}">{{ pl.title }}</option>
+                          {% endif %}
+                        {% endfor %}
+                      </optgroup>
+                    {% endfor %}
+                  </select>
+                  <input type="text" name="new_name" id="new-name" maxlength="100" placeholder="{{ view.current.title }} (copy)" aria-label="New playlist name">
+                  <button class="btn" type="submit" name="mode" value="selected" id="copy-selected" disabled>Copy selected</button>
+                  <button class="btn" type="submit" name="mode" value="all" title="Add every item on this playlist to the destination">Copy whole playlist</button>
+                </div>
+                <p class="small muted">Copies only add: nothing is removed here or on the destination, and items it already has are skipped. Copies go to the same service ({{ chosen.label.split(' ')[0] }}), including another account.{% if chosen.field == 'youtube_video_id' %} YouTube allows about 100 inserted items a day per 5,000 quota units used, so a run is capped at 100.{% endif %}</p>
+                {% endif %}
+                <section>
+                  {% for entry in view.entries %}
+                    <div class="row">
+                      <input type="checkbox" class="pick" name="item" value="{{ entry.match[1] }}" aria-label="Select {{ entry.title }}">
+                      <a class="title" href="{{ entry.url }}" target="_blank" rel="noopener noreferrer">{{ entry.title }}</a>
+                      {% if entry.sub %}<span class="small muted">{{ entry.sub }}</span>{% endif %}
+                      {% if entry.local %}
+                        <span class="tag {{ 'done' if entry.local.done else 'in' }}" title="In your list under {{ entry.local.category }}">{{ done_label if entry.local.done else 'in list' }} · {{ entry.local.category }}</span>
+                      {% else %}
+                        <span class="tag" title="Not in your list. Only the {{ cfg.title }} queue playlist is imported by Sync">not in list</span>
+                      {% endif %}
+                    </div>
+                  {% else %}
+                    <p class="empty">This playlist is empty.</p>
+                  {% endfor %}
+                </section>
+              </form>
+            {% endif %}
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+  {% endif %}
+</main>
+<script>
+(function () {
+  const form = document.getElementById("copy-form");
+  if (!form) return;
+  const picks = [...form.querySelectorAll(".pick")];
+  const all = document.getElementById("pick-all");
+  const label = document.getElementById("picked");
+  const button = document.getElementById("copy-selected");
+  const dest = document.getElementById("dest");
+  const name = document.getElementById("new-name");
+  function refresh() {
+    const n = picks.filter(function (box) { return box.checked; }).length;
+    if (label) label.textContent = n + " selected";
+    if (button) button.disabled = n === 0;
+    if (all) all.checked = n > 0 && n === picks.length;
+    if (name && dest) name.hidden = !dest.value.endsWith("|new");
+  }
+  if (all) all.addEventListener("change", function () {
+    picks.forEach(function (box) { box.checked = all.checked; });
+    refresh();
+  });
+  picks.forEach(function (box) { box.addEventListener("change", refresh); });
+  if (dest) dest.addEventListener("change", refresh);
+  refresh();
+})();
+</script>
+</body>
+</html>
