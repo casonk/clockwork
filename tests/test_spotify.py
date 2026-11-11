@@ -500,3 +500,46 @@ def test_copy_between_two_youtube_accounts_creates_and_fills_a_private_playlist(
     )
     assert made == [("Partner", "From Me")]
     assert added == [("Partner", "PLNEWNEWNEW", "vid2abcdef")]
+
+
+def test_a_pkce_grant_needs_no_client_secret_and_refreshes_with_the_client_id(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "g.json"
+    path.write_text(
+        json.dumps(
+            {
+                "client_id": "cid",
+                "client_secret": "",
+                "refresh_token": "r",
+                "scopes": ["playlist-read-private"],
+            }
+        )
+    )
+    path.chmod(0o600)
+    sent = {}
+
+    def fake_request(request, *, context):
+        sent["headers"] = dict(request.header_items())
+        sent["body"] = urllib.parse.parse_qs(request.data.decode())
+        return {"access_token": "tok"}
+
+    monkeypatch.setattr(spotify_api, "_request", fake_request)
+    assert spotify_api.access_token(spotify_api.Settings(oauth_file=path)) == "tok"
+    assert "Authorization" not in sent["headers"]
+    assert sent["body"]["client_id"] == ["cid"] and sent["body"]["grant_type"] == ["refresh_token"]
+    # With a secret it is a confidential-client refresh instead.
+    path.write_text(
+        json.dumps(
+            {
+                "client_id": "cid",
+                "client_secret": "sec",
+                "refresh_token": "r",
+                "scopes": ["playlist-read-private"],
+            }
+        )
+    )
+    path.chmod(0o600)
+    spotify_api.access_token(spotify_api.Settings(oauth_file=path))
+    assert sent["headers"]["Authorization"].startswith("Basic ")
+    assert "client_id" not in sent["body"]

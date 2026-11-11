@@ -403,14 +403,18 @@ item automatically, and it is saved through `POST /<page>/link-provider/<provide
 
 To Listen can link items to Spotify and keep a private **To Listen** playlist in sync.
 
-1. Create an app in the Spotify developer dashboard and register the redirect URI
-   `http://127.0.0.1:8765/callback` (Spotify rejects `localhost`).
-2. Run `SPOTIFY_CLIENT_SECRET=... python3 scripts/authorize_spotify.py --client-id ... --write`.
-   The grant (read and `playlist-modify-private`) is stored in owner-only
-   `~/.config/clockwork/spotify-oauth.json`; the refresh token is never printed.
-3. Point the web service at it with `CLOCKWORK_SPOTIFY_OAUTH_FILE` (see
-   `config/spotify.env.example`), restart it, then press **＋ Spotify List** on To Listen to create
-   (or adopt) the private playlist. Its id is saved beside the grant.
+1. Run `scripts/setup_spotify.sh`. With no arguments it reuses the Spotify app tape-deck already
+   uses (its client ID and registered loopback redirect URI are read from
+   `~/.config/tape-deck/config.toml`), so nothing needs registering or typing: the PKCE login
+   needs no client secret. For a different app, pass `CLIENT_ID [CLIENT_SECRET]` and register
+   `http://127.0.0.1:8765/callback` on it first (Spotify rejects `localhost`).
+2. It opens the browser to approve access (read and `playlist-modify-private`), stores the grant
+   in owner-only `~/.config/clockwork/spotify-oauth.json` (the refresh token is never printed),
+   creates or adopts the private **To Listen** playlist (its id is saved beside the grant),
+   restarts the web service and checks it is up. The default grant path needs no environment
+   variable.
+3. Only to move the grant elsewhere, set `CLOCKWORK_SPOTIFY_OAUTH_FILE` (see
+   `config/spotify.env.example`).
 
 **↔ Sync Spotify** is additive like the YouTube sync: playlist tracks and episodes are imported by
 stable Spotify URI into a local `Spotify` category, and active linked **tracks and episodes** are

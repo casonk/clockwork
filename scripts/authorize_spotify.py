@@ -5,7 +5,7 @@ Spotify's authorization-code flow is completed locally on a loopback redirect
 (register ``http://127.0.0.1:8765/callback`` on the Spotify app, or pass --port).
 The resulting refresh token is written to an owner-only file and is never printed.
 
-    python3 scripts/authorize_spotify.py --client-id ID --client-secret SECRET [--write]
+    python3 scripts/authorize_spotify.py --client-id ID [--client-secret SECRET] [--port N] [--write]
 """
 
 from __future__ import annotations
@@ -58,14 +58,14 @@ class ReusableTCPServer(socketserver.TCPServer):
 
 
 def _exchange(data: dict[str, str], client_id: str, client_secret: str) -> dict:
-    basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode("ascii")
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    if client_secret:  # PKCE needs no secret; send one only when the app has it
+        basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode("ascii")
+        headers["Authorization"] = f"Basic {basic}"
     request = urllib.request.Request(
         TOKEN_URL,
         data=urllib.parse.urlencode(data).encode("ascii"),
-        headers={
-            "Authorization": f"Basic {basic}",
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
+        headers=headers,
         method="POST",
     )
     try:
@@ -185,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--client-secret",
         default=os.environ.get("SPOTIFY_CLIENT_SECRET", ""),
-        help="or set SPOTIFY_CLIENT_SECRET (keeps it out of shell history)",
+        help="optional (PKCE needs none); or set SPOTIFY_CLIENT_SECRET",
     )
     parser.add_argument(
         "--output",
@@ -202,8 +202,8 @@ def main(argv: list[str] | None = None) -> int:
         help="also request playlist-modify-private (create the playlist, push items)",
     )
     args = parser.parse_args(argv)
-    if not args.client_id or not args.client_secret:
-        print("Spotify authorization failed: client ID and secret are required", file=sys.stderr)
+    if not args.client_id:
+        print("Spotify authorization failed: a client ID is required", file=sys.stderr)
         return 1
     try:
         authorize(

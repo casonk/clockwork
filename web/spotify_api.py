@@ -94,13 +94,14 @@ def playlist_link(settings: Settings) -> str:
 
 
 def load_credentials(path: Path) -> dict[str, str]:
+    """client_id and refresh_token are required; client_secret is optional (PKCE grants have none)."""
     payload = _owner_json(path)
-    required = ("client_id", "client_secret", "refresh_token")
-    credentials = {name: str(payload.get(name) or "").strip() for name in required}
-    if any(not credentials[name] for name in required):
-        raise SpotifyError(
-            "Spotify OAuth file must contain client_id, client_secret, and refresh_token"
-        )
+    credentials = {
+        name: str(payload.get(name) or "").strip()
+        for name in ("client_id", "client_secret", "refresh_token")
+    }
+    if not credentials["client_id"] or not credentials["refresh_token"]:
+        raise SpotifyError("Spotify OAuth file must contain client_id and refresh_token")
     scopes = payload.get("scopes", payload.get("scope", []))
     if isinstance(scopes, str):
         scopes = scopes.split()
@@ -184,18 +185,19 @@ def _request(request: urllib.request.Request, *, context: str) -> dict[str, Any]
 def access_token(settings: Settings) -> str:
     """Refresh an access token; a rotated refresh token is saved back to the grant file."""
     credentials = load_credentials(settings.oauth_file)
-    basic = base64.b64encode(
-        f"{credentials['client_id']}:{credentials['client_secret']}".encode()
-    ).decode("ascii")
+    form = {"grant_type": "refresh_token", "refresh_token": credentials["refresh_token"]}
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    if credentials["client_secret"]:  # confidential client
+        basic = base64.b64encode(
+            f"{credentials['client_id']}:{credentials['client_secret']}".encode()
+        ).decode("ascii")
+        headers["Authorization"] = f"Basic {basic}"
+    else:  # PKCE grant: the client ID travels in the body
+        form["client_id"] = credentials["client_id"]
     request = urllib.request.Request(
         TOKEN_URL,
-        data=urllib.parse.urlencode(
-            {"grant_type": "refresh_token", "refresh_token": credentials["refresh_token"]}
-        ).encode("ascii"),
-        headers={
-            "Authorization": f"Basic {basic}",
-            "Content-Type": "application/x-www-form-urlencoded",
-        },
+        data=urllib.parse.urlencode(form).encode("ascii"),
+        headers=headers,
         method="POST",
     )
     payload = _request(request, context="Spotify token refresh")
