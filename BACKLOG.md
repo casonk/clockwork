@@ -34,6 +34,14 @@ Mark items `[x]` when complete and move them to Done.
   this done when an old hash returns 404 here. Never push an old clone's
   history back.
 
+- [ ] [manual:2026-11-11] **Strip AI-attribution trailers added after the 2026-10-15 rewrite** — assistant
+  co-author and session trailers are back on 62 lines of commit messages on `main`, mostly squash-merge
+  messages (#38 to #57 and #190). A pull request cannot remove them, since a merge only adds commits.
+  Removing them means rewriting `main`: a trailer-only filter leaves every tree identical, but needs
+  the branch ruleset that requires pull requests lifted for one force-push, then a re-sync of every
+  clone, then the purge request above covering the new hashes. Until then, put no attribution lines
+  in commit messages or PR bodies; GitHub builds the squash message from them.
+
 ## In Progress
 
 ## Done
