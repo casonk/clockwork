@@ -54,6 +54,18 @@ Mark items `[x]` when complete and move them to Done.
   clone, then the purge request above covering the new hashes. Until then, put no attribution lines
   in commit messages or PR bodies; GitHub builds the squash message from them.
 
+- [ ] [manual:2026-11-11] **Re-sync every local clone after the 2026-11-11 history rewrite.** The
+  attribution trailers were stripped from `main` and from all branches in this repository and in
+  auto-pass, which changed commit hashes. Before pushing anything from an existing clone:
+  1. Commit or stash uncommitted work (the Spotify provider work is in this state).
+  2. `git fetch origin`, then rebase each local branch onto its `origin/` counterpart
+     (`git rebase --onto origin/<branch> <old-tip> <branch>`), or for a branch with nothing local to
+     keep, reset it to `origin/<branch>`. Local `main` can then fast-forward to `origin/main`.
+  3. Do the same in worktrees, such as the one for `feat/instrument-identity`, and in auto-pass
+     (its remote is SSH; fetch from your own shell).
+  4. Never push an old clone's history back, since that restores the trailers.
+  Mark this done when `git log --all` in each clone shows no assistant co-author or session lines.
+
 ## In Progress
 
 ## Done
