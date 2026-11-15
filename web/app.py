@@ -8571,6 +8571,7 @@ _SERVICE_ICONS: dict[str, str] = {
 _REPO_GROUP: dict[str, str] = {
     "./util-repos/clockwork": "Clockwork",
     "./util-repos/tachometer": "Monitoring",
+    "./util-repos/crew-chief": "Monitoring",
     "./util-repos/intake": "Monitoring",
     "./util-repos/snowbridge": "Infrastructure",
     "./util-repos/pit-box": "Pit Box",
