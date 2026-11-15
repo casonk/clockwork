@@ -1,0 +1,27 @@
+# RETIRED 2026-11-15 — the listener now runs as a pod in the K3s cluster (crew-chief/deploy/k3s).
+# Clockwork only reads files ending in .toml, so this one is ignored while it ends in .retired.
+#
+# To restore the host listener (stop the pod first, or both will poll the same mailbox):
+#   kubectl -n crew-chief-listener scale deploy/crew-chief-listener --replicas=0
+#   mv listener-service.toml.retired listener-service.toml     # and the .local.toml.retired if you keep one
+#   clockwork install --manifest examples/crew-chief/listener-service.toml --target systemd-user
+#   systemctl --user daemon-reload && systemctl --user enable --now crew-chief-listener.service
+#
+[[jobs]]
+name = "crew-chief-listener"
+description = "crew-chief shock-relay listener — poll Signal and Gmail for commands"
+scope = "user"
+service_type = "simple"
+working_directory = "%h/git/util-repos/crew-chief"
+exec_start = "%h/git/util-repos/crew-chief/scripts/run_listener.sh"
+poll_interval = "30s"
+after = ["network.target"]
+restart = "on-failure"
+restart_sec = "5"
+standard_output = "journal"
+standard_error = "journal"
+service_install_wanted_by = ["default.target"]
+
+[jobs.environment]
+CREW_CHIEF_LISTENER_CONFIG = "%h/git/util-repos/crew-chief/config/listener/config.toml"
+PYTHONPATH = "%h/git/util-repos/crew-chief/src"
