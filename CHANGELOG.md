@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Restore `examples/crew-chief/listener-service.toml` (it had been renamed `.retired`): the host listener is now one of crew-chief's three deployment modes (`dev`, `host`, `k3s`), not a retired service. Its header says how it relates to the K3s mode.
 - Retire the host crew-chief listener manifest, now that the listener runs in the K3s cluster: `examples/crew-chief/listener-service.toml` becomes `listener-service.toml.retired`, which Clockwork does not read. The file's header lists the steps to restore it.
 - Registry services owned by `./util-repos/crew-chief` (the cluster's Hubble UI) show in the Monitoring group on Home and in the top navigation instead of an unlisted Other group.
 - `examples/crew-chief/prometheus-ui-service.toml`: keeps the K3s cluster's Prometheus reachable at `http://127.0.0.1:9190` as a user service (a localhost-only `kubectl port-forward` that restarts with the cluster). Port 9190 avoids Cockpit on 9090.
