@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Registry services owned by `./util-repos/crew-chief` (the cluster's Hubble UI) show in the Monitoring group on Home and in the top navigation instead of an unlisted Other group.
 - `examples/crew-chief/prometheus-ui-service.toml`: keeps the K3s cluster's Prometheus reachable at `http://127.0.0.1:9190` as a user service (a localhost-only `kubectl port-forward` that restarts with the cluster). Port 9190 avoids Cockpit on 9090.
 - `examples/crew-chief/hubble-ui-service.toml`: keeps the K3s cluster's Hubble UI reachable at `http://127.0.0.1:8195` as a user service (a localhost-only `kubectl port-forward` that restarts when the cluster or pod does). Port 8195 avoids Auto Pass (8081), Guacamole (8090, 8091) and Cockpit (9090).
 - The library player notices a redeploy. The web service stamps each start with a build id (`GET /api/build`); the player checks it every five minutes and when the tab returns to the foreground, and shows a Reload banner when it is newer. It never reloads by itself, so playback is not interrupted, and the banner says to reload when the episode ends if one is playing. This closes the gap where an autoplay tab kept running the script it first loaded. The check is a shared partial (`_build_watch.html`) other long-lived pages can include.
