@@ -7,6 +7,7 @@
 <style>
   .guide-season { margin-top:10px; border-top:1px solid var(--border); padding-top:8px; }
   .guide-season summary { cursor:pointer; font-weight:700; }
+  .guide-season-tools { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:8px 0; }
   .guide-episode { padding:9px 0; border-bottom:1px solid var(--border); }
   .guide-episode-head { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
   .guide-episode-head strong { flex:1; min-width:180px; }
@@ -101,8 +102,8 @@
 
 {% if resume %}
   <section class="panel" id="resume">
-    <h2>{{ resume.label }}{% if resume.item.season is not none and resume.item.episode is not none %} · S{{ "%02d"|format(resume.item.season) }}E{{ "%02d"|format(resume.item.episode) }}{% endif %}</h2>
-    <p class="small muted">{% if resume.item.watched %}Last watched {{ resume.item.watched.ago }}.{% else %}Next up after what you last watched.{% endif %}
+    <h2>{{ resume.label }}{% if resume.label == "Continue" %} · S{{ "%02d"|format(resume.item.season) }}E{{ "%02d"|format(resume.item.episode) }}{% endif %}</h2>
+    <p class="small muted">{% if resume.label == "Watched" %}Last watched {{ resume.item.watched.ago }}.{% else %}{% if resume.last %}Last watched S{{ "%02d"|format(resume.last.season) }}E{{ "%02d"|format(resume.last.episode) }} · {{ resume.last.watched.ago }}. {% endif %}{% if resume.label == "Continue" %}Next up: S{{ "%02d"|format(resume.item.season) }}E{{ "%02d"|format(resume.item.episode) }}.{% else %}Every available episode is watched.{% endif %}{% endif %}
       <a class="btn primary" href="{{ url_for('library_pages.play_page', rel=resume.item.rel) }}?autoplay=1">▶ {{ "Play" if resume.label == "Continue" else "Play again" }}</a></p>
   </section>
 {% endif %}
@@ -149,14 +150,15 @@
     return node;
   }
 
-  async function searchEpisode(episode, output, button) {
+  async function searchRelease(scope, output, button) {
     button.disabled = true;
     output.replaceChildren(el('p', 'small muted', 'Searching Magneto sources…'));
     const params = new URLSearchParams({
-      q: `${root.dataset.title} ${episode.code}`, cat: 'TV Shows',
+      q: `${root.dataset.title} ${scope.code}`, cat: 'TV Shows',
       title: root.dataset.title, year: root.dataset.year,
-      season: String(episode.season), episode: String(episode.episode),
+      season: String(scope.season),
     });
+    if (scope.episode !== undefined) params.set('episode', String(scope.episode));
     try {
       const response = await fetch(`/api/torrent-search?${params}`);
       const data = await response.json();
@@ -243,6 +245,15 @@
       const details = el('details', 'guide-season');
       details.open = episodes.some(item => item.status === 'new');
       details.append(el('summary', '', `Season ${season} · ${episodes.length} to find`));
+      const seasonTools = el('div', 'guide-season-tools');
+      const findSeason = el('button', 'btn', '🔍 Find whole season');
+      findSeason.type = 'button';
+      seasonTools.append(findSeason, el('span', 'small muted', 'Search season packs instead of individual episodes.'));
+      const seasonResults = el('div', 'guide-results');
+      findSeason.addEventListener('click', () => searchRelease({
+        season, code: `S${String(season).padStart(2, '0')}`,
+      }, seasonResults, findSeason));
+      details.append(seasonTools, seasonResults);
       for (const episode of episodes) {
         const row = el('div', 'guide-episode');
         const head = el('div', 'guide-episode-head');
@@ -257,7 +268,7 @@
         if (episode.summary) row.append(el('p', 'small muted', episode.summary));
         const results = el('div', 'guide-results');
         row.append(results);
-        find.addEventListener('click', () => searchEpisode(episode, results, find));
+        find.addEventListener('click', () => searchRelease(episode, results, find));
         details.append(row);
       }
       content.append(details);

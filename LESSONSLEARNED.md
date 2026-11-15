@@ -53,6 +53,10 @@ should change how future sessions work in this repo.
 - A finished download that Transmission is still seeding is registered by
   linking episode files into `shows/<Title>/Season NN/`. Do not rename or move
   the torrent data. Skip any destination that already exists.
+- Watch history must follow stable title and season/episode identity when an
+  organizer changes an episode's path. Prefer an exact path match, then recover
+  unmatched episodes by normalized show title and episode code so filing does
+  not erase watched badges or resume position.
 - A portfolio portal should federate application-owned UIs rather than become
   the implementation home for every application's domain page. Give each app a
   complete loopback UI and stable API, then let the portal link or reverse

@@ -1215,11 +1215,13 @@ def plan_show(
         plan.skipped = "single episode file; file it under its show by hand"
         return plan
     folder = root / SHOWS / title_folder(title, year)
-    plan.moves.append(Move(entry, folder))
-    plan.prune = folder
+    merging = folder.exists()
+    if not merging:
+        plan.moves.append(Move(entry, folder))
+    plan.prune = entry if merging else folder
 
     def rebase(p: Path) -> Path:
-        return folder / p.relative_to(entry)
+        return p if merging else folder / p.relative_to(entry)
 
     companions_by_code: dict[tuple[int, int], list[Path]] = {}
     for companion in _companion_files(entry):
@@ -1281,7 +1283,9 @@ def plan_show(
             for c, m in zip(companions, _companion_moves(companions, season_dir, stem), strict=True)
         )
         placed.update(companions)
-    plan.moves.extend(_leftover_moves(entry, folder, placed, folder / RELEASE_DIR))
+    plan.moves.extend(
+        _leftover_moves(entry, entry if merging else folder, placed, folder / RELEASE_DIR)
+    )
     if extras:
         plan.note = f"{extras} video(s) without an episode code filed under Extras"
     return plan

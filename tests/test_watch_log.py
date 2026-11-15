@@ -181,6 +181,31 @@ def test_next_episode_continues_after_the_latest_watched():
     assert watch_log.next_episode(eps, done) is None
 
 
+def test_title_history_survives_episode_paths_changing_after_filing():
+    events = [
+        {
+            "event": "watched",
+            "kind": "episode",
+            "title": "House Of The Dragon Season 1 Mp4 1080p",
+            "rel": "House Of The Dragon Season 1 Mp4 1080p/House Of The Dragon S01E10.mp4",
+            "season": 1,
+            "episode": 10,
+            "ts": "2026-11-11T20:50:46",
+        }
+    ]
+    current = [
+        {
+            "rel": "shows/House of the Dragon (2022)/Season 01/House_of_the_Dragon_S01E10_1080p.mp4",
+            "season": 1,
+            "episode": 10,
+        }
+    ]
+
+    watched = watch_log.watched_for_title(events, "House of the Dragon", current)
+
+    assert watched[current[0]["rel"]] == {"views": 1, "ts": "2026-11-11T20:50:46"}
+
+
 def test_stream_fallback_logs_only_a_stream_that_ran_to_the_end(
     client, library, tmp_path, monkeypatch
 ):

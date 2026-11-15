@@ -62,6 +62,7 @@ def list_files(tmp_path, monkeypatch):
 @pytest.fixture()
 def client(list_files, monkeypatch):
     monkeypatch.setattr(web_app, "_ollama_available", lambda: False)
+    monkeypatch.setenv("CLOCKWORK_PIRATEBAY_SEARCH", "0")
     web_app.app.config["TESTING"] = True
     web_app.app.config["SECRET_KEY"] = "test-secret"
     return web_app.app.test_client()
@@ -1553,6 +1554,41 @@ def test_episode_search_returns_only_releases_covering_the_requested_episode(
     assert resp.status_code == 200
     assert [result["name"] for result in resp.get_json()["results"]] == names[1:3]
     assert client.get("/api/torrent-search?q=x&season=1").status_code == 400
+
+    season = client.get(
+        "/api/torrent-search?q=Stargate%20S01&cat=TV%20Shows&title=Stargate&season=1"
+    )
+    assert season.status_code == 200
+    assert [result["name"] for result in season.get_json()["results"]] == [names[2]]
+    assert client.get("/api/torrent-search?q=x&episode=1").status_code == 400
+
+
+def test_scoped_tv_search_uses_base_title_for_piratebay(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(web_app, "WATCH_DIR", tmp_path)
+    monkeypatch.setattr(web_app, "_EXTRA_WATCH_DIRS", [])
+    monkeypatch.setattr(web_app, "_search_torrents_csv", lambda _query: [])
+    calls = []
+
+    def piratebay(query, limit=20):
+        calls.append((query, limit))
+        return [
+            {
+                "name": "Joe.Pickett.S02E01.1080p",
+                "magnet": "magnet:?xt=urn:btih:" + "A" * 40,
+                "seeders": 2,
+            }
+        ]
+
+    monkeypatch.setattr(web_app.release_sources, "search_piratebay", piratebay)
+
+    response = client.get(
+        "/api/torrent-search?q=Joe%20Pickett%20S02E01&cat=TV%20Shows&title=Joe%20Pickett"
+        "&year=2021&season=2&episode=1"
+    )
+
+    assert response.status_code == 200
+    assert [item["name"] for item in response.get_json()["results"]] == ["Joe.Pickett.S02E01.1080p"]
+    assert calls == [("Joe Pickett", 100)]
 
 
 def test_library_page_and_search_api(client, tmp_path, monkeypatch):
