@@ -1,0 +1,16 @@
+[[jobs]]
+name = "crew-chief-hubble-ui"
+description = "Hubble UI for the K3s and Cilium cluster — a localhost-only kubectl port-forward on 8091"
+scope = "user"
+service_type = "simple"
+working_directory = "%h/git/util-repos/crew-chief"
+exec_start = "%h/git/util-repos/crew-chief/deploy/k3s/forward.sh ui"
+restart = "always"
+restart_sec = "10"
+standard_output = "journal"
+standard_error = "journal"
+service_install_wanted_by = ["default.target"]
+
+[jobs.environment]
+KUBECONFIG = "%h/.kube/k3s.yaml"
+HUBBLE_UI_PORT = "8091"
