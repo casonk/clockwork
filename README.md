@@ -578,6 +578,7 @@ clockwork render --manifest examples/example-scheduler/intraday-snapshots.toml -
 clockwork render --manifest examples/example-scheduler/monthly-controller.toml --target cron
 clockwork render --manifest examples/shock-relay/gmail-digest.toml --target systemd-user
 clockwork render --manifest examples/tradility/daily-analysis.toml --target systemd-user
+clockwork render --manifest examples/fred-public-data/refresh.toml --target systemd-user
 clockwork render --manifest examples/traction-control/bug-sweep-agentic.toml --target systemd-user
 clockwork render --manifest examples/traction-control/template-consolidation-agentic.toml --target systemd-user
 clockwork render --manifest examples/traction-control/ci-repair-agentic.toml --target systemd-user

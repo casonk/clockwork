@@ -1,0 +1,22 @@
+[[jobs]]
+name = "fred-public-data-refresh"
+description = "Daily FRED series download and chart refresh (keyless public endpoint)"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h/git/research-repos/fred-public-data"
+exec_start = "/usr/bin/python3 refresh.py"
+after = ["network-online.target"]
+wants = ["network-online.target"]
+standard_output = "journal"
+standard_error = "journal"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "*-*-* 07:20:00"
+persistent = true
+randomized_delay_sec = "900"
+
+[jobs.cron]
+expression = "20 7 * * *"
+command = "mkdir -p $HOME/.local/share/fred-public-data-refresh/runs && cd $HOME/git/research-repos/fred-public-data && /usr/bin/python3 refresh.py >> $HOME/.local/share/fred-public-data-refresh/runs/cron.log 2>&1"
+comments = ["Auto-generated from systemd timer: *-*-* 07:20:00"]
