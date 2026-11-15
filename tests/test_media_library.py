@@ -201,6 +201,26 @@ def test_organize_show_files_episodes_into_seasons(tmp_path):
     assert (show / "Extras" / "Blooper reel.mkv").exists()
 
 
+def test_organize_merges_a_later_season_into_an_existing_show(tmp_path):
+    root = tmp_path / "watch"
+    show = root / "shows" / "House of the Dragon (2022)"
+    first = _touch(show / "Season 01" / "House_of_the_Dragon_S01E01_1080p.mkv")
+    pack = root / "House of the Dragon (2022) S02 1080p"
+    second = _touch(pack / "House.of.the.Dragon.S02E01.mkv")
+    second_inode = second.stat().st_ino
+    _touch(pack / "Read Me.txt")
+
+    plans = ml.plan_library(root, prober=_prober, tracked=set())
+    _batch, done = ml.apply_plans(plans, tmp_path / "j.jsonl")
+
+    filed = show / "Season 02" / "House_of_the_Dragon_S02E01_1080p.mkv"
+    assert done == 2
+    assert first.exists()
+    assert filed.exists() and filed.stat().st_ino == second_inode
+    assert (show / ".release" / "Read Me.txt").exists()
+    assert not pack.exists()
+
+
 def test_organize_skips_seeding_and_multi_part(tmp_path):
     root = tmp_path / "watch"
     _touch(root / "Gran Torino (2008) [1080p]" / "Gran.Torino.mp4")

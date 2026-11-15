@@ -85,3 +85,30 @@ def test_invalid_prowlarr_url_does_not_break_search(monkeypatch):
     monkeypatch.setenv("CLOCKWORK_PROWLARR_URL", "http://[")
     monkeypatch.setenv("CLOCKWORK_PROWLARR_API_KEY", "private-key")
     assert release_sources.search_prowlarr("A Book", "read") == []
+
+
+def test_piratebay_search_builds_valid_magnets_and_skips_bad_rows(monkeypatch):
+    monkeypatch.setenv("CLOCKWORK_PIRATEBAY_SEARCH", "1")
+    requested = []
+
+    def urlopen(request, timeout):
+        requested.append((request, timeout))
+        return _response(
+            [
+                {
+                    "name": "Example.Show.S02.1080p",
+                    "info_hash": "A" * 40,
+                    "seeders": "12",
+                    "leechers": "3",
+                    "size": "1000",
+                },
+                {"name": "Bad", "info_hash": "not-a-hash"},
+            ]
+        )
+
+    monkeypatch.setattr(release_sources, "urlopen", urlopen)
+    results = release_sources.search_piratebay("Example Show S02")
+
+    assert len(results) == 1 and results[0]["source"] == "The Pirate Bay"
+    assert results[0]["magnet"].startswith("magnet:?xt=urn:btih:" + "A" * 40)
+    assert "cat=200" in requested[0][0].full_url and requested[0][1] == 8

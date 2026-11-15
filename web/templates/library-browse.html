@@ -18,7 +18,7 @@
   <table>
     {% for d in dirs %}
       <tr>
-        <td>📁 <a href="{{ url_for('library_pages.browse', rel=d.rel) }}">{{ d.name }}</a>
+        <td>📁 <a href="{{ url_for('library_pages.title_page', rel=d.rel) if d.is_title else url_for('library_pages.browse', rel=d.rel) }}">{{ d.name }}</a>
           {% if d.meta %}
             <div class="small muted"{% if d.meta.kind == 'shows' and (not d.meta.rating or not d.meta.has_plot) %} data-guide-api="{{ url_for('library_pages.show_summary', rel=d.rel) }}" data-has-plot="{{ '1' if d.meta.has_plot else '0' }}"{% endif %}>
               <span class="browse-rating">{% if d.meta.rating %}★ {{ "%.1f"|format(d.meta.rating) }}{% endif %}</span>
@@ -32,7 +32,10 @@
     {% endfor %}
     {% for f in files %}
       <tr>
-        <td class="small">{{ "🎞" if f.video else "📄" }} {{ f.name }}</td>
+        <td class="small">{{ "🎞" if f.video else "📄" }} {{ f.name }}
+          {% if f.video and f.watched %}<span class="badge quality" title="Watched {{ f.watched.views }}×">✓ watched {{ f.watched.ago }}</span>
+          {% elif f.video and title_meta %}<span class="badge">○ not watched</span>{% endif %}
+        </td>
         <td class="small muted" style="white-space:nowrap">{{ f.size }}</td>
         <td style="white-space:nowrap">
           {% if f.video %}<a class="btn primary" href="{{ url_for('library_pages.play_page', rel=f.rel) }}">▶</a>{% endif %}

@@ -181,6 +181,44 @@ def watched_by_rel(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return out
 
 
+def watched_for_title(
+    events: list[dict[str, Any]], title: str, files: list[dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
+    """Watch state for current library files, surviving organizer path changes.
+
+    Exact paths remain authoritative.  For episodes whose current path has no
+    event, match the normalized title plus season/episode identity.  Downloads
+    are commonly watched before the media-library job links them into the
+    canonical ``shows/<title>/Season NN`` tree, so a path-only lookup loses
+    otherwise valid history.
+    """
+    by_rel = watched_by_rel(events)
+    watched = {item["rel"]: by_rel[item["rel"]] for item in files if item["rel"] in by_rel}
+    title_key = normalize_title(title)
+    by_episode: dict[tuple[int, int], dict[str, Any]] = {}
+    for event in events:
+        if (
+            event.get("event") != "watched"
+            or event.get("kind") != "episode"
+            or normalize_title(str(event.get("title", ""))) != title_key
+        ):
+            continue
+        try:
+            key = (int(event["season"]), int(event["episode"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+        row = by_episode.setdefault(key, {"views": 0, "ts": ""})
+        row["views"] += 1
+        row["ts"] = max(row["ts"], str(event.get("ts", "")))
+    for item in files:
+        if item["rel"] in watched or item.get("season") is None or item.get("episode") is None:
+            continue
+        recovered = by_episode.get((int(item["season"]), int(item["episode"])))
+        if recovered:
+            watched[item["rel"]] = recovered
+    return watched
+
+
 def ago(ts: str, now: datetime.datetime | None = None) -> str:
     """``just now`` / ``12 min ago`` / ``3 h ago`` / ``2 days ago`` for an ISO timestamp."""
     now = now or datetime.datetime.now()
