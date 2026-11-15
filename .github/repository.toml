@@ -4,6 +4,7 @@
 [repository]
 # One line shown on GitHub. Keep it free of private repository names and local paths.
 description = "Shared cron, systemd, and macOS launchd scheduling helpers: declarative job manifests and rendered scheduler units."
+topics = ["cron", "systemd", "launchd", "scheduler", "python", "devops", "automation"]
 
 [main_branch]
 # Direct commits and pushes to main are refused unless this is true.
