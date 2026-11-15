@@ -1,0 +1,24 @@
+# The crew-chief listener as a host service: the `host` mode of crew-chief's deploy/deploy.sh.
+# `deploy/deploy.sh --mode k3s up` stops this service before the pod starts (two listeners on one mailbox would
+# answer every email twice), and `--mode host up` stops the pod and starts this one again.
+# Copy to listener-service.local.toml with real paths, then:
+#   clockwork install --manifest examples/crew-chief/listener-service.local.toml --target systemd-user
+#
+[[jobs]]
+name = "crew-chief-listener"
+description = "crew-chief shock-relay listener — poll Signal and Gmail for commands"
+scope = "user"
+service_type = "simple"
+working_directory = "%h/git/util-repos/crew-chief"
+exec_start = "%h/git/util-repos/crew-chief/scripts/run_listener.sh"
+poll_interval = "30s"
+after = ["network.target"]
+restart = "on-failure"
+restart_sec = "5"
+standard_output = "journal"
+standard_error = "journal"
+service_install_wanted_by = ["default.target"]
+
+[jobs.environment]
+CREW_CHIEF_LISTENER_CONFIG = "%h/git/util-repos/crew-chief/config/listener/config.toml"
+PYTHONPATH = "%h/git/util-repos/crew-chief/src"
