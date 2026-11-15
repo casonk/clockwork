@@ -116,7 +116,44 @@ def test_show_page_groups_episodes_by_season(client):
     assert "S01E02" in html
     assert "Episode guide" in html and "/api/library/episodes/shows/Breaking" in html
     assert "TVmaze" in html and "/api/torrent-search" in html
+    assert "Find whole season" in html and "Search season packs" in html
     assert "Genre folder" not in html
+
+
+def test_show_page_recovers_filed_watch_history_and_names_last_and_next(
+    client, tmp_path, monkeypatch
+):
+    log = tmp_path / "watch-log.jsonl"
+    log.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "event": "watched",
+                    "kind": "episode",
+                    "title": "Breaking.Bad.Season.1.1080p",
+                    "rel": f"downloads/Breaking.Bad.S01E0{episode}.mkv",
+                    "season": 1,
+                    "episode": episode,
+                    "ts": f"2026-11-0{episode}T12:00:00",
+                }
+            )
+            for episode in (1,)
+        )
+        + "\n"
+    )
+    monkeypatch.setenv("CLOCKWORK_WATCH_LOG_FILE", str(log))
+
+    html = client.get("/library/title/shows/Breaking Bad (2008)").get_data(as_text=True)
+
+    assert "Continue · S01E02" in html
+    assert "Last watched S01E01" in html
+    assert "Next up: S01E02" in html
+
+
+def test_browse_title_folder_name_opens_the_history_aware_details_page(client):
+    html = client.get("/library/browse/shows").get_data(as_text=True)
+
+    assert 'href="/library/title/shows/Breaking%20Bad%20(2008)">Breaking Bad (2008)</a>' in html
 
 
 def test_episode_guide_reports_owned_missing_new_and_upcoming(client, monkeypatch):
@@ -327,6 +364,32 @@ def test_browse_lists_folders_and_hides_release_clutter(client):
     assert "Seven_1995_1080p_David_Fincher.mp4" in title
     assert ".release" not in title
     assert "Details" in title
+
+
+def test_browse_season_marks_watched_and_unwatched_episodes(client, tmp_path, monkeypatch):
+    log = tmp_path / "watch-log.jsonl"
+    log.write_text(
+        json.dumps(
+            {
+                "event": "watched",
+                "kind": "episode",
+                "title": "Breaking.Bad.Season.1.1080p",
+                "rel": "downloads/Breaking.Bad.S01E01.mkv",
+                "season": 1,
+                "episode": 1,
+                "ts": "2026-11-01T12:00:00",
+            }
+        )
+        + "\n"
+    )
+    monkeypatch.setenv("CLOCKWORK_WATCH_LOG_FILE", str(log))
+
+    html = client.get("/library/browse/shows/Breaking Bad (2008)/Season 01").get_data(as_text=True)
+
+    assert html.count("✓ watched") == 1
+    assert html.count("○ not watched") == 1
+    assert "Breaking_Bad_S01E01_1080p.mkv" in html
+    assert "Breaking_Bad_S01E02_1080p.mkv" in html
 
 
 def test_browse_exposes_catalog_rating_and_description(client):

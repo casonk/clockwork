@@ -4197,6 +4197,22 @@ def _search_torrents_csv(query: str, limit: int = 20) -> list[dict]:
     return sorted(results, key=lambda r: r["seeders"], reverse=True)[:limit]
 
 
+def _merge_torrent_results(*groups: list[dict], limit: int = 40) -> list[dict]:
+    """Merge providers by info hash, preserving source precedence for duplicates."""
+    seen: set[str] = set()
+    merged = []
+    for group in groups:
+        for result in group:
+            magnet = str(result.get("magnet") or "")
+            query = urllib.parse.parse_qs(magnet.partition("?")[2])
+            key = str(result.get("infohash") or query.get("xt", [magnet])[0]).casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(result)
+    return sorted(merged, key=lambda item: item.get("seeders", 0), reverse=True)[:limit]
+
+
 def _search_nyaa(query: str, limit: int = 20) -> list[dict]:
     """Search Nyaa.si RSS and return anime results sorted by seeders."""
     import urllib.parse as _up
@@ -8434,34 +8450,34 @@ def torrent_search():
         return jsonify({"error": "The read or listen library folder is not configured."}), 503
     season_raw = request.args.get("season", "").strip()
     episode_raw = request.args.get("episode", "").strip()
-    if (season_raw or episode_raw) and (not season_raw.isdigit() or not episode_raw.isdigit()):
+    if episode_raw and not season_raw:
+        return jsonify({"error": "An episode search also requires a season."}), 400
+    if (season_raw and not season_raw.isdigit()) or (episode_raw and not episode_raw.isdigit()):
         return jsonify({"error": "Season and episode must be positive numbers."}), 400
     season = int(season_raw) if season_raw else None
     episode = int(episode_raw) if episode_raw else None
-    if season is not None and (season < 1 or episode < 1):
+    if season is not None and (season < 1 or (episode is not None and episode < 1)):
         return jsonify({"error": "Season and episode must be positive numbers."}), 400
+    if season is not None and not title:
+        return jsonify({"error": "A season search requires a title."}), 400
     if not q:
         return jsonify({"results": []})
     if cat == "anime":
         results = _search_nyaa(q)
     else:
         results = _search_torrents_csv(q)
+        if cat == "tv shows":
+            pirate_query = title if season is not None else q
+            results = _merge_torrent_results(
+                results,
+                release_sources.search_piratebay(
+                    pirate_query,
+                    limit=100 if season is not None else 20,
+                ),
+                limit=120 if season is not None else 40,
+            )
     if media_kind in ("read", "listen"):
-        from urllib.parse import parse_qs
-
-        def release_key(result: dict) -> str:
-            magnet = result.get("magnet", "")
-            query = magnet.partition("?")[2]
-            xt = parse_qs(query).get("xt", [""])[0].casefold()
-            return xt or magnet.casefold()
-
-        seen = {release_key(result) for result in results}
-        for result in release_sources.search_prowlarr(q, media_kind):
-            key = release_key(result)
-            if key not in seen:
-                seen.add(key)
-                results.append(result)
-        results = sorted(results, key=lambda result: result.get("seeders", 0), reverse=True)[:40]
+        results = _merge_torrent_results(results, release_sources.search_prowlarr(q, media_kind))
     if season is not None:
         wanted = _normalize_media_title(title)
         selected = []
@@ -8473,10 +8489,13 @@ def torrent_search():
             start, end = release["season"], release["season_end"] or release["season"]
             if not start <= season <= end:
                 continue
-            if release["release_type"] == "episode" and not (
-                release["episode"] <= episode <= (release["episode_end"] or release["episode"])
-            ):
-                continue
+            if release["release_type"] == "episode":
+                if episode is None:
+                    continue
+                if not (
+                    release["episode"] <= episode <= (release["episode_end"] or release["episode"])
+                ):
+                    continue
             selected.append(result)
         results = selected
     if media_kind and title:

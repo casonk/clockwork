@@ -236,6 +236,8 @@ Library pages (`web/library_pages.py`):
   backing `GET /api/library/episodes/shows/<title-folder>` endpoint returns
   show details, per-episode status, and counts. Ambiguous show names require
   choosing a TVmaze show ID; future episodes are counted but not downloadable.
+  TV searches merge torrents-csv with APIBay/The Pirate Bay and de-duplicate
+  releases by info hash; set `CLOCKWORK_PIRATEBAY_SEARCH=0` to disable APIBay.
 - `/library/play/<file>`: plays a video in the browser with its `.srt`
   subtitles (and embedded text subtitles) converted to WebVTT. MP4 with
   H.264/AAC plays directly with HTTP range seeking. Everything else (MKV,

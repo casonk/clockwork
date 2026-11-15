@@ -300,15 +300,16 @@ def title_page(rel: str):
     finally:
         if conn is not None:
             conn.close()
+    match = re.match(r"^(?P<title>.+?)(?: \((?P<year>\d{4})\))?$", folder.name)
+    title = meta.get("title") or (match.group("title") if match else folder.name)
     snapshot = _ai_snapshot()
-    watched = watch_log.watched_by_rel(watch_log.read())
+    watched = watch_log.watched_for_title(watch_log.read(), title, files)
     for item in files:
         item["ai"] = _ai_state(item, item["height"], snapshot)
         seen = watched.get(item["rel"])
         item["watched"] = (
             {"views": seen["views"], "ago": watch_log.ago(seen["ts"])} if seen else None
         )
-    match = re.match(r"^(?P<title>.+?)(?: \((?P<year>\d{4})\))?$", folder.name)
     kind = ml.SHOWS if _rel(folder).startswith(ml.SHOWS + "/") else ml.MOVIES
     seasons: dict[int, list[dict]] = {}
     if kind == ml.SHOWS:
@@ -320,10 +321,16 @@ def title_page(rel: str):
     if kind == ml.SHOWS:
         ordered = [e for _season, items in sorted(seasons.items()) for e in items]
         upcoming = watch_log.next_episode(ordered, watched)
-        if upcoming and any(e["watched"] for e in ordered):
-            resume = {"label": "Continue", "item": upcoming}
-        elif any(e["watched"] for e in ordered) and ordered:
-            resume = {"label": "All watched. Rewatch from the start", "item": ordered[0]}
+        seen = [e for e in ordered if e["watched"]]
+        last = max(seen, key=lambda e: watched[e["rel"]]["ts"]) if seen else None
+        if upcoming and last:
+            resume = {"label": "Continue", "item": upcoming, "last": last}
+        elif last and ordered:
+            resume = {
+                "label": "All watched. Rewatch from the start",
+                "item": ordered[0],
+                "last": last,
+            }
     elif files and files[0]["watched"]:
         resume = {"label": "Watched", "item": files[0]}
     extras = [
@@ -335,7 +342,7 @@ def title_page(rel: str):
     return render_template(
         "library-title.html",
         rel=_rel(folder),
-        title=meta.get("title") or (match.group("title") if match else folder.name),
+        title=title,
         year=meta.get("year") or (match.group("year") if match else None),
         kind=kind,
         meta=meta,
@@ -701,12 +708,15 @@ def browse(rel: str = ""):
         title_rows = (
             {
                 row["folder"]: {
+                    "title": row["title"],
                     "rating": row["rating"],
                     "description": row["plot"] or ", ".join(json.loads(row["genres"] or "[]")[:4]),
                     "has_plot": bool(row["plot"]),
                     "kind": row["kind"],
                 }
-                for row in conn.execute("SELECT folder, kind, rating, plot, genres FROM titles")
+                for row in conn.execute(
+                    "SELECT folder, kind, title, rating, plot, genres FROM titles"
+                )
             }
             if conn
             else {}
@@ -730,13 +740,31 @@ def browse(rel: str = ""):
                 }
             )
         elif child.is_file():
+            parsed = ml.parse_release_name(child.name)
             files.append(
                 {
                     "name": child.name,
                     "rel": child_rel,
                     "size": _format_size(child.stat().st_size),
                     "video": child.suffix.lower() in ml.VIDEO_EXTS,
+                    "season": parsed.season,
+                    "episode": parsed.episode,
                 }
+            )
+    title_meta = next(
+        (
+            meta
+            for folder, meta in title_rows.items()
+            if path == Path(folder).resolve() or Path(folder).resolve() in path.parents
+        ),
+        None,
+    )
+    if title_meta:
+        watched = watch_log.watched_for_title(watch_log.read(), title_meta["title"], files)
+        for item in files:
+            seen = watched.get(item["rel"])
+            item["watched"] = (
+                {"views": seen["views"], "ago": watch_log.ago(seen["ts"])} if seen else None
             )
     current_meta = title_rows.get(str(_root() / rel)) if rel else None
     is_title = current_meta is not None
@@ -747,6 +775,7 @@ def browse(rel: str = ""):
         files=files,
         is_title=is_title,
         current_meta=current_meta,
+        title_meta=title_meta,
         breadcrumbs=_breadcrumbs(rel),
     )
 

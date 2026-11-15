@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+- TV library pages retain watched badges and resume position after episodes are
+  filed into canonical show/season folders, show both the last watched and next
+  episode, and expose watched state while browsing a season directory.
+- Show organization now merges later seasons into an existing show instead of
+  leaving duplicate top-level release folders. Missing-episode guides can search
+  a whole season, and TV release search supplements torrents-csv with APIBay/The
+  Pirate Bay while merging duplicate info hashes.
 - Restore `examples/crew-chief/listener-service.toml` (it had been renamed `.retired`): the host listener is now one of crew-chief's three deployment modes (`dev`, `host`, `k3s`), not a retired service. Its header says how it relates to the K3s mode.
 - Retire the host crew-chief listener manifest, now that the listener runs in the K3s cluster: `examples/crew-chief/listener-service.toml` becomes `listener-service.toml.retired`, which Clockwork does not read. The file's header lists the steps to restore it.
 - Registry services owned by `./util-repos/crew-chief` (the cluster's Hubble UI) show in the Monitoring group on Home and in the top navigation instead of an unlisted Other group.
