@@ -560,3 +560,57 @@ def test_ecu_source_is_found_among_sibling_checkouts(tmp_path):
     (package / "__main__.py").write_text("")
     assert ecu._sibling_source(tmp_path) == tmp_path / "gpu-arbiter" / "src"
     assert ecu._sibling_source(tmp_path / "clockwork") is None
+
+
+_GPU_ERROR = (
+    "Unexpected error from cudaGetDeviceCount(). Did you run some cuda functions before calling "
+    "NumCudaDevices() that might have already set an error? Error 804: forward compatibility "
+    "was attempted on non supported HW"
+)
+
+
+def test_gpu_unavailable_is_told_apart_from_a_bad_video():
+    assert upscale.is_gpu_unavailable(_GPU_ERROR)
+    assert upscale.is_gpu_unavailable("Failed to initialize NVML: Driver/library version mismatch")
+    assert not upscale.is_gpu_unavailable("[Errno 32] Broken pipe")
+    assert not upscale.is_gpu_unavailable("CUDA out of memory. Tried to allocate 188.00 MiB")
+
+
+def test_forgive_gpu_failures_keeps_real_failures(tmp_path):
+    path = tmp_path / "failed.json"
+    path.write_text(json.dumps({"/a.mp4": _GPU_ERROR, "/b.mp4": "[Errno 32] Broken pipe"}))
+
+    assert upscale.forgive_gpu_failures(path) == 1
+    assert json.loads(path.read_text()) == {"/b.mp4": "[Errno 32] Broken pipe"}
+    assert upscale.forgive_gpu_failures(path) == 0
+
+
+def test_render_one_does_not_blame_the_video_for_an_unusable_gpu(tmp_path, monkeypatch):
+    root, conn = _catalog(tmp_path)
+    job = upscale.plan_jobs(root, conn)[0]
+    conn.close()
+    failed = tmp_path / "failed.json"
+    monkeypatch.setattr(upscale, "FAILED_FILE", failed)
+    monkeypatch.setattr(upscale, "has_room", lambda *_args: True)
+    monkeypatch.setattr(upscale, "write_status", lambda *_args, **_kw: None)
+    monkeypatch.setattr(upscale, "progress_reporter", lambda *_args, **_kw: None)
+
+    class NoGpu:
+        class throttle:  # noqa: N801 - mirrors Renderer.throttle
+            duty = 1.0
+            on_cooling = None
+
+        yield_requested = None
+
+        def stop(self):
+            pass
+
+        def render(self, *_args):
+            raise RuntimeError(_GPU_ERROR)
+
+    monkeypatch.setattr(upscale, "Renderer", NoGpu)
+
+    status = upscale.render_one(root, tmp_path / "lib.sqlite", 0, job.source)
+
+    assert status == upscale.GPU_UNAVAILABLE
+    assert upscale.load_failed(failed) == {}

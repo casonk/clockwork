@@ -380,6 +380,36 @@ def record_failure(source: Path, reason: str, path: Path | None = None) -> None:
     path.write_text(json.dumps(failed, indent=2))
 
 
+# render-one exit status: the GPU itself is unusable (driver/library mismatch after an update,
+# no device). It is the machine's fault, not the video's, so nothing is recorded against the file.
+GPU_UNAVAILABLE = 76
+_GPU_UNAVAILABLE_MARKERS = (
+    "cudagetdevicecount",
+    "driver/library version mismatch",
+    "forward compatibility was attempted",
+    "no cuda gpus are available",
+    "cuda driver version is insufficient",
+    "torch not compiled with cuda",
+    "nvml",
+)
+
+
+def is_gpu_unavailable(reason: object) -> bool:
+    """True when ``reason`` says CUDA cannot initialise (as opposed to a per-video failure)."""
+    text = str(reason).lower()
+    return any(marker in text for marker in _GPU_UNAVAILABLE_MARKERS)
+
+
+def forgive_gpu_failures(path: Path | None = None) -> int:
+    """Drop failures that were really an unusable GPU, so those videos are retried."""
+    path = path or FAILED_FILE
+    failed = load_failed(path)
+    kept = {src: why for src, why in failed.items() if not is_gpu_unavailable(why)}
+    if len(kept) != len(failed):
+        path.write_text(json.dumps(kept, indent=2))
+    return len(failed) - len(kept)
+
+
 def load_priority(path: Path | None = None) -> list[str]:
     try:
         path = path or PRIORITY_FILE
@@ -975,6 +1005,8 @@ def render_one(root: Path, db: Path, min_free_gb: float, source: Path) -> int:
         return ecu.REQUEUED
     except Exception as exc:  # noqa: BLE001 - one bad file must not stop the queue
         print(f"upscale failed for {job.source}: {exc}", file=sys.stderr)
+        if is_gpu_unavailable(exc):
+            return GPU_UNAVAILABLE
         record_failure(job.source, str(exc))
     return 0
 
@@ -1037,6 +1069,9 @@ def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
     signal.signal(signal.SIGTERM, lambda _signum, _frame: stopping.set())
     signal.signal(signal.SIGINT, lambda _signum, _frame: stopping.set())
     finished = 0
+    forgiven = forgive_gpu_failures()
+    if forgiven:
+        print(f"forgave {forgiven} failure(s) caused by an unusable GPU", file=sys.stderr)
     while not stopping.is_set():
         base = {"state": "idle", "finished": finished}
         if not wait_while_paused(stopping.is_set, base) and stopping.is_set():
@@ -1069,6 +1104,19 @@ def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
                 if wait_while_paused(stopping.is_set, base | {"next": job.title}):
                     continue
                 pause_after_requeue(base, job, stopping.is_set)
+                continue
+            if result == GPU_UNAVAILABLE:
+                write_status(
+                    {
+                        **base,
+                        "state": "gpu-unavailable",
+                        "next": job.title,
+                        "reason": "CUDA cannot initialise (driver/library mismatch? reboot)",
+                    }
+                )
+                if once:
+                    return 0
+                wait_for_request(900, stopping.is_set)
                 continue
             if result != 0:
                 write_status({**base, "state": "ecu-error", "next": job.title})
