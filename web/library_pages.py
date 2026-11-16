@@ -539,6 +539,16 @@ def log_watched(rel: str):
     return jsonify({"logged": event is not None})
 
 
+@library_pages.post("/library/play/<path:rel>/active")
+def note_playback_active(rel: str):
+    """A player heartbeat keeps background upscaling off the library disk."""
+    video = _resolve(rel)
+    if not video.is_file() or video.suffix.lower() not in ml.VIDEO_EXTS:
+        abort(404)
+    upscale.note_playback()
+    return "", 204
+
+
 @library_pages.post("/library/play/<path:rel>/upscale")
 def request_upscale(rel: str):
     video = _resolve(rel)
@@ -607,6 +617,7 @@ def _quality_arg() -> str:
 
 @library_pages.get("/library/stream/<path:rel>/index.m3u8")
 def stream_playlist(rel: str):
+    upscale.note_playback()
     quality = _quality_arg()
     variant = _variant_arg()
     session = streaming.manager().session(_stream_source(rel), quality)
@@ -647,6 +658,7 @@ def _note_segment(rel: str, index: int, duration: float) -> None:
 
 @library_pages.get("/library/stream/<path:rel>/seg/<int:index>.ts")
 def stream_segment(rel: str, index: int):
+    upscale.note_playback()
     source = _stream_source(rel)
     quality = _quality_arg()
     segment = streaming.manager().segment(source, index, quality)
@@ -667,6 +679,8 @@ def media_file(rel: str):
     if not path.is_file() or path.suffix.lower() not in ml.VIDEO_EXTS | ml.COMPANION_EXTS:
         abort(404)
     download = request.args.get("download") == "1"
+    if not download and path.suffix.lower() in ml.VIDEO_EXTS:
+        upscale.note_playback()
     # conditional=True answers Range requests, which seeking in <video> needs.
     return send_file(path, conditional=True, as_attachment=download, download_name=path.name)
 
