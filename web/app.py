@@ -4492,6 +4492,89 @@ def _completed_local_torrents() -> list[dict]:
     return payload["torrents"]
 
 
+def _disk_downloads(torrents: list[dict]) -> tuple[list[dict], list[str]]:
+    """Torrent-shaped records for entries sitting in the torrent dirs.
+
+    Transmission forgets a torrent once it is removed (Magneto's "Remove" keeps the files), so
+    filing from its live list alone strands a finished download. Anything on disk that no live
+    torrent names is treated as complete; ``_has_incomplete_files`` still rejects partials.
+    Returns ``(records, errors)``; an unreadable directory is reported, not fatal.
+    """
+    tracked = {(str(t.get("downloadDir") or ""), str(t.get("name") or "")) for t in torrents}
+    records: list[dict] = []
+    errors: list[str] = []
+    for src_dir in _EXTRA_WATCH_DIRS:
+        try:
+            entries = list(src_dir.iterdir())
+        except OSError as exc:
+            errors.append(f"{src_dir}: {exc.strerror or exc}")
+            continue
+        for entry in entries:
+            if entry.name.startswith(".") or (str(src_dir), entry.name) in tracked:
+                continue
+            records.append(
+                {
+                    "name": entry.name,
+                    "downloadDir": str(src_dir),
+                    "percentDone": 1,
+                    "untracked": True,
+                }
+            )
+    return records, errors
+
+
+def _with_disk_downloads(torrents: list[dict]) -> tuple[list[dict], list[str]]:
+    extra, errors = _disk_downloads(torrents)
+    return list(torrents) + extra, errors
+
+
+def _show_folder_title(folder: str) -> tuple[str, int | None]:
+    """Split a library folder like ``Joe Pickett (2021)`` into title and year."""
+    match = re.match(r"^(.*?)\s*\((\d{4})\)$", folder)
+    if match:
+        return match.group(1), int(match.group(2))
+    return folder, None
+
+
+def auto_file_completed_series() -> dict:
+    """File completed episodes into the show folders that already exist in the library.
+
+    Runs without a live torrent and without a button press, so a finished download is
+    never stranded by removing it from Transmission. It only fills existing show folders;
+    new shows are still started from To Watch.
+    """
+    try:
+        torrents = _completed_local_torrents()
+        status_error = ""
+    except Exception as exc:  # Magneto down: disk-only filing is still valid
+        torrents = []
+        status_error = str(exc)
+    torrents, disk_errors = _with_disk_downloads(torrents)
+    result: dict = {"linked": [], "skipped": [], "errors": list(disk_errors)}
+    if status_error:
+        result["errors"].append(f"magneto status unavailable: {status_error}")
+    shows = WATCH_DIR / media_library.SHOWS
+    try:
+        folders = sorted(
+            p.name for p in shows.iterdir() if p.is_dir() and not p.name.startswith(".")
+        )
+    except OSError as exc:
+        result["errors"].append(f"{shows}: {exc.strerror or exc}")
+        return result
+    release_titles = {
+        _normalize_media_title(media_library.parse_release_name(str(t.get("name") or "")).title)
+        for t in torrents
+    }
+    for folder in folders:
+        title, year = _show_folder_title(folder)
+        if _normalize_media_title(title) not in release_titles:
+            continue
+        built = _build_series_library(title, year, torrents)
+        for key in ("linked", "skipped", "errors"):
+            result[key].extend(built[key])
+    return result
+
+
 def _build_series_library(title: str, year: int | None, torrents: list[dict]) -> dict:
     """Link completed episode files into one show/season tree without moving seeds."""
     normalized_title = _normalize_media_title(title)
@@ -8424,7 +8507,13 @@ def series_build_api():
     else:
         return jsonify({"ok": False, "error": "Invalid series year."}), 400
     try:
-        result = _build_series_library(title, year, _completed_local_torrents())
+        try:
+            torrents = _completed_local_torrents()
+        except Exception:  # Magneto down: the files on disk can still be filed
+            torrents = []
+        torrents, disk_errors = _with_disk_downloads(torrents)
+        result = _build_series_library(title, year, torrents)
+        result["errors"] = disk_errors + result["errors"]
     except (OSError, ValueError, RuntimeError) as exc:
         return jsonify({"ok": False, "error": str(exc)}), 503
     return jsonify({"ok": True, **result})

@@ -2588,3 +2588,85 @@ def test_to_eat_keeps_cuisine_and_place_and_links_a_map(client, list_files):
     html = client.get("/to-eat").get_data(as_text=True)
     assert "To Eat" in html and "google.com/maps/search" in html
     assert "Pizza" in html and "Phoenix, AZ" in html
+
+
+def test_series_build_files_untracked_downloads_left_on_disk(client, tmp_path, monkeypatch):
+    """A finished torrent removed from Transmission (files kept) must still be filed."""
+    downloads = tmp_path / "downloads"
+    pack = downloads / "Example.Show.S02.1080p"
+    pack.mkdir(parents=True)
+    (pack / "Example.Show.S02E01.mkv").write_bytes(b"video")
+    (pack / "Example.Show.S02E02.mkv.part").write_bytes(b"partial")
+    monkeypatch.setattr(web_app, "WATCH_DIR", tmp_path / "watch")
+    monkeypatch.setattr(web_app, "_EXTRA_WATCH_DIRS", [downloads])
+    monkeypatch.setattr(web_app, "_completed_local_torrents", lambda: [])
+
+    response = client.post(
+        "/api/series-build",
+        json={"title": "Example Show", "year": 2020},
+        headers={"X-CSRF-Token": _csrf(client, "/api/watch")},
+    )
+
+    assert response.get_json()["linked"] == []  # partial download blocks the whole pack
+    (pack / "Example.Show.S02E02.mkv.part").unlink()
+    response = client.post(
+        "/api/series-build",
+        json={"title": "Example Show", "year": 2020},
+        headers={"X-CSRF-Token": _csrf(client, "/api/watch")},
+    )
+    assert response.get_json()["linked"] == [
+        "shows/Example Show (2020)/Season 02/Example.Show.S02E01.mkv"
+    ]
+
+
+def test_series_build_survives_magneto_down_and_unreadable_dir(client, tmp_path, monkeypatch):
+    def boom():
+        raise RuntimeError("magneto down")
+
+    monkeypatch.setattr(web_app, "WATCH_DIR", tmp_path / "watch")
+    monkeypatch.setattr(web_app, "_EXTRA_WATCH_DIRS", [tmp_path / "missing"])
+    monkeypatch.setattr(web_app, "_completed_local_torrents", boom)
+
+    response = client.post(
+        "/api/series-build",
+        json={"title": "Example Show", "year": 2020},
+        headers={"X-CSRF-Token": _csrf(client, "/api/watch")},
+    )
+
+    body = response.get_json()
+    assert response.status_code == 200 and body["ok"] is True
+    assert body["linked"] == [] and len(body["errors"]) == 1
+
+
+def test_auto_file_completed_series_fills_existing_show_folders_only(tmp_path, monkeypatch):
+    downloads = tmp_path / "downloads"
+    library = tmp_path / "watch"
+    (library / "shows" / "Joe Pickett (2021)" / "Season 01").mkdir(parents=True)
+    pack = downloads / "Joe.Pickett.S02.PROPER.1080p.WEBRip.x265[eztv.re]"
+    pack.mkdir(parents=True)
+    episode = pack / "Joe.Pickett.S02E01.1080p.WEBRip.x265[eztv.re].mp4"
+    episode.write_bytes(b"video")
+    stranger = downloads / "Brand.New.Show.S01E01.mkv"
+    stranger.write_bytes(b"video")
+    monkeypatch.setattr(web_app, "WATCH_DIR", library)
+    monkeypatch.setattr(web_app, "_EXTRA_WATCH_DIRS", [downloads])
+
+    def boom():
+        raise RuntimeError("magneto down")
+
+    monkeypatch.setattr(web_app, "_completed_local_torrents", boom)
+
+    first = web_app.auto_file_completed_series()
+    second = web_app.auto_file_completed_series()
+
+    target = library / "shows" / "Joe Pickett (2021)" / "Season 02" / episode.name
+    assert target.resolve() == episode
+    assert first["linked"] == [f"shows/Joe Pickett (2021)/Season 02/{episode.name}"]
+    assert second["linked"] == []
+    assert not (library / "shows" / "Brand New Show").exists()
+    assert any("magneto status unavailable" in e for e in first["errors"])
+
+
+def test_show_folder_title_splits_year():
+    assert web_app._show_folder_title("Joe Pickett (2021)") == ("Joe Pickett", 2021)
+    assert web_app._show_folder_title("No Year") == ("No Year", None)

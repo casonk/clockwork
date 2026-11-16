@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- Completed downloads are no longer stranded when their torrent leaves Transmission. **File
+  completed episodes** now also reads the torrent directories on disk (not only Transmission's live
+  list), and Magneto being down no longer blocks it. A new `scripts/file_completed_series.py` and
+  `examples/clockwork/series-filing.toml` job (every 10 minutes) link finished episodes into show
+  folders that already exist, never creating new ones.
 - Listening now offers all time, 2-year, 1-year, 6-month, 90-day, 30-day and 7-day views. Its
   selected-window timeline is a calendar-aligned line graph (daily, weekly, or monthly as the range
   grows), zero-fills inactive periods, and uses listening-tracker's complete private daily history instead
