@@ -25,14 +25,41 @@ SUMMARY = {
             "artists": [{"name": "Band", "plays": 30}, {"name": "Duo", "plays": 15}],
             "albums": [{"name": "LP", "artist": "Band", "plays": 12}],
         },
-        "365d": {"plays": 40, "hours": 130.0, "tracks": [], "artists": [], "albums": []},
+        "365d": {
+            "plays": 40,
+            "hours": 130.0,
+            "tracks": [],
+            "artists": [],
+            "albums": [],
+        },
+        "730d": {
+            "plays": 70,
+            "hours": 230.0,
+            "tracks": [],
+            "artists": [],
+            "albums": [],
+        },
+        "180d": {"plays": 20, "hours": 65.0, "tracks": [], "artists": [], "albums": []},
+        "90d": {"plays": 12, "hours": 40.0, "tracks": [], "artists": [], "albums": []},
         "30d": {"plays": 7, "hours": 22.5, "tracks": [], "artists": [], "albums": []},
+        "7d": {"plays": 3, "hours": 10.0, "tracks": [], "artists": [], "albums": []},
     },
     "by_hour": [0] * 8 + [5, 9, 3] + [0] * 13,
     "by_weekday": [10, 20, 30, 40, 50, 60, 70],
     "by_month": {"2026-09": 10, "2026-10": 30, "2026-11": 5},
+    "by_day": {"2026-10-08": 2, "2026-10-20": 4, "2026-11-06": 3},
+    "by_day_ms": {
+        "2026-10-08": 3_600_000,
+        "2026-10-20": 7_200_000,
+        "2026-11-06": 1_800_000,
+    },
     "recent": [
-        {"played_at": "2026-11-06T12:00:00Z", "name": "Latest", "artist": "Band", "album": "LP"}
+        {
+            "played_at": "2026-11-06T12:00:00Z",
+            "name": "Latest",
+            "artist": "Band",
+            "album": "LP",
+        }
     ],
 }
 
@@ -53,12 +80,65 @@ def test_page_shows_the_top_lists_and_escapes_names(client):
     assert "Top artists" in html and "Top tracks" in html and "Top albums" in html
     assert "Song &lt;One&gt;" in html and "Song <One>" not in html
     assert "410.5" in html and "since 2021-05-01" in html and "Latest" in html
+    assert "https://open.spotify.com/search/Band" in html
+    assert "https://open.spotify.com/search/Band%20Song%20%3COne%3E" in html
+    assert "https://open.spotify.com/search/Band%20LP" in html
 
 
 def test_windows_switch_the_numbers(client):
     html = client.get("/listening?window=30d").get_data(as_text=True)
     assert "22.5" in html and "410.5" not in html
     assert 'aria-current="page">Last 30 days' in html
+
+
+def test_extended_windows_and_selected_timeline_render(client):
+    html = client.get("/listening?window=7d").get_data(as_text=True)
+    assert 'aria-current="page">Last 7 days' in html
+    assert "Last 2 years" in html and "Last 6 months" in html and "Last 90 days" in html
+    assert 'aria-label="Daily plays for the selected time window"' in html
+    view = web_app._listening_view(SUMMARY, "30d")
+    assert len(view["timeline"]) == 30
+    assert view["timeline"][-1] == {"label": "2026-11-06", "value": 3, "pct": 75.0}
+    assert view["timeline_ticks"][-1] == {"label": "Nov 6", "x": 100.0, "edge": "end"}
+
+
+def test_custom_date_range_changes_the_timeline(client, monkeypatch):
+    monkeypatch.setattr(
+        web_app,
+        "_listening_custom_stats",
+        lambda _start, _end: {
+            "plays": 7,
+            "hours": 2.5,
+            "tracks": [],
+            "artists": [],
+            "albums": [],
+            "by_hour": [0] * 24,
+            "by_weekday": [0] * 7,
+            "recent": [],
+        },
+    )
+    html = client.get("/listening?window=all&start=2026-10-20&end=2026-11-06").get_data(
+        as_text=True
+    )
+    assert "2026-10-20 to 2026-11-06" in html
+    assert 'value="2026-10-20"' in html and 'value="2026-11-06"' in html
+    assert 'aria-current="page">Custom' in html
+    assert 'aria-current="page">All time' not in html
+    assert "At a glance · Custom range" in html
+    view = web_app._listening_view(
+        SUMMARY,
+        "all",
+        web_app.datetime.date(2026, 10, 20),
+        web_app.datetime.date(2026, 11, 6),
+    )
+    assert len(view["timeline"]) == 18
+    assert sum(point["value"] for point in view["timeline"]) == 7
+    assert (view["plays"], view["hours"]) == (7, 2.5)
+
+
+def test_invalid_custom_date_range_fails_soft(client):
+    html = client.get("/listening?start=2026-11-06&end=2026-10-20").get_data(as_text=True)
+    assert "Enter both custom dates" in html
 
 
 def test_an_unknown_window_falls_back_to_all_time(client):
@@ -76,6 +156,7 @@ def test_charts_have_a_table_view_and_labels(client):
     html = client.get("/listening").get_data(as_text=True)
     assert html.count('class="table-view"') == 2
     assert 'aria-label="Plays by hour of day"' in html
+    assert 'aria-label="Monthly plays for the selected time window"' in html
 
 
 def test_missing_summary_explains_how_to_make_one(client):

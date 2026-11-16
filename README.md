@@ -393,7 +393,7 @@ interface, so a new service is one subclass plus its item fields in `_simple_lis
 
 | Provider | Pages | Capabilities | Status |
 |---|---|---|---|
-| Spotify | To Listen | link, browse, write | live |
+| Spotify | To Listen | link, browse, write | live; browser separates owned and followed playlists, with opt-in YouTube match suggestions |
 | YouTube | To Watch, To Listen | link, browse, write | live |
 | Apple Music | To Listen | link | links only: playlist sync needs a MusicKit developer token (Apple Developer Program) and a user token |
 | Apple TV | To Watch | link | links only: Apple publishes no watchlist or Up Next API, so nothing can sync |
@@ -425,6 +425,13 @@ cannot hold them, so they are never pushed. Nothing is ever removed on either si
 collisions are left alone. Since Spotify's February 2026 API changes, development-mode apps can
 need a Premium owner and may be refused write access; a refused push is reported on the page and
 the read-only link and import still work.
+
+The **Playlists** browser lists every playlist returned by Spotify, separated into ones you own and
+ones you follow. For Spotify tracks and episodes it always offers a direct YouTube search link, and
+**Top YouTube matches** performs an explicit, read-only search through a connected YouTube account.
+Suggestions are never saved, linked, copied, or added to a playlist automatically; choose a result
+and link it yourself if it is the right video. Each lookup returns at most three candidates and is
+briefly cached.
 
 weak-denoise twin (`CLOCKWORK_UPSCALE_DENOISE`, default 0.5) so film grain and
 skin texture survive. The queue runs lowest resolution first, newest downloads

@@ -204,36 +204,7 @@
       <a class="action-btn" href="{{ url_for('personal_library.browse', kind=cfg.key) }}" title="Browse local {{ cfg.title|lower }} files">{{ '🎧' if cfg.key == 'listen' else '📚' }} Library</a>
     {% endif %}
     {% if cfg.key in ("watch", "listen") %}
-      <form method="post" action="/{{ cfg.page }}/sync-youtube">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button class="action-btn" type="submit"{% if not youtube_status.configured %} disabled{% endif %}
-                title="{% if youtube_status.configured %}Pull playlist videos into Clockwork and push explicitly linked active items to every configured account{% else %}Configure YouTube OAuth and this list's playlist ID first{% endif %}">↔ Sync YouTube</button>
-      </form>
-      <form method="post" action="/youtube/create-playlists">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="next" value="/{{ cfg.page }}">
-        <button class="action-btn" type="submit"{% if not youtube_account_count %} disabled{% endif %}
-                title="Create only missing private To Watch and To Listen playlists for authorized accounts">＋ YouTube Lists</button>
-      </form>
-      <a class="action-btn" href="/{{ cfg.page }}/playlist" title="Browse the linked playlists here, next to what is already in this list">📋 Playlists</a>
-      {% for playlist in youtube_playlists %}
-        <a class="action-btn" href="{{ playlist.url }}" target="_blank" rel="noopener noreferrer"
-           title="Open this list's private YouTube playlist ({{ playlist.account }})">▶ Playlist{% if youtube_playlists|length > 1 %} · {{ playlist.account }}{% endif %}</a>
-      {% endfor %}
-    {% endif %}
-    {% if cfg.key == "listen" %}
-      <form method="post" action="/to-listen/sync-spotify">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button class="action-btn" type="submit"{% if not spotify_status.configured %} disabled{% endif %}
-                title="{% if spotify_status.configured %}Pull playlist tracks into Clockwork and push linked tracks and episodes that are still to listen{% else %}Authorize Spotify (scripts/authorize_spotify.py --write) and create the playlist first{% endif %}">↔ Sync Spotify</button>
-      </form>
-      <form method="post" action="/spotify/create-playlist">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="next" value="/{{ cfg.page }}">
-        <button class="action-btn" type="submit"{% if not spotify_status.credential_file_present %} disabled{% endif %}
-                title="Create (or adopt) a private To Listen playlist on Spotify">＋ Spotify List</button>
-      </form>
-      {% if spotify_playlist_url %}<a class="action-btn" href="{{ spotify_playlist_url }}" target="_blank" rel="noopener noreferrer" title="Open the private To Listen playlist on Spotify">🎵 Spotify Playlist</a>{% endif %}
+      <a class="action-btn" href="/{{ cfg.page }}/playlist" title="Browse linked Spotify and YouTube playlists, choose a source tab, and manage copies">📋 Playlists</a>
     {% endif %}
     {% if cfg.get("holdings_sync") %}
       <form method="post" action="/to-invest/sync-holdings">

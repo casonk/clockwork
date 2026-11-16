@@ -87,6 +87,39 @@ def test_video_id_from_url_rejects_non_video_urls(url):
         youtube_api.video_id_from_url(url)
 
 
+def test_search_videos_returns_usable_candidates(tmp_path, monkeypatch):
+    settings = youtube_api.Settings(oauth_file=_credential_file(tmp_path / "youtube.json"))
+    monkeypatch.setattr(youtube_api, "access_token", lambda _credentials: "token")
+    seen = {}
+
+    def api_get(resource, _token, **params):
+        seen.update(resource=resource, params=params)
+        return {
+            "items": [
+                {
+                    "id": {"videoId": "abc_123-XYZ"},
+                    "snippet": {"title": "Song", "channelTitle": "Artist"},
+                },
+                {"id": {}, "snippet": {"title": "Unusable"}},
+            ]
+        }
+
+    monkeypatch.setattr(youtube_api, "_api_get", api_get)
+
+    assert youtube_api.search_videos(settings, "Artist – Song") == [
+        {
+            "video_id": "abc_123-XYZ",
+            "title": "Song",
+            "channel": "Artist",
+            "url": "https://www.youtube.com/watch?v=abc_123-XYZ",
+        }
+    ]
+    assert seen == {
+        "resource": "search",
+        "params": {"part": "snippet", "type": "video", "q": "Artist – Song", "maxResults": 3},
+    }
+
+
 class _Response:
     def __init__(self, payload: dict):
         self.payload = payload

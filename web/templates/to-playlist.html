@@ -45,6 +45,9 @@
     .pl:hover { background:color-mix(in srgb, var(--accent) 10%, transparent); }
     .pl.current { background:color-mix(in srgb, var(--accent) 18%, transparent); }
     .pl-name { overflow-wrap:anywhere; }
+    .playlist-group + .playlist-group { border-top:1px solid var(--border); margin-top:8px; padding-top:8px; }
+    .matches { display:grid; gap:4px; width:100%; padding-left:28px; }
+    .matches a { color:var(--accent); font-size:12px; overflow-wrap:anywhere; }
     @media (max-width: 720px) { .layout { grid-template-columns:1fr; } .plist { max-height:240px; } }
   </style>
   {% include "_theme_head.html" %}
@@ -79,18 +82,31 @@
         <aside>
           <h2>Your playlists · {{ view.playlists|length }}</h2>
           <section class="plist">
-            {% for pl in view.playlists %}
-              <a class="pl{% if view.current and pl.id == view.current.id %} current{% endif %}" href="/{{ cfg.page }}/playlist?source={{ chosen.id }}&playlist={{ pl.id }}">
-                <span class="pl-name">{{ pl.title }}</span>
-                <span class="small muted">{% if pl.count %}{{ pl.count }} · {% endif %}{% if pl.id == chosen.queue %}queue{% elif pl.private %}private{% endif %}</span>
-              </a>
-            {% endfor %}
+            {% if chosen.provider.id == 'spotify' %}
+              {% for group_name, group in [('Your playlists', view.owned_playlists), ('Followed playlists', view.followed_playlists)] %}
+                {% if group %}<div class="playlist-group"><h2>{{ group_name }} · {{ group|length }}</h2>
+                {% for pl in group %}
+                  <a class="pl{% if view.current and pl.id == view.current.id %} current{% endif %}" href="/{{ cfg.page }}/playlist?source={{ chosen.id }}&playlist={{ pl.id }}">
+                    <span class="pl-name">{{ pl.title }}</span>
+                    <span class="small muted">{% if pl.count %}{{ pl.count }} · {% endif %}{% if pl.id == chosen.queue %}queue{% elif pl.private %}private{% endif %}</span>
+                  </a>
+                {% endfor %}</div>{% endif %}
+              {% endfor %}
+            {% else %}
+              {% for pl in view.playlists %}
+                <a class="pl{% if view.current and pl.id == view.current.id %} current{% endif %}" href="/{{ cfg.page }}/playlist?source={{ chosen.id }}&playlist={{ pl.id }}">
+                  <span class="pl-name">{{ pl.title }}</span>
+                  <span class="small muted">{% if pl.count %}{{ pl.count }} · {% endif %}{% if pl.id == chosen.queue %}queue{% elif pl.private %}private{% endif %}</span>
+                </a>
+              {% endfor %}
+            {% endif %}
           </section>
         </aside>
         <div class="content">
           {% if view.current %}
             <div class="bar small muted">
               <strong style="color:var(--text)">{{ view.current.title }}</strong>
+              {% if view.current.ownership %}<span class="tag">{{ 'your playlist' if view.current.ownership == 'owned' else 'followed playlist' }}</span>{% endif %}
               <span>{{ view.entries|length }} item{{ '' if view.entries|length == 1 else 's' }} · {{ view.imported }} already in your list{% if view.unpushed %} · {{ view.unpushed }} linked item{{ '' if view.unpushed == 1 else 's' }} not yet pushed (Sync){% endif %}</span>
               <span class="grow"></span>
               {% if view.current.url %}<a href="{{ view.current.url }}" target="_blank" rel="noopener noreferrer">Open on {{ chosen.label.split(' ')[0] }} ↗</a>{% endif %}
@@ -136,6 +152,16 @@
                         <span class="tag {{ 'done' if entry.local.done else 'in' }}" title="In your list under {{ entry.local.category }}">{{ done_label if entry.local.done else 'in list' }} · {{ entry.local.category }}</span>
                       {% else %}
                         <span class="tag" title="Not in your list. Only the {{ cfg.title }} queue playlist is imported by Sync">not in list</span>
+                      {% endif %}
+                      {% if entry.youtube_search_url %}
+                        <a class="small" href="{{ entry.youtube_search_url }}" target="_blank" rel="noopener noreferrer">Search YouTube ↗</a>
+                        <a class="small" href="{{ entry.youtube_match_url }}">Top YouTube matches</a>
+                      {% endif %}
+                      {% if entry.youtube_match_error %}<span class="small muted">YouTube matches unavailable: {{ entry.youtube_match_error }}</span>{% endif %}
+                      {% if entry.youtube_matches %}
+                        <div class="matches">
+                          {% for match in entry.youtube_matches %}<a href="{{ match.url }}" target="_blank" rel="noopener noreferrer">{{ match.title }}{% if match.channel %} · {{ match.channel }}{% endif %} ↗</a>{% endfor %}
+                        </div>
                       {% endif %}
                     </div>
                   {% else %}
