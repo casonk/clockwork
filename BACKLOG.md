@@ -10,6 +10,11 @@ Mark items `[x]` when complete and move them to Done.
 
 ## Pending
 
+- [ ] [manual:2026-11-16] **Enable the series-filing job and torrent-dir access** — the login user
+  is not in the `snowbridge` group, so `/srv/snowbridge/share/torrents` (mode 2770) is unreadable
+  and disk-based filing reports "Permission denied". Add the user to `snowbridge`, restart
+  clockwork-web, then install `examples/clockwork/series-filing.local.toml` (user scope).
+
 - [ ] [manual:2026-11-11] **Apple Music playlist sync** — Apple Music is link-only today. A
   `MusicKit` adapter in `web/providers.py` (`accounts`/`playlists`/`entries` and
   `create_playlist`/`add` against `api.music.apple.com/v1/me/library`, then `BROWSE`/`WRITE` in
