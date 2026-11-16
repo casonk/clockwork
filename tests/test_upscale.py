@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import signal
 import subprocess
 import sys
 from fractions import Fraction
@@ -614,3 +615,49 @@ def test_render_one_does_not_blame_the_video_for_an_unusable_gpu(tmp_path, monke
 
     assert status == upscale.GPU_UNAVAILABLE
     assert upscale.load_failed(failed) == {}
+
+
+def test_gpu_backoff_doubles_from_a_minute_and_caps_at_an_hour():
+    waits = []
+    wait = 0.0
+    for _ in range(9):
+        wait = upscale.gpu_backoff(wait)
+        waits.append(wait)
+
+    assert waits[:4] == [60.0, 120.0, 240.0, 480.0]
+    assert waits[-1] == 3600.0 and max(waits) == 3600.0
+    assert upscale.gpu_backoff(3600.0) == 3600.0
+
+
+def test_run_backs_off_while_the_gpu_is_down_and_resets_after_a_render(tmp_path, monkeypatch):
+    root, conn = _catalog(tmp_path)
+    conn.close()
+    results = iter([upscale.GPU_UNAVAILABLE, upscale.GPU_UNAVAILABLE, 0, upscale.GPU_UNAVAILABLE])
+    waits: list[float] = []
+    statuses: list[dict] = []
+
+    def fake_wait(seconds, should_stop, *_args, **_kw):
+        waits.append(seconds)
+        if len(waits) == 3:
+            should_stop.__self__.set()  # the loop's own stop event
+
+    monkeypatch.setattr(upscale, "FAILED_FILE", tmp_path / "failed.json")
+    monkeypatch.setattr(upscale, "load_priority", lambda *_a, **_k: [])
+    monkeypatch.setattr(upscale, "has_room", lambda *_args: True)
+    monkeypatch.setattr(upscale, "drop_request", lambda *_args: None)
+    monkeypatch.setattr(upscale, "wait_while_paused", lambda *_a, **_k: False)
+    monkeypatch.setattr(upscale, "wait_for_request", fake_wait)
+    monkeypatch.setattr(upscale, "write_status", lambda status, *_a, **_k: statuses.append(status))
+    monkeypatch.setattr(upscale.ecu, "run_render", lambda *_args: next(results))
+    old_term, old_int = signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGINT)
+    try:
+        assert upscale.run(root, tmp_path / "lib.sqlite", 0) == 0
+    finally:
+        signal.signal(signal.SIGTERM, old_term)
+        signal.signal(signal.SIGINT, old_int)
+
+    # Two consecutive GPU failures double the wait; a render in between resets it to a minute.
+    assert waits == [60.0, 120.0, 60.0]
+    gpu_states = [s for s in statuses if s.get("state") == "gpu-unavailable"]
+    assert len(gpu_states) == 3 and all("retry_at" in s for s in gpu_states)
+    assert upscale.load_failed(tmp_path / "failed.json") == {}

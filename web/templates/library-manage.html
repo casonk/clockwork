@@ -61,7 +61,7 @@
   {% elif st.state == "disk-floor" %}
     <p class="small" style="margin-top:8px">Paused: the next render ({{ st.next }}) would take free space below the floor. Checking again hourly.</p>
   {% elif st.state == "gpu-unavailable" %}
-    <p class="small" style="margin-top:8px">⚠ Paused: the GPU is not usable ({{ st.reason }}). No video was marked failed. Checking again every 15 minutes; a reboot normally fixes a driver/library mismatch after an NVIDIA update.</p>
+    <p class="small" style="margin-top:8px">⚠ Paused: the GPU is not usable ({{ st.reason }}). No video was marked failed. Retrying{% if st.retry_at %} at {{ st.retry_at }}{% endif %}, backing off from 1 minute up to 1 hour; a reboot normally fixes a driver/library mismatch after an NVIDIA update.</p>
   {% elif st.state == "throttled" %}
     <p class="small" style="margin-top:8px">Paused: {{ st.activity or "live playback" }} needed the GPU, so the ECU is spacing out retries. Trying {{ st.next }} again at {{ st.retry_at }}.</p>
   {% elif st.state == "done" %}
