@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased
+- Listening now offers all time, 2-year, 1-year, 6-month, 90-day, 30-day and 7-day views. Its
+  selected-window timeline is a calendar-aligned line graph (daily, weekly, or monthly as the range
+  grows), zero-fills inactive periods, and uses listening-tracker's complete private daily history instead
+  of the former 24-month display slice. Date inputs add a custom timeline range without requiring a
+  new summary export; overlapping year ticks expand to month-and-year labels.
+- Spotify's To Listen playlist browser now separates playlists you own from playlists you follow.
+  Each Spotify track or episode has a direct YouTube search link plus an opt-in **Top YouTube
+  matches** lookup. The lookup returns at most three read-only candidates from a connected YouTube
+  account, is briefly cached, and never saves, links, copies, or queues a suggested video.
 - TV library pages retain watched badges and resume position after episodes are
   filed into canonical show/season folders, show both the last watched and next
   episode, and expose watched state while browsing a season directory.

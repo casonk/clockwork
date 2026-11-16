@@ -116,6 +116,40 @@ def test_playlist_items_reads_the_2026_item_shape_and_skips_local_and_unsupporte
     assert rows[1]["spotify_uri"] == f"spotify:episode:{EPISODE}"
 
 
+def test_user_playlists_marks_owned_and_followed_playlists(tmp_path, monkeypatch):
+    settings = spotify_api.Settings(oauth_file=_grant(tmp_path / "g.json"))
+    monkeypatch.setattr(spotify_api, "access_token", lambda _s: "tok")
+
+    def fake_get(path, _token, **_kwargs):
+        if path == "me":
+            return {"id": "my-account"}
+        assert path == "me/playlists"
+        return {
+            "items": [
+                {
+                    "id": ALBUM,
+                    "name": "Mine",
+                    "owner": {"id": "my-account", "display_name": "Me"},
+                    "items": {"total": 2},
+                },
+                {
+                    "id": TRACK,
+                    "name": "Followed",
+                    "owner": {"id": "someone-else", "display_name": "Friend"},
+                    "items": {"total": 3},
+                },
+            ],
+            "next": None,
+        }
+
+    monkeypatch.setattr(spotify_api, "_get", fake_get)
+
+    assert [row["ownership"] for row in spotify_api.user_playlists(settings)] == [
+        "owned",
+        "followed",
+    ]
+
+
 def test_sync_imports_pushes_only_active_tracks_and_is_idempotent(
     client, list_files, tmp_path, monkeypatch
 ):
@@ -231,6 +265,7 @@ def _two_playlists(monkeypatch, tmp_path, items_for):
                 "count": "2",
                 "url": "u1",
                 "owner": "",
+                "ownership": "owned",
                 "private": "private",
             },
             {
@@ -239,6 +274,7 @@ def _two_playlists(monkeypatch, tmp_path, items_for):
                 "count": "1",
                 "url": "u2",
                 "owner": "",
+                "ownership": "followed",
                 "private": "",
             },
         ],
@@ -304,7 +340,8 @@ def test_playlist_view_lists_every_playlist_and_opens_any_of_them(
     )
     # Default: the account's playlists in the sidebar, the To Listen queue opened.
     page = client.get("/to-listen/playlist").get_data(as_text=True)
-    assert "Road trip" in page and "Your playlists · 2" in page
+    assert "Road trip" in page and "Your playlists · 1" in page
+    assert "Followed playlists · 1" in page
     assert "A – Song" in page and "B – New" in page
     assert "listened · Albums" in page and "not in list" in page
     assert "1 linked item not yet pushed" in page  # the episode; the album is link-only
@@ -318,6 +355,45 @@ def test_playlist_view_lists_every_playlist_and_opens_any_of_them(
     bogus = client.get("/to-listen/playlist?source=spotify&playlist=" + "z" * 22)
     assert bogus.status_code == 200 and "A – Song" in bogus.get_data(as_text=True)
     assert client.get("/to-read/playlist").status_code == 404
+
+
+def test_to_listen_has_one_playlist_browser_control(client):
+    page = client.get("/to-listen").get_data(as_text=True)
+
+    assert page.count('href="/to-listen/playlist"') == 1
+    assert "📋 Playlists" in page
+    assert "Sync Spotify" not in page
+    assert "Sync YouTube" not in page
+
+
+def test_playlist_view_offers_opt_in_youtube_matches_for_spotify_entries(
+    client, list_files, tmp_path, monkeypatch
+):
+    _two_playlists(monkeypatch, tmp_path, {ALBUM: [_entry("track", TRACK, "A – Song")]})
+    youtube = _youtube_account(tmp_path, "YouTube")
+    monkeypatch.setattr(web_app.youtube_api, "settings_list_from_env", lambda: [youtube])
+    monkeypatch.setattr(
+        web_app.youtube_api,
+        "search_videos",
+        lambda _settings, query: [
+            {
+                "video_id": "video-1",
+                "title": f"{query} official audio",
+                "channel": "Artist",
+                "url": "https://www.youtube.com/watch?v=video-1",
+            }
+        ],
+    )
+    web_app._PLAYLIST_CACHE.clear()
+
+    page = client.get("/to-listen/playlist").get_data(as_text=True)
+    assert "Search YouTube" in page and "Top YouTube matches" in page
+
+    matched = client.get(
+        f"/to-listen/playlist?source=spotify&playlist={ALBUM}&youtube_match=spotify:track:{TRACK}"
+    ).get_data(as_text=True)
+    assert "A – Song official audio" in matched
+    assert "https://www.youtube.com/watch?v=video-1" in matched
 
 
 def test_playlist_view_reports_a_provider_error_instead_of_failing(

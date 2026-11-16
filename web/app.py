@@ -14,6 +14,7 @@ import plistlib
 import re
 import secrets
 import shutil
+import sqlite3
 import ssl
 import stat
 import subprocess
@@ -22,6 +23,7 @@ import tempfile
 import time
 import urllib.parse
 import uuid
+from collections import Counter
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -40,7 +42,11 @@ from flask import (
 )
 
 from clockwork.manifest import load_manifest
-from clockwork.render import _LAUNCHD_ENV_LOADER, render_launchd_plist, resolve_launchd_label
+from clockwork.render import (
+    _LAUNCHD_ENV_LOADER,
+    render_launchd_plist,
+    resolve_launchd_label,
+)
 
 try:
     from web import (
@@ -186,12 +192,14 @@ MAGNETO_MTLS_CLIENT_CERT = os.environ.get("CLOCKWORK_MAGNETO_MTLS_CLIENT_CERT", 
 MAGNETO_MTLS_CLIENT_KEY = os.environ.get("CLOCKWORK_MAGNETO_MTLS_CLIENT_KEY", "").strip()
 GROCERIES_HISTORY_FILE = Path(
     os.environ.get(
-        "CLOCKWORK_GROCERIES_HISTORY_FILE", BASE_DIR / "config" / "groceries-history.jsonl"
+        "CLOCKWORK_GROCERIES_HISTORY_FILE",
+        BASE_DIR / "config" / "groceries-history.jsonl",
     )
 )
 SHOPPING_HISTORY_FILE = Path(
     os.environ.get(
-        "CLOCKWORK_SHOPPING_HISTORY_FILE", BASE_DIR / "config" / "shopping-history.jsonl"
+        "CLOCKWORK_SHOPPING_HISTORY_FILE",
+        BASE_DIR / "config" / "shopping-history.jsonl",
     )
 )
 TODO_FILE = Path(os.environ.get("CLOCKWORK_TODO_FILE", BASE_DIR / "config" / "todo.json"))
@@ -203,7 +211,8 @@ WATCH_LIST_FILE = Path(
 )
 WATCH_LIST_HISTORY_FILE = Path(
     os.environ.get(
-        "CLOCKWORK_WATCH_LIST_HISTORY_FILE", BASE_DIR / "config" / "to-watch-history.jsonl"
+        "CLOCKWORK_WATCH_LIST_HISTORY_FILE",
+        BASE_DIR / "config" / "to-watch-history.jsonl",
     )
 )
 READ_LIST_FILE = Path(
@@ -211,7 +220,8 @@ READ_LIST_FILE = Path(
 )
 READ_LIST_HISTORY_FILE = Path(
     os.environ.get(
-        "CLOCKWORK_READ_LIST_HISTORY_FILE", BASE_DIR / "config" / "to-read-history.jsonl"
+        "CLOCKWORK_READ_LIST_HISTORY_FILE",
+        BASE_DIR / "config" / "to-read-history.jsonl",
     )
 )
 LISTEN_LIST_FILE = Path(
@@ -219,7 +229,8 @@ LISTEN_LIST_FILE = Path(
 )
 LISTEN_LIST_HISTORY_FILE = Path(
     os.environ.get(
-        "CLOCKWORK_LISTEN_LIST_HISTORY_FILE", BASE_DIR / "config" / "to-listen-history.jsonl"
+        "CLOCKWORK_LISTEN_LIST_HISTORY_FILE",
+        BASE_DIR / "config" / "to-listen-history.jsonl",
     )
 )
 EAT_LIST_FILE = Path(os.environ.get("CLOCKWORK_EAT_LIST_FILE", BASE_DIR / "config" / "to-eat.json"))
@@ -231,7 +242,8 @@ INVEST_LIST_FILE = Path(
 )
 INVEST_LIST_HISTORY_FILE = Path(
     os.environ.get(
-        "CLOCKWORK_INVEST_LIST_HISTORY_FILE", BASE_DIR / "config" / "to-invest-history.jsonl"
+        "CLOCKWORK_INVEST_LIST_HISTORY_FILE",
+        BASE_DIR / "config" / "to-invest-history.jsonl",
     )
 )
 CODE_LIST_FILE = Path(
@@ -239,7 +251,8 @@ CODE_LIST_FILE = Path(
 )
 CODE_LIST_HISTORY_FILE = Path(
     os.environ.get(
-        "CLOCKWORK_CODE_LIST_HISTORY_FILE", BASE_DIR / "config" / "to-code-history.jsonl"
+        "CLOCKWORK_CODE_LIST_HISTORY_FILE",
+        BASE_DIR / "config" / "to-code-history.jsonl",
     )
 )
 
@@ -448,7 +461,15 @@ def job_target(state: dict, manifest_rel: str, job_name: str) -> str:
 # Cron auto-generation helpers
 # ---------------------------------------------------------------------------
 
-_DOW = {"Mon": "1", "Tue": "2", "Wed": "3", "Thu": "4", "Fri": "5", "Sat": "6", "Sun": "0"}
+_DOW = {
+    "Mon": "1",
+    "Tue": "2",
+    "Wed": "3",
+    "Thu": "4",
+    "Fri": "5",
+    "Sat": "6",
+    "Sun": "0",
+}
 
 
 def _calendar_to_cron(on_calendar: str) -> tuple[str, str]:
@@ -631,7 +652,7 @@ def scan_repos() -> dict[str, dict]:
                     "service_name": _coerce(job.get("service_name")),
                     "launchd_label": _coerce(job.get("launchd_label")) or None,
                     "poll_interval": _coerce(job.get("poll_interval")),
-                    "timer": {k: _coerce(v) for k, v in timer.items()} if timer else None,
+                    "timer": ({k: _coerce(v) for k, v in timer.items()} if timer else None),
                     "cron": {k: _coerce(v) for k, v in cron.items()} if cron else None,
                     # dual_target = has both systemd timer and cron, user can choose
                     "dual_target": bool(timer) and bool(cron),
@@ -639,7 +660,11 @@ def scan_repos() -> dict[str, dict]:
             )
 
         repos[repo_name]["manifests"].append(
-            {"path": rel_path, "name": toml_file.stem.removesuffix(".local"), "jobs": jobs}
+            {
+                "path": rel_path,
+                "name": toml_file.stem.removesuffix(".local"),
+                "jobs": jobs,
+            }
         )
     return repos
 
@@ -667,7 +692,14 @@ def _run(*cmd: str, timeout: int = 30) -> tuple[int, str]:
         return 124, f"timed out after {timeout}s"
 
 
-_SYSTEMCTL_WRITE_CMDS = {"enable", "disable", "start", "stop", "restart", "daemon-reload"}
+_SYSTEMCTL_WRITE_CMDS = {
+    "enable",
+    "disable",
+    "start",
+    "stop",
+    "restart",
+    "daemon-reload",
+}
 _LAUNCHD_LABEL_PREFIX = "io.github.casonk.clockwork"
 _LAUNCHD_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _LAUNCHD_LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,248}$", re.ASCII)
@@ -724,15 +756,24 @@ def _traction_runtime_arguments(arguments: list[str]) -> tuple[list[str] | None,
     if arguments[:2] != ["/usr/bin/python3", "-c"]:
         return arguments, ""
     if len(arguments) != 4 or arguments[2] != _LAUNCHD_ENV_LOADER:
-        return None, "Traction Control adapter has a malformed Clockwork environment loader"
+        return (
+            None,
+            "Traction Control adapter has a malformed Clockwork environment loader",
+        )
     try:
         config = json.loads(arguments[-1])
     except (TypeError, json.JSONDecodeError) as exc:
         return None, f"Traction Control adapter has invalid loader JSON: {exc}"
     if not isinstance(config, dict) or set(config) != {"argv", "environment_files"}:
-        return None, "Traction Control adapter loader must contain only argv and environment_files"
+        return (
+            None,
+            "Traction Control adapter loader must contain only argv and environment_files",
+        )
     if json.dumps(config, sort_keys=True, separators=(",", ":")) != arguments[-1]:
-        return None, "Traction Control adapter loader JSON is not canonical Clockwork output"
+        return (
+            None,
+            "Traction Control adapter loader JSON is not canonical Clockwork output",
+        )
     runtime_arguments = config.get("argv")
     environment_files = config.get("environment_files")
     if (
@@ -750,7 +791,10 @@ def _traction_runtime_arguments(arguments: list[str]) -> tuple[list[str] | None,
     for entry in environment_files:
         path = entry[1:] if entry.startswith("-") else entry
         if not path or not Path(path).is_absolute():
-            return None, "Traction Control adapter loader environment file must be absolute"
+            return (
+                None,
+                "Traction Control adapter loader environment file must be absolute",
+            )
     return runtime_arguments, ""
 
 
@@ -790,7 +834,10 @@ def _validate_launchd_plist(path: Path, *, label: str, job_name: str) -> tuple[d
         or not all(isinstance(argument, str) and argument for argument in arguments)
         or not Path(arguments[0]).is_absolute()
     ):
-        return None, "LaunchAgent ProgramArguments must begin with an absolute executable"
+        return (
+            None,
+            "LaunchAgent ProgramArguments must begin with an absolute executable",
+        )
     for key, suffix in (
         ("StandardOutPath", "stdout"),
         ("StandardErrorPath", "stderr"),
@@ -806,7 +853,10 @@ def _validate_launchd_plist(path: Path, *, label: str, job_name: str) -> tuple[d
         if runtime_arguments is None:
             return None, runtime_error
         if len(runtime_arguments) < 4 or runtime_arguments[0] != "/bin/bash":
-            return None, "Traction Control adapter must invoke its runtime wrapper with /bin/bash"
+            return (
+                None,
+                "Traction Control adapter must invoke its runtime wrapper with /bin/bash",
+            )
         wrapper = Path(runtime_arguments[1])
         if (
             not wrapper.is_absolute()
@@ -815,11 +865,20 @@ def _validate_launchd_plist(path: Path, *, label: str, job_name: str) -> tuple[d
             or wrapper.parent.name != "scripts"
             or wrapper.parent.parent.name != "traction-control"
         ):
-            return None, "Traction Control adapter does not use its exact absolute runtime wrapper"
+            return (
+                None,
+                "Traction Control adapter does not use its exact absolute runtime wrapper",
+            )
         if runtime_arguments.count("--job") != 1:
-            return None, "Traction Control adapter must contain exactly one --job identity"
+            return (
+                None,
+                "Traction Control adapter must contain exactly one --job identity",
+            )
         if runtime_arguments[2:4] != ["--job", job_name]:
-            return None, "Traction Control adapter --job identity does not match the manifest"
+            return (
+                None,
+                "Traction Control adapter --job identity does not match the manifest",
+            )
     return payload, ""
 
 
@@ -842,7 +901,11 @@ def _launchd_render_plan(manifest_path: Path, job: dict) -> tuple[dict | None, b
         expected_label = resolve_launchd_label(candidate.name, candidate.launchd_label)
         if expected_label != primary_unit(job):
             return None, False, "manifest and UI launchd labels do not match"
-        return plistlib.loads(render_launchd_plist(candidate).encode("utf-8")), False, ""
+        return (
+            plistlib.loads(render_launchd_plist(candidate).encode("utf-8")),
+            False,
+            "",
+        )
     except ValueError as exc:
         message = str(exc)
         adapter_required = bool(candidate.launchd_label) and any(
@@ -1182,7 +1245,11 @@ def _do_enable_launchd(manifest_full_path: Path, job: dict) -> list[tuple[str, i
             if rc_check == 0:
                 rc_bootout, bootout_output = _launchctl("bootout", service, scope=scope)
                 results.append(
-                    (f"rollback launchctl bootout {service}", rc_bootout, bootout_output)
+                    (
+                        f"rollback launchctl bootout {service}",
+                        rc_bootout,
+                        bootout_output,
+                    )
                 )
             rc_disable, disable_output = _launchctl("disable", service, scope=scope)
             results.append((f"rollback launchctl disable {service}", rc_disable, disable_output))
@@ -1682,7 +1749,10 @@ def job_details():
             return jsonify({"error": "missing manifest job_name for launchd job"}), 400
         try:
             if resolve_launchd_label(job_name, unit) != unit:
-                return jsonify({"error": "launchd label does not match manifest job_name"}), 400
+                return (
+                    jsonify({"error": "launchd label does not match manifest job_name"}),
+                    400,
+                )
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         rc, launchd_out = _launchctl("print", _launchd_service(unit), scope=scope)
@@ -1801,7 +1871,11 @@ def job_details():
 def _ecu_binary() -> str | None:
     """The `ecu` command: CLOCKWORK_ECU_BIN, else PATH, else the user bin directory."""
     configured = os.environ.get("CLOCKWORK_ECU_BIN", "").strip()
-    for candidate in (configured, shutil.which("ecu") or "", str(Path.home() / ".local/bin/ecu")):
+    for candidate in (
+        configured,
+        shutil.which("ecu") or "",
+        str(Path.home() / ".local/bin/ecu"),
+    ):
         if candidate and os.access(candidate, os.X_OK):
             return candidate
     return None
@@ -1838,10 +1912,24 @@ def ecu_page():
 
 LISTENING_FILE = Path(
     os.environ.get(
-        "CLOCKWORK_TAPE_DECK_FILE", Path.home() / ".local" / "share" / "listening-tracker" / "summary.json"
+        "CLOCKWORK_TAPE_DECK_FILE",
+        Path.home() / ".local" / "share" / "listening-tracker" / "summary.json",
     )
 )
-LISTENING_WINDOWS = (("all", "All time"), ("365d", "Last year"), ("30d", "Last 30 days"))
+LISTENING_DB_FILE = Path(
+    os.environ.get("CLOCKWORK_TAPE_DECK_DB_FILE", LISTENING_FILE.with_name("plays.sqlite"))
+)
+LISTENING_WINDOWS = (
+    ("all", "All time"),
+    ("730d", "Last 2 years"),
+    ("365d", "Last year"),
+    ("180d", "Last 6 months"),
+    ("90d", "Last 90 days"),
+    ("30d", "Last 30 days"),
+    ("7d", "Last 7 days"),
+)
+_LISTENING_WINDOW_DAYS = {key: int(key[:-1]) for key, _label in LISTENING_WINDOWS if key != "all"}
+_LISTENING_WINDOW_LABELS = dict(LISTENING_WINDOWS)
 _WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 
@@ -1850,12 +1938,41 @@ def _listening_summary() -> tuple[dict | None, str]:
     try:
         document = json.loads(LISTENING_FILE.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return None, "no summary yet: run `listening-tracker poll --summary` (see the listening-tracker repo)"
+        return (
+            None,
+            "no summary yet: run `listening-tracker poll --summary` (see the listening-tracker repo)",
+        )
     except (OSError, ValueError) as exc:
         return None, f"the summary could not be read ({type(exc).__name__})"
     if not isinstance(document, dict) or "windows" not in document:
         return None, "the summary is not a listening-tracker summary"
     return document, ""
+
+
+def _spotify_now_playing() -> dict | None:
+    """Read Spotify's current playback using listening-tracker's owner-only fresh token."""
+    token_file = Path.home() / ".config" / "listening-tracker" / "token.json"
+    try:
+        token = str(json.loads(token_file.read_text(encoding="utf-8")).get("access_token") or "")
+        import urllib.request
+
+        request = urllib.request.Request(
+            "https://api.spotify.com/v1/me/player/currently-playing",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urllib.request.urlopen(request, timeout=4) as response:  # noqa: S310
+            payload = json.loads(response.read().decode("utf-8") or "{}")
+    except Exception:
+        return None
+    item = payload.get("item") if isinstance(payload, dict) else None
+    if not payload.get("is_playing") or not isinstance(item, dict):
+        return None
+    artists = item.get("artists") if isinstance(item.get("artists"), list) else []
+    return {
+        "name": str(item.get("name") or "Unknown track"),
+        "artist": ", ".join(str(a.get("name") or "") for a in artists if isinstance(a, dict)),
+        "url": str((item.get("external_urls") or {}).get("spotify") or ""),
+    }
 
 
 def _bars(values: list[tuple[str, int]]) -> list[dict]:
@@ -1867,24 +1984,275 @@ def _bars(values: list[tuple[str, int]]) -> list[dict]:
     ]
 
 
-def _listening_view(document: dict, window: str) -> dict:
+def _listening_timeline(
+    document: dict,
+    window: str,
+    custom_start: datetime.date | None = None,
+    custom_end: datetime.date | None = None,
+) -> tuple[list[dict], str, str, list[dict]]:
+    """Calendar-aligned listening counts for the selected range.
+
+    New listening-tracker summaries include sparse local ``by_day`` counts.  Zero-fill the selected range so
+    the line's spacing reflects time rather than only the days on which the user listened.  The
+    month fallback keeps existing summaries readable until the next listening-tracker refresh.
+    """
+
+    counts: dict[datetime.date, int] = {}
+    for label, value in document.get("by_day", {}).items():
+        try:
+            counts[datetime.date.fromisoformat(label)] = int(value)
+        except (TypeError, ValueError):
+            continue
+    if not counts:
+        for label, value in document.get("by_month", {}).items():
+            try:
+                counts[datetime.date.fromisoformat(f"{label}-01")] = int(value)
+            except (TypeError, ValueError):
+                continue
+    try:
+        today = (
+            datetime.datetime.fromisoformat(
+                str(document.get("generated") or "").replace("Z", "+00:00")
+            )
+            .astimezone()
+            .date()
+        )
+    except ValueError:
+        today = datetime.datetime.now().astimezone().date()
+    days = _LISTENING_WINDOW_DAYS.get(window)
+    if custom_start:
+        range_start = custom_start
+    elif days:
+        range_start = today - datetime.timedelta(days=days - 1)
+    else:
+        try:
+            range_start = (
+                datetime.datetime.fromisoformat(
+                    str(document.get("first") or "").replace("Z", "+00:00")
+                )
+                .astimezone()
+                .date()
+            )
+        except ValueError:
+            range_start = min(counts, default=today)
+    range_end = custom_end or today
+    span_days = (range_end - range_start).days + 1
+    if span_days >= 730:
+        unit, title = "month", "Monthly plays"
+    elif span_days >= 180:
+        unit, title = "week", "Weekly plays"
+    else:
+        unit, title = "day", "Daily plays"
+
+    def bucket(day: datetime.date) -> datetime.date:
+        if unit == "month":
+            return day.replace(day=1)
+        if unit == "week":
+            return day - datetime.timedelta(days=day.weekday())
+        return day
+
+    start, end = bucket(range_start), bucket(range_end)
+    grouped: dict[datetime.date, int] = {}
+    for day, value in counts.items():
+        if range_start <= day <= range_end:
+            key = bucket(day)
+            grouped[key] = grouped.get(key, 0) + value
+    values: list[tuple[str, int]] = []
+    current = start
+    while current <= end:
+        values.append((current.isoformat(), grouped.get(current, 0)))
+        if unit == "month":
+            current = (current.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
+        elif unit == "week":
+            current += datetime.timedelta(days=7)
+        else:
+            current += datetime.timedelta(days=1)
+    timeline = _bars(values)
+    peak = max((point["value"] for point in timeline), default=0) or 1
+    if len(timeline) == 1:
+        points = f"50,{100 - 100 * timeline[0]['value'] / peak:.1f}"
+    else:
+        points = " ".join(
+            f"{100 * index / (len(timeline) - 1):.2f},{100 - 100 * point['value'] / peak:.2f}"
+            for index, point in enumerate(timeline)
+        )
+    tick_indices = sorted({0, len(timeline) // 2, len(timeline) - 1})
+    tick_days = [datetime.date.fromisoformat(timeline[index]["label"]) for index in tick_indices]
+    tick_labels = [
+        str(day.year) if unit == "month" else f"{day.strftime('%b')} {day.day}" for day in tick_days
+    ]
+    if len(set(tick_labels)) != len(tick_labels):
+        tick_labels = [day.strftime("%b %Y") for day in tick_days]
+    ticks: list[dict] = []
+    for index, _day, label in zip(tick_indices, tick_days, tick_labels, strict=True):
+        x = 50 if len(timeline) == 1 else round(100 * index / (len(timeline) - 1), 2)
+        ticks.append(
+            {
+                "label": label,
+                "x": x,
+                "edge": (
+                    "start" if index == 0 else "end" if index == len(timeline) - 1 else "middle"
+                ),
+            }
+        )
+    return timeline, points, title, ticks
+
+
+def _listening_custom_metrics(
+    document: dict, start: datetime.date, end: datetime.date
+) -> tuple[int, float]:
+    """Count eligible plays and listened hours from listening-tracker's private daily aggregates."""
+
+    plays = milliseconds = 0
+    for label, value in document.get("by_day", {}).items():
+        try:
+            if start <= datetime.date.fromisoformat(label) <= end:
+                plays += int(value)
+        except (TypeError, ValueError):
+            continue
+    for label, value in document.get("by_day_ms", {}).items():
+        try:
+            if start <= datetime.date.fromisoformat(label) <= end:
+                milliseconds += int(value)
+        except (TypeError, ValueError):
+            continue
+    return plays, round(milliseconds / 3_600_000, 1)
+
+
+def _listening_custom_stats(start: datetime.date, end: datetime.date, limit: int = 10) -> dict:
+    """Compute a custom slice directly from listening-tracker's owner-only SQLite history, read-only."""
+    start_at = datetime.datetime.combine(start, datetime.time.min).astimezone(datetime.timezone.utc)
+    end_at = datetime.datetime.combine(
+        end + datetime.timedelta(days=1), datetime.time.min
+    ).astimezone(datetime.timezone.utc)
+    uri = LISTENING_DB_FILE.resolve().as_uri() + "?mode=ro"
+    with sqlite3.connect(uri, uri=True) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT played_at, uri, kind, name, artist, album, duration_ms, ms_played FROM plays "
+            "WHERE played_at >= ? AND played_at < ? ORDER BY played_at",
+            (start_at.strftime("%Y-%m-%dT%H:%M:%SZ"), end_at.strftime("%Y-%m-%dT%H:%M:%SZ")),
+        ).fetchall()
+
+    def lead(value: str) -> str:
+        return value.split(", ")[0] if value else ""
+
+    eligible = [row for row in rows if row["ms_played"] is None or row["ms_played"] >= 30_000]
+    tracks = Counter(row["uri"] for row in eligible if row["kind"] == "track")
+    names = {row["uri"]: (row["name"], lead(row["artist"])) for row in eligible}
+    artists = Counter(
+        lead(row["artist"]) for row in eligible if row["kind"] == "track" and row["artist"]
+    )
+    albums = Counter(
+        (row["album"], lead(row["artist"]))
+        for row in eligible
+        if row["kind"] == "track" and row["album"]
+    )
+    local = [
+        datetime.datetime.fromisoformat(row["played_at"].replace("Z", "+00:00")).astimezone()
+        for row in eligible
+    ]
+    milliseconds = sum(
+        (row["ms_played"] if row["ms_played"] is not None else row["duration_ms"]) or 0
+        for row in rows
+    )
+    return {
+        "plays": len(eligible),
+        "hours": round(milliseconds / 3_600_000, 1),
+        "tracks": [
+            {"name": names[uri][0], "artist": names[uri][1], "uri": uri, "plays": plays}
+            for uri, plays in tracks.most_common(limit)
+        ],
+        "artists": [{"name": name, "plays": plays} for name, plays in artists.most_common(limit)],
+        "albums": [
+            {"name": album, "artist": artist, "plays": plays}
+            for (album, artist), plays in albums.most_common(limit)
+        ],
+        "by_hour": [sum(stamp.hour == hour for stamp in local) for hour in range(24)],
+        "by_weekday": [sum(stamp.weekday() == day for stamp in local) for day in range(7)],
+        "recent": [
+            {
+                "played_at": row["played_at"],
+                "name": row["name"],
+                "artist": lead(row["artist"]),
+                "album": row["album"],
+            }
+            for row in reversed(rows[-25:])
+        ],
+    }
+
+
+def _listening_view(
+    document: dict,
+    window: str,
+    custom_start: datetime.date | None = None,
+    custom_end: datetime.date | None = None,
+) -> dict:
     chosen = document["windows"].get(window) or document["windows"]["all"]
+    active_window = window if window in document["windows"] else "all"
+    timeline, timeline_points, timeline_title, timeline_ticks = _listening_timeline(
+        document, active_window, custom_start, custom_end
+    )
 
     def ranked(rows: list[dict]) -> list[dict]:
         peak = max((r["plays"] for r in rows), default=0) or 1
         return [{**r, "pct": round(100 * r["plays"] / peak, 1)} for r in rows]
 
+    custom = None
+    plays, hours = chosen["plays"], chosen["hours"]
+    if custom_start and custom_end:
+        custom = _listening_custom_stats(custom_start, custom_end)
+        plays, hours = custom["plays"], custom["hours"]
+    tracks = ranked((custom or chosen)["tracks"])
+    artists = ranked((custom or chosen)["artists"])
+    for track in tracks:
+        uri = str(track.get("uri") or "")
+        match = re.fullmatch(r"spotify:track:([A-Za-z0-9]{22})", uri)
+        query = f"{track['artist']} {track['name']}".strip()
+        track["spotify_url"] = (
+            f"https://open.spotify.com/track/{match.group(1)}"
+            if match
+            else "https://open.spotify.com/search/" + urllib.parse.quote(query)
+        )
+    for artist in artists:
+        artist["spotify_url"] = "https://open.spotify.com/search/" + urllib.parse.quote(
+            artist["name"]
+        )
+    albums = ranked((custom or chosen)["albums"])
+    for album in albums:
+        album["spotify_url"] = "https://open.spotify.com/search/" + urllib.parse.quote(
+            f"{album['artist']} {album['name']}".strip()
+        )
     return {
-        "window": window if window in document["windows"] else "all",
-        "plays": chosen["plays"],
-        "hours": chosen["hours"],
-        "tracks": ranked(chosen["tracks"]),
-        "artists": ranked(chosen["artists"]),
-        "albums": ranked(chosen["albums"]),
-        "hours_of_day": _bars([(str(h), n) for h, n in enumerate(document.get("by_hour", []))]),
-        "weekdays": _bars(list(zip(_WEEKDAYS, document.get("by_weekday", []), strict=False))),
-        "months": _bars(list(document.get("by_month", {}).items())),
-        "recent": document.get("recent", [])[:15],
+        "window": "custom" if custom_start else active_window,
+        "summary_window": active_window,
+        "plays": plays,
+        "hours": hours,
+        "tracks": tracks,
+        "artists": artists,
+        "albums": albums,
+        "hours_of_day": _bars(
+            [(str(h), n) for h, n in enumerate((custom or document).get("by_hour", []))]
+        ),
+        "weekdays": _bars(
+            list(zip(_WEEKDAYS, (custom or document).get("by_weekday", []), strict=False))
+        ),
+        "timeline": timeline,
+        "timeline_points": timeline_points,
+        "timeline_title": timeline_title,
+        "timeline_ticks": timeline_ticks,
+        "window_label": _LISTENING_WINDOW_LABELS.get(active_window, "All time"),
+        "custom_start": custom_start.isoformat() if custom_start else "",
+        "custom_end": custom_end.isoformat() if custom_end else "",
+        "metrics_label": (
+            "Custom range"
+            if custom_start
+            else _LISTENING_WINDOW_LABELS.get(active_window, "All time")
+        ),
+        "hour_peak": max((custom or document).get("by_hour", []) or [0]),
+        "weekday_peak": max((custom or document).get("by_weekday", []) or [0]),
+        "timeline_peak": max((point["value"] for point in timeline), default=0),
+        "recent": (custom or document).get("recent", [])[:15],
     }
 
 
@@ -1896,17 +2264,59 @@ def api_listening():
     return jsonify(document)
 
 
+@app.get("/api/listening/top")
+def api_listening_top():
+    """One page of ranked local listening history for infinite-scroll panels."""
+    kind = request.args.get("kind", "")
+    if kind not in {"tracks", "artists", "albums"}:
+        abort(400)
+    offset = max(0, request.args.get("offset", 0, type=int) or 0)
+    limit = min(50, max(1, request.args.get("limit", 20, type=int) or 20))
+    start_value, end_value = request.args.get("start", ""), request.args.get("end", "")
+    try:
+        end = (
+            datetime.date.fromisoformat(end_value) if end_value else datetime.datetime.now().date()
+        )
+        start = datetime.date.fromisoformat(start_value) if start_value else None
+    except ValueError:
+        abort(400)
+    if start is None:
+        days = _LISTENING_WINDOW_DAYS.get(request.args.get("window", "all"))
+        start = end - datetime.timedelta(days=days - 1) if days else datetime.date(1970, 1, 1)
+    stats = _listening_custom_stats(start, end, 100_000)
+    rows = stats[kind]
+    peak = max((row["plays"] for row in rows), default=1) or 1
+    page = [
+        {**row, "pct": round(100 * row["plays"] / peak, 1)} for row in rows[offset : offset + limit]
+    ]
+    return jsonify({"rows": page, "more": offset + limit < len(rows)})
+
+
 @app.get("/listening")
 def listening_page():
     document, error = _listening_summary()
     window = request.args.get("window", "all")
-    view = _listening_view(document, window) if document else None
+    range_error = ""
+    custom_start = custom_end = None
+    start_value, end_value = request.args.get("start", ""), request.args.get("end", "")
+    if start_value or end_value:
+        try:
+            custom_start = datetime.date.fromisoformat(start_value)
+            custom_end = datetime.date.fromisoformat(end_value)
+            if custom_start > custom_end:
+                raise ValueError
+        except ValueError:
+            range_error = "Enter both custom dates as a valid range (start on or before end)."
+            custom_start = custom_end = None
+    view = _listening_view(document, window, custom_start, custom_end) if document else None
     return render_template(
         "listening.html",
         summary=document,
         view=view,
         error=error,
+        range_error=range_error,
         windows=LISTENING_WINDOWS,
+        now_playing=_spotify_now_playing(),
     )
 
 
@@ -2002,7 +2412,10 @@ def _publish_site_chrome_forever(interval: float = 300.0) -> None:
         try:
             _publish_site_chrome()
         except Exception as exc:  # keep the loop alive; the next pass retries
-            print(f"clockwork-web  could not publish the site top bar: {exc}", file=sys.stderr)
+            print(
+                f"clockwork-web  could not publish the site top bar: {exc}",
+                file=sys.stderr,
+            )
         time.sleep(interval)
 
 
@@ -2129,7 +2542,10 @@ def _grandmaster_home_cards() -> list[dict]:
 
 
 def _home_cards_response(status: int = 200, **extra):
-    return jsonify({"ok": status < 400, "cards": _grandmaster_home_cards(), **extra}), status
+    return (
+        jsonify({"ok": status < 400, "cards": _grandmaster_home_cards(), **extra}),
+        status,
+    )
 
 
 @app.get("/api/grandmaster/home")
@@ -2239,7 +2655,11 @@ def api_grandmaster_action(action: str):
             candidates = [r for r in candidates if r["name"] not in critical]
         if body.get("dry_run"):
             return jsonify(
-                {"dry_run": True, "targets": [r["name"] for r in candidates], "skipped": skipped}
+                {
+                    "dry_run": True,
+                    "targets": [r["name"] for r in candidates],
+                    "skipped": skipped,
+                }
             )
         entered, why = _GRANDMASTER_GATE.try_enter(bulk=True)
         if not entered:
@@ -2252,10 +2672,17 @@ def api_grandmaster_action(action: str):
             _GRANDMASTER_GATE.leave()
         scope = f"all:{repo}" if repo else "all"
         _grandmaster_audit(
-            f"bulk-{action}", scope, all(r["ok"] for r in results), f"{len(results)} app(s)"
+            f"bulk-{action}",
+            scope,
+            all(r["ok"] for r in results),
+            f"{len(results)} app(s)",
         )
         return jsonify(
-            {"ok": all(r["ok"] for r in results), "results": results, "skipped": skipped}
+            {
+                "ok": all(r["ok"] for r in results),
+                "results": results,
+                "skipped": skipped,
+            }
         )
     mpath, name = body.get("manifest_path", ""), body.get("name", "")
     if not mpath or not name:
@@ -2355,7 +2782,14 @@ _GROCERY_ALIASES: dict[str, tuple[str, ...]] = {
     "onions": ("onion",),
     "green beans": ("green bean", "string bean"),
     "salad": ("lettuce", "spinach", "romaine", "arugula", "mixed greens"),
-    "bread": ("loaf", "sourdough", "ciabatta", "baguette", "wheat bread", "white bread"),
+    "bread": (
+        "loaf",
+        "sourdough",
+        "ciabatta",
+        "baguette",
+        "wheat bread",
+        "white bread",
+    ),
     "bagels": ("bagel",),
     "chips": ("doritos", "lays", "pringles", "fritos", "cheetos", "tortilla chip"),
     "chocolate": ("choc", "cocoa", "hershey", "ghirardelli", "lindt", "dove"),
@@ -2367,7 +2801,14 @@ _GROCERY_ALIASES: dict[str, tuple[str, ...]] = {
     "cream cheese": ("philly", "philadelphia"),
     "coffee": ("folgers", "maxwell", "starbucks", "dunkin", "nescafe", "espresso"),
     "tea": ("lipton", "bigelow", "celestial", "chai"),
-    "milk": ("dairy", "whole milk", "2 percent", "skim milk", "almond milk", "oat milk"),
+    "milk": (
+        "dairy",
+        "whole milk",
+        "2 percent",
+        "skim milk",
+        "almond milk",
+        "oat milk",
+    ),
     "cheese": ("cheddar", "mozzarella", "gouda", "swiss", "parmesan", "brie", "feta"),
     "yogurt": ("greek yogurt", "chobani", "fage", "siggi"),
     "mushrooms": ("mushroom",),
@@ -2378,12 +2819,27 @@ _GROCERY_ALIASES: dict[str, tuple[str, ...]] = {
     "orange": ("oranges", "navel", "clementine", "mandarin"),
     "mango": ("mangos", "mangoes"),
     "kiwi": ("kiwis",),
-    "chicken": ("poultry", "breast", "thigh", "drumstick", "tyson", "perdue", "rotisserie"),
+    "chicken": (
+        "poultry",
+        "breast",
+        "thigh",
+        "drumstick",
+        "tyson",
+        "perdue",
+        "rotisserie",
+    ),
     "beef": ("ground beef", "steak", "sirloin", "ribeye", "chuck", "brisket", "angus"),
     "pork": ("bacon", "ham", "pork chop", "tenderloin", "ribs"),
     "sausage": ("bratwurst", "kielbasa", "chorizo", "andouille", "italian sausage"),
     "soup": ("broth", "bouillon", "ramen broth", "chowder", "bisque"),
-    "rice": ("white rice", "brown rice", "basmati", "jasmine", "uncle bens", "uncle ben"),
+    "rice": (
+        "white rice",
+        "brown rice",
+        "basmati",
+        "jasmine",
+        "uncle bens",
+        "uncle ben",
+    ),
     "corn": (
         "sweet corn",
         "canned corn",
@@ -3140,7 +3596,10 @@ def _list_category_views(data: dict, status_key: str) -> list[dict]:
             group["items"].append(item)
         groups = sorted(
             by_type.values(),
-            key=lambda group: (group["name"] == "Uncategorized", group["name"].casefold()),
+            key=lambda group: (
+                group["name"] == "Uncategorized",
+                group["name"].casefold(),
+            ),
         )
         for group in groups:
             group["items"] = sorted(group["items"], key=lambda item: bool(item.get(status_key)))
@@ -3476,7 +3935,11 @@ def groceries_sync_intake():
     else:
         data["last_synced_at"] = datetime.datetime.now().isoformat(timespec="seconds")
         save_groceries(data)
-        _log_event(GROCERIES_HISTORY_FILE, "sync", detail=f"stocked {count}: {', '.join(marked)}")
+        _log_event(
+            GROCERIES_HISTORY_FILE,
+            "sync",
+            detail=f"stocked {count}: {', '.join(marked)}",
+        )
         flash(
             f"Marked {count} item{'s' if count != 1 else ''} as stocked: {', '.join(marked)}.",
             "success",
@@ -3487,7 +3950,10 @@ def groceries_sync_intake():
 @app.post("/groceries/ai-categorize")
 def groceries_ai_categorize():
     if not _ollama_available():
-        flash("Ollama is not reachable — start crew-chief before using AI features.", "error")
+        flash(
+            "Ollama is not reachable — start crew-chief before using AI features.",
+            "error",
+        )
         return redirect(url_for("groceries"))
     data = load_groceries()
     try:
@@ -3499,14 +3965,20 @@ def groceries_ai_categorize():
         flash("All items already have types — nothing to categorize.", "success")
     else:
         save_groceries(data)
-        flash(f"Assigned types to {count} item{'s' if count != 1 else ''} via {model}.", "success")
+        flash(
+            f"Assigned types to {count} item{'s' if count != 1 else ''} via {model}.",
+            "success",
+        )
     return redirect(url_for("groceries"))
 
 
 @app.post("/groceries/ai-rules")
 def groceries_ai_rules():
     if not _ollama_available():
-        flash("Ollama is not reachable — start crew-chief before using AI features.", "error")
+        flash(
+            "Ollama is not reachable — start crew-chief before using AI features.",
+            "error",
+        )
         return redirect(url_for("groceries"))
     if not INTAKE_DB.exists():
         flash("Intake DB not found — set CLOCKWORK_INTAKE_DB.", "error")
@@ -3520,9 +3992,15 @@ def groceries_ai_rules():
         return redirect(url_for("groceries"))
     if added == 0:
         if rejected_proposals:
-            flash("No new alias tokens accepted; rejected suggestions were blocked.", "success")
+            flash(
+                "No new alias tokens accepted; rejected suggestions were blocked.",
+                "success",
+            )
         else:
-            flash("No new alias tokens generated — try after more receipts are scanned.", "success")
+            flash(
+                "No new alias tokens generated — try after more receipts are scanned.",
+                "success",
+            )
     else:
         new_aliases = load_grocery_rules().get("aliases", {})
         session["_new_grocery_rules"] = [
@@ -3531,7 +4009,10 @@ def groceries_ai_rules():
             for token in tokens
             if token not in old_aliases.get(name, [])
         ][:100]
-        flash(f"Added {added} new alias token{'s' if added != 1 else ''} via {model}.", "success")
+        flash(
+            f"Added {added} new alias token{'s' if added != 1 else ''} via {model}.",
+            "success",
+        )
     blocked_count = sum(len(tokens) for tokens in rejected_proposals.values())
     if blocked_count:
         flash(
@@ -3807,7 +4288,10 @@ def shopping_sync_intake():
 @app.post("/shopping/ai-categorize")
 def shopping_ai_categorize():
     if not _ollama_available():
-        flash("Ollama is not reachable — start crew-chief before using AI features.", "error")
+        flash(
+            "Ollama is not reachable — start crew-chief before using AI features.",
+            "error",
+        )
         return redirect(url_for("shopping"))
     replace_existing = request.form.get("scope", "missing") == "all"
     data = load_shopping()
@@ -3833,7 +4317,10 @@ def shopping_ai_categorize():
 @app.post("/shopping/ai-rules")
 def shopping_ai_rules():
     if not _ollama_available():
-        flash("Ollama is not reachable — start crew-chief before using AI features.", "error")
+        flash(
+            "Ollama is not reachable — start crew-chief before using AI features.",
+            "error",
+        )
         return redirect(url_for("shopping"))
     if not INTAKE_DB.exists():
         flash("Intake DB not found — set CLOCKWORK_INTAKE_DB.", "error")
@@ -3845,9 +4332,15 @@ def shopping_ai_rules():
         flash(f"AI rules generation failed: {exc}", "error")
         return redirect(url_for("shopping"))
     if added == 0:
-        flash("No new alias tokens generated — try after more receipts are scanned.", "success")
+        flash(
+            "No new alias tokens generated — try after more receipts are scanned.",
+            "success",
+        )
     else:
-        flash(f"Added {added} new alias token{'s' if added != 1 else ''} via {model}.", "success")
+        flash(
+            f"Added {added} new alias token{'s' if added != 1 else ''} via {model}.",
+            "success",
+        )
     return redirect(url_for("shopping"))
 
 
@@ -4053,7 +4546,10 @@ def _build_series_library(title: str, year: int | None, torrents: list[dict]) ->
                         found = media_library.parse_release_name(current.name)
                         if found.episode is not None:
                             existing.update(
-                                range(found.episode, (found.episode_end or found.episode) + 1)
+                                range(
+                                    found.episode,
+                                    (found.episode_end or found.episode) + 1,
+                                )
                             )
                 indexed_seasons[episode.season] = existing
             episode_numbers = set(
@@ -4261,7 +4757,10 @@ def _magneto_target_url(host_id: str | None) -> tuple[str | None, str]:
     if not host_id:
         return MAGNETO_URL.rstrip("/"), ""
     if not MAGNETO_HOSTS_FILE:
-        return None, "Torrent host selection is not configured on this Clockwork instance."
+        return (
+            None,
+            "Torrent host selection is not configured on this Clockwork instance.",
+        )
     try:
         raw = json.loads(Path(MAGNETO_HOSTS_FILE).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -4618,7 +5117,10 @@ def _code_triage_detail(item: dict) -> str:
         "requires_sudo": "requires sudo",
     }
     return ", ".join(
-        [item.get("priority", "unrated"), *(labels[f] for f in CODE_FLAGS if item.get(f))]
+        [
+            item.get("priority", "unrated"),
+            *(labels[f] for f in CODE_FLAGS if item.get(f)),
+        ]
     )
 
 
@@ -4655,7 +5157,11 @@ def _parse_simple_item(raw: str, cfg: dict) -> dict:
         return item
     match = re.match(r"^(.+?)\s*\((\d{4})\)\s*$", raw)
     if match:
-        return {"title": match.group(1).strip(), "year": match.group(2), cfg["status"]: False}
+        return {
+            "title": match.group(1).strip(),
+            "year": match.group(2),
+            cfg["status"]: False,
+        }
     return {"title": raw, cfg["status"]: False}
 
 
@@ -4878,7 +5384,8 @@ def _invest_holding_rows(holdings: list) -> list[dict]:
 
     The export gives every instrument its own record (``instrument_id`` is ``T`` for AT&T and
     ``crypto:T`` for the coin), so AT&T and the Threshold coin never share a row. An older export that
-    merged a symbol across a stock and a coin is split here by each account's asset class."""
+    merged a symbol across a stock and a coin is split here by each account's asset class.
+    """
 
     rows: list[dict] = []
     for holding in holdings:
@@ -4916,7 +5423,13 @@ def _invest_holding_rows(holdings: list) -> list[dict]:
             rows.append(_holding_row(ticker, "asset", stock_value, stock_class, description))
         else:
             rows.append(
-                _holding_row(ticker, "crypto" if coin else "asset", value, asset_class, description)
+                _holding_row(
+                    ticker,
+                    "crypto" if coin else "asset",
+                    value,
+                    asset_class,
+                    description,
+                )
             )
     return rows
 
@@ -5048,7 +5561,11 @@ def _sync_invest_classifications(
                 by_label[label] = item
                 changes += 1
             held = total > 0
-            for key, value in (("allocation_pct", percent), ("name", detail), ("holding", held)):
+            for key, value in (
+                ("allocation_pct", percent),
+                ("name", detail),
+                ("holding", held),
+            ):
                 if item.get(key) != value and (value or key in item):
                     item[key] = value
                     changes += 1
@@ -5093,7 +5610,10 @@ def _rebalance_invest_targets(
                 continue
             seen.add((category["name"].casefold(), ticker))
             sector, industry = _invest_labels(
-                ticker, classes, industry_sectors, _invest_kind(category["name"]) == "crypto"
+                ticker,
+                classes,
+                industry_sectors,
+                _invest_kind(category["name"]) == "crypto",
             )
             try:
                 current = float(item.get("allocation_pct") or 0)
@@ -5341,7 +5861,8 @@ def _invest_row_anchors(
     ``invest-item-TICKER`` (the link Tradility uses); a later row gets
     ``invest-item-TICKER--category``. ``duplicates`` lists the other rows of the *same instrument*
     (a stock or fund listed in two categories); ``shared`` lists rows of a *different* instrument
-    that merely has the same symbol (AT&T and the Threshold coin), which are not duplicates."""
+    that merely has the same symbol (AT&T and the Threshold coin), which are not duplicates.
+    """
     rows: dict[str, list[tuple[str, str]]] = {}
     for category in data["categories"]:
         if _is_invest_derived(category):
@@ -5765,7 +6286,7 @@ def _render_simple_list(key: str):
         link_providers=[
             p for p in providers.for_page(key, providers.LINK) if p.id not in {"youtube", "spotify"}
         ],
-        spotify_status=spotify_api.public_status(spotify_settings) if spotify_settings else {},
+        spotify_status=(spotify_api.public_status(spotify_settings) if spotify_settings else {}),
         spotify_playlist_url=(
             spotify_api.playlist_link(spotify_settings) if spotify_settings else ""
         ),
@@ -5884,7 +6405,8 @@ def simple_list_sync_youtube(page):
     configured = [account for account in accounts if account.playlist_id(key)]
     if not configured:
         flash(
-            f"YouTube sync failed: no account has a To {key.title()} playlist configured", "error"
+            f"YouTube sync failed: no account has a To {key.title()} playlist configured",
+            "error",
         )
         return redirect(url_for(_simple_list_endpoint(key)))
     data = load_simple_list(key)
@@ -6024,7 +6546,10 @@ def api_themes():
             }
         )
     except themes_admin.ThemesError as exc:
-        return jsonify({"ok": False, "error": str(exc), "csrf_token": _csrf_token()}), 503
+        return (
+            jsonify({"ok": False, "error": str(exc), "csrf_token": _csrf_token()}),
+            503,
+        )
 
 
 def _themes_change(action):
@@ -6036,7 +6561,12 @@ def _themes_change(action):
         return jsonify({"ok": False, "error": str(exc)}), 400
     _publish_site_chrome()  # the Caddy copy follows the render
     return jsonify(
-        {"ok": True, "state": state, "catalog": _label_catalog(), "csrf_token": _csrf_token()}
+        {
+            "ok": True,
+            "state": state,
+            "catalog": _label_catalog(),
+            "csrf_token": _csrf_token(),
+        }
     )
 
 
@@ -6080,7 +6610,11 @@ def _add_placeholder_backlog(card: dict) -> str:
     category["items"].append(item)
     save_simple_list("code", data)
     _log_event(
-        cfg["history_file"], "add", item=title, category=card["repo_group"], detail=card["repo"]
+        cfg["history_file"],
+        "add",
+        item=title,
+        category=card["repo_group"],
+        detail=card["repo"],
     )
     return "added"
 
@@ -6111,7 +6645,10 @@ def api_placeholders():
     try:
         cards = placeholders.load(strict=True)
     except placeholders.PlaceholderError as exc:
-        return jsonify({"ok": False, "error": str(exc), "csrf_token": _csrf_token()}), 400
+        return (
+            jsonify({"ok": False, "error": str(exc), "csrf_token": _csrf_token()}),
+            400,
+        )
     return jsonify(
         {
             "ok": True,
@@ -6276,7 +6813,12 @@ def _playlist_cached(cache_key: str, refresh: bool, build):
         return hit[1], ""
     try:
         value = build()
-    except (youtube_api.YouTubeError, spotify_api.SpotifyError, OSError, RuntimeError) as exc:
+    except (
+        youtube_api.YouTubeError,
+        spotify_api.SpotifyError,
+        OSError,
+        RuntimeError,
+    ) as exc:
         return None, str(exc)
     _PLAYLIST_CACHE[cache_key] = (now, value)
     return value, ""
@@ -6301,6 +6843,27 @@ def _provider_entries(account: providers.Account, key: str, playlist_id: str, re
     )
 
 
+def _youtube_matches(query: str, accounts: list[providers.Account], refresh: bool):
+    """Read a few video candidates from the first healthy connected YouTube account."""
+
+    failures: list[str] = []
+    for account in accounts:
+        if account.provider.id != "youtube":
+            continue
+        matches, error = _playlist_cached(
+            f"youtube-match:{account.id}:{query}",
+            refresh,
+            lambda account=account: youtube_api.search_videos(account.settings, query),
+        )
+        if matches is not None:
+            return matches, ""
+        failures.append(f"{account.label}: {error}")
+    return (
+        [],
+        "; ".join(failures) or "No connected YouTube account is available for search",
+    )
+
+
 @app.get("/<page>/playlist")
 def simple_list_playlist(page):
     """Browse every playlist on the linked Spotify/YouTube accounts, beside local list state."""
@@ -6310,10 +6873,14 @@ def simple_list_playlist(page):
     cfg = _simple_list_config(key)
     refresh = request.args.get("refresh") == "1"
     accounts = _playlist_providers(key)
-    chosen = next(
-        (a for a in accounts if a.id == request.args.get("source")),
-        accounts[0] if accounts else None,
-    )
+    requested_source = request.args.get("source")
+    chosen = next((a for a in accounts if a.id == requested_source), None)
+    # ``source=youtube`` is a stable UI shortcut. Individual account ids include
+    # a user-configured display name, so templates must not have to know them.
+    if chosen is None and requested_source == "youtube":
+        chosen = next((a for a in accounts if a.provider.id == "youtube"), None)
+    if chosen is None:
+        chosen = accounts[0] if accounts else None
     view: dict = {}
     if chosen is not None:
         playlists, list_error = _provider_playlists(chosen, key, refresh)
@@ -6329,6 +6896,32 @@ def simple_list_playlist(page):
         if current is not None:
             entries, entry_error = _provider_entries(chosen, key, current["id"], refresh)
             entries = [dict(e) for e in entries or []]
+            if chosen.provider.id == "spotify":
+                requested_match = request.args.get("youtube_match", "")
+                selected = next(
+                    (entry for entry in entries if entry["match"][1] == requested_match),
+                    None,
+                )
+                for entry in entries:
+                    query = entry["title"]
+                    entry["youtube_search_url"] = (
+                        "https://www.youtube.com/results?"
+                        + urllib.parse.urlencode({"search_query": query})
+                    )
+                    entry["youtube_match_url"] = (
+                        f"{url_for('simple_list_playlist', page=cfg['page'])}?"
+                        + urllib.parse.urlencode(
+                            {
+                                "source": chosen.id,
+                                "playlist": current["id"],
+                                "youtube_match": entry["match"][1],
+                            }
+                        )
+                    )
+                if selected is not None:
+                    matches, match_error = _youtube_matches(selected["title"], accounts, refresh)
+                    selected["youtube_matches"] = matches
+                    selected["youtube_match_error"] = match_error
         data = load_simple_list(key)
         local: dict[tuple[str, str], dict] = {}
         for category in data["categories"]:
@@ -6349,6 +6942,8 @@ def simple_list_playlist(page):
         is_queue = current is not None and current["id"] == chosen.queue
         view = {
             "playlists": playlists,
+            "owned_playlists": [p for p in playlists if p.get("ownership") == "owned"],
+            "followed_playlists": [p for p in playlists if p.get("ownership") == "followed"],
             "list_error": list_error,
             "current": current,
             "entries": entries,
@@ -6491,7 +7086,10 @@ def listen_sync_spotify():
     back = url_for(_simple_list_endpoint("listen"))
     settings = spotify_api.settings_from_env()
     if not settings.ready():
-        flash("Spotify sync failed: authorize Spotify and create the playlist first", "error")
+        flash(
+            "Spotify sync failed: authorize Spotify and create the playlist first",
+            "error",
+        )
         return redirect(back)
     data = load_simple_list("listen")
     failures: list[str] = []
@@ -6910,7 +7508,10 @@ def update_invest_targets():
             edits.append((category, ticker, float(target) if target else None))
     problems = _rebalance_invest_targets(data, edits, _invest_classes())
     if problems:
-        flash(problems[0][:1].upper() + problems[0][1:] + ". No targets were saved.", "error")
+        flash(
+            problems[0][:1].upper() + problems[0][1:] + ". No targets were saved.",
+            "error",
+        )
         return redirect(url_for("to_invest"))
     changed = sum(
         1
@@ -7045,7 +7646,10 @@ def api_tradility_set_target(ticker: str):
         name = str(payload.get("category") or "").strip()
         category = _find_simple_category(data, name) if name else None
         if category is None:
-            return jsonify({"ok": False, "error": "choose a To Invest category to add it to"}), 400
+            return (
+                jsonify({"ok": False, "error": "choose a To Invest category to add it to"}),
+                400,
+            )
         found = _parse_simple_item(base if name == "Crypto" else symbol, cfg)
         category["items"].append(found)
         placed_in = name
@@ -7058,14 +7662,23 @@ def api_tradility_set_target(ticker: str):
         _invest_classes(),
     )
     if problems:
-        return jsonify({"ok": False, "error": problems[0][:1].upper() + problems[0][1:]}), 400
+        return (
+            jsonify({"ok": False, "error": problems[0][:1].upper() + problems[0][1:]}),
+            400,
+        )
     if placed_in:
         _log_event(
-            cfg["history_file"], "add", item=found["ticker"], category=placed_in, detail="tradility"
+            cfg["history_file"],
+            "add",
+            item=found["ticker"],
+            category=placed_in,
+            detail="tradility",
         )
     save_simple_list("invest", data)
     _log_event(
-        cfg["history_file"], "targets", detail=f"tradility {found['ticker']}={target or 'cleared'}"
+        cfg["history_file"],
+        "targets",
+        detail=f"tradility {found['ticker']}={target or 'cleared'}",
     )
     rows, _summary = _invest_target_rows(data)
     return jsonify({"ok": True, "target": rows.get(symbol) or rows.get(base)})
@@ -7137,7 +7750,10 @@ def api_simple_add_category(list_key):
         return jsonify({"ok": False, "error": "category required"}), 400
     data = load_simple_list(key)
     if _find_simple_category(data, name):
-        return jsonify({"ok": False, "error": f'{cfg["name_label"]} "{name}" already exists'}), 409
+        return (
+            jsonify({"ok": False, "error": f'{cfg["name_label"]} "{name}" already exists'}),
+            409,
+        )
     data["categories"].append({"name": name, "items": []})
     save_simple_list(key, data)
     _log_event(cfg["history_file"], "add-category", category=name)
@@ -7193,7 +7809,10 @@ def api_simple_add_item(list_key):
         data["categories"].append(cat)
         _log_event(cfg["history_file"], "add-category", category=category)
     if cat is None:
-        return jsonify({"ok": False, "error": f'{cfg["name_label"]} "{category}" not found'}), 404
+        return (
+            jsonify({"ok": False, "error": f'{cfg["name_label"]} "{category}" not found'}),
+            404,
+        )
     item = _parse_simple_item(raw, cfg)
     youtube_url = str(payload.get("youtube_url") or "").strip()
     if youtube_url and key in {"watch", "listen"}:
@@ -7208,7 +7827,9 @@ def api_simple_add_item(list_key):
         item["repo"] = repo
         item["added"] = datetime.date.today().isoformat()
         _apply_code_triage(
-            item, priority=payload.get("priority"), **{f: payload.get(f) for f in CODE_FLAGS}
+            item,
+            priority=payload.get("priority"),
+            **{f: payload.get(f) for f in CODE_FLAGS},
         )
     if cfg["primary"] == "ticker" and payload.get("name"):
         item["name"] = str(payload["name"]).strip()
@@ -7221,12 +7842,19 @@ def api_simple_add_item(list_key):
         item[cfg["status"]] = bool(payload["done"])
     value = _simple_item_value(item, cfg)
     if _find_simple_item(cat, value, cfg, repo=repo if key == "code" else None):
-        return jsonify({"ok": False, "error": f'"{value}" already in {repo or category}'}), 409
+        return (
+            jsonify({"ok": False, "error": f'"{value}" already in {repo or category}'}),
+            409,
+        )
     cat["items"].append(item)
     save_simple_list(key, data)
     _log_event(cfg["history_file"], "add", item=value, category=category, detail=repo)
     return jsonify(
-        {"ok": True, "data": data, **({"auto_sorted": sorted_to.describe()} if sorted_to else {})}
+        {
+            "ok": True,
+            "data": data,
+            **({"auto_sorted": sorted_to.describe()} if sorted_to else {}),
+        }
     )
 
 
@@ -7289,7 +7917,9 @@ def api_simple_update_item(list_key):
     if item is None:
         return jsonify({"ok": False, "error": "item not found"}), 404
     _apply_code_triage(
-        item, priority=payload.get("priority"), **{f: payload.get(f) for f in CODE_FLAGS}
+        item,
+        priority=payload.get("priority"),
+        **{f: payload.get(f) for f in CODE_FLAGS},
     )
     save_simple_list(key, data)
     _log_event(
@@ -7351,7 +7981,8 @@ def _tradility_refresh_active() -> bool:
 def _read_tradility_analysis() -> dict:
     """The analysis file with any bare NaN read as null: NaN is not JSON and Safari rejects it."""
     return json.loads(
-        TRADILITY_ANALYSIS_FILE.read_text(encoding="utf-8"), parse_constant=lambda _name: None
+        TRADILITY_ANALYSIS_FILE.read_text(encoding="utf-8"),
+        parse_constant=lambda _name: None,
     )
 
 
@@ -7370,7 +8001,8 @@ def _tradility_card_url_template() -> str:
 def _tradility_card_tickers() -> frozenset[str]:
     """Tickers that have a Tradility card with a detail view, for linking from other pages.
 
-    Cached on the analysis file's modification time so a page render does not re-read it."""
+    Cached on the analysis file's modification time so a page render does not re-read it.
+    """
     try:
         stat = TRADILITY_ANALYSIS_FILE.stat()
     except OSError:
@@ -7516,9 +8148,15 @@ def api_tradility_ticker_detail(ticker: str):
 def api_tradility_refresh():
     """Start the installed user-level Tradility refresh without blocking."""
     if not TRADILITY_REFRESH_UNIT:
-        return jsonify({"ok": False, "error": "Tradility refresh unit is not configured"}), 503
+        return (
+            jsonify({"ok": False, "error": "Tradility refresh unit is not configured"}),
+            503,
+        )
     if _scheduler_backend() != "systemd":
-        return jsonify({"ok": False, "error": "Tradility refresh requires systemd"}), 503
+        return (
+            jsonify({"ok": False, "error": "Tradility refresh requires systemd"}),
+            503,
+        )
     rc, _output = _systemctl("start", "--no-block", TRADILITY_REFRESH_UNIT, scope="user")
     if rc != 0:
         return jsonify({"ok": False, "error": "Could not start Tradility refresh"}), 503
@@ -7619,7 +8257,8 @@ def _watch_media_inventory(title: str, year: str, category: str) -> dict:
                             inventory["episodes"].update(
                                 (season, episode)
                                 for episode in range(
-                                    release.episode, (release.episode_end or release.episode) + 1
+                                    release.episode,
+                                    (release.episode_end or release.episode) + 1,
                                 )
                             )
     return inventory
@@ -7859,7 +8498,10 @@ Respond with ONLY a JSON array, no explanation, no markdown fences. Format:
 
     suggestions = _extract_json(raw)
     if not isinstance(suggestions, list):
-        return jsonify({"ok": False, "error": "Model returned unexpected format", "raw": raw}), 500
+        return (
+            jsonify({"ok": False, "error": "Model returned unexpected format", "raw": raw}),
+            500,
+        )
 
     # Normalise fields and filter out anything already known
     known_norm = {_normalize_media_title(t) for t in known}
@@ -8121,7 +8763,10 @@ Respond with ONLY a JSON array, no explanation, no markdown fences. Format:
 
     parsed = _extract_json(raw)
     if not isinstance(parsed, list):
-        return jsonify({"ok": False, "error": "Model returned unexpected format", "raw": raw}), 500
+        return (
+            jsonify({"ok": False, "error": "Model returned unexpected format", "raw": raw}),
+            500,
+        )
 
     clean: list[dict] = []
     for s in parsed:
@@ -8233,7 +8878,10 @@ def api_groceries_add_item():
     if cat is None:
         return jsonify({"ok": False, "error": f'Category "{category}" not found'}), 404
     if any(i["name"].lower() == item_name.lower() for i in cat["items"]):
-        return jsonify({"ok": False, "error": f'"{item_name}" already in {category}'}), 409
+        return (
+            jsonify({"ok": False, "error": f'"{item_name}" already in {category}'}),
+            409,
+        )
     cat["items"].append({"name": item_name, "stocked": bool(payload.get("stocked", False))})
     save_groceries(data)
     _log_event(GROCERIES_HISTORY_FILE, "add", item=item_name, category=category)
@@ -8346,7 +8994,10 @@ def api_shopping_add_item():
     if cat is None:
         return jsonify({"ok": False, "error": f'Category "{category}" not found'}), 404
     if any(i["name"].lower() == item_name.lower() for i in cat["items"]):
-        return jsonify({"ok": False, "error": f'"{item_name}" already in {category}'}), 409
+        return (
+            jsonify({"ok": False, "error": f'"{item_name}" already in {category}'}),
+            409,
+        )
     cat["items"].append({"name": item_name, "owned": bool(payload.get("owned", False))})
     save_shopping(data)
     _log_event(SHOPPING_HISTORY_FILE, "add", item=item_name, category=category)
@@ -8447,7 +9098,10 @@ def torrent_search():
     if media_kind and not title:
         return jsonify({"error": "A list title is required for library checking."}), 400
     if media_kind and personal_media.root_for(media_kind) is None:
-        return jsonify({"error": "The read or listen library folder is not configured."}), 503
+        return (
+            jsonify({"error": "The read or listen library folder is not configured."}),
+            503,
+        )
     season_raw = request.args.get("season", "").strip()
     episode_raw = request.args.get("episode", "").strip()
     if episode_raw and not season_raw:
@@ -8541,7 +9195,10 @@ def torrent_add():
         if not title:
             return jsonify({"ok": False, "error": "A list title is required."}), 400
         if personal_media.root_for(media_kind) is None:
-            return jsonify({"ok": False, "error": "The library folder is not configured."}), 503
+            return (
+                jsonify({"ok": False, "error": "The library folder is not configured."}),
+                503,
+            )
         if title:
             match = personal_media.match_title(media_kind, title, year)
             if match["found"]:
@@ -8559,7 +9216,10 @@ def torrent_add():
         inventory = _watch_media_inventory(title, year, category)
         conflict = _watch_release_conflict(inventory, category, release_name)
         if conflict:
-            return jsonify({"ok": False, "error": conflict, "library_url": inventory["url"]}), 409
+            return (
+                jsonify({"ok": False, "error": conflict, "library_url": inventory["url"]}),
+                409,
+            )
     ok, err = _proxy_to_magneto(magnet, host)
     if ok:
         return jsonify({"ok": True})
@@ -8570,7 +9230,12 @@ def torrent_add():
 # Routes — home portal
 # ---------------------------------------------------------------------------
 
-_NAV_CATEGORY_GROUPS: tuple[str, ...] = ("Monitoring", "Pit Box", "Infrastructure", "AI")
+_NAV_CATEGORY_GROUPS: tuple[str, ...] = (
+    "Monitoring",
+    "Pit Box",
+    "Infrastructure",
+    "AI",
+)
 
 _SERVICE_ICONS: dict[str, str] = {
     "clockwork-web": "⏰",
@@ -9002,7 +9667,10 @@ def home():
 
 def _schedule_clockwork_web_refresh() -> tuple[bool, str]:
     if _scheduler_backend() != "systemd":
-        return False, "Site refresh is only wired for the systemd user service on this host."
+        return (
+            False,
+            "Site refresh is only wired for the systemd user service on this host.",
+        )
     service = os.environ.get("CLOCKWORK_WEB_SERVICE", "clockwork-web.service").strip()
     if not re.fullmatch(r"[A-Za-z0-9@_.:-]+\.service", service):
         return False, f"Refusing invalid Clockwork web service name: {service!r}"
@@ -9098,7 +9766,12 @@ if __name__ == "__main__":
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
     scheme = "https" if ssl_context else "http"
-    debug = os.environ.get("CLOCKWORK_WEB_DEBUG", "").lower() in {"1", "true", "yes", "on"}
+    debug = os.environ.get("CLOCKWORK_WEB_DEBUG", "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     print(f"clockwork-web  {scheme}://{host}:{port}")
     if site_chrome.chrome_dirs():
         import threading

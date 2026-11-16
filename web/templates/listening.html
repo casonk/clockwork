@@ -17,20 +17,35 @@
     .refresh-note.stale { color: var(--yellow); }
     .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
     .tabs a { color: var(--text); text-decoration: none; border: 1px solid var(--border); border-radius: 99px; padding: 3px 12px; font-size: 13px; }
-    .tabs a[aria-current="page"] { border-color: var(--accent); color: var(--accent); }
+    .tabs a[aria-current="page"], .tabs .active { border-color: var(--accent); color: var(--accent); }
+    .tabs .active { border: 1px solid; border-radius: 99px; padding: 3px 12px; font-size: 13px; }
+    .range-form { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+    .range-form label { display: grid; gap: 3px; }
+    .range-form input { color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 5px; padding: 4px 6px; font: inherit; }
+    .range-form button { color: var(--text); background: transparent; border: 1px solid var(--border); border-radius: 99px; padding: 4px 12px; font: inherit; cursor: pointer; }
+    .scale-toggle { justify-self:start; display:flex; gap:4px; align-items:center; color:var(--muted); font-size:12px; }
+    .scale-toggle button { color:var(--text); background:transparent; border:1px solid var(--border); border-radius:99px; padding:3px 10px; cursor:pointer; }
+    .scale-toggle button[aria-pressed="true"] { border-color:var(--accent); color:var(--accent); }
     .stats { display: flex; gap: 28px; flex-wrap: wrap; }
     .stat b { display: block; font-size: 22px; font-family: var(--mono); }
     .stat span { color: var(--muted); font-size: 12px; }
     .lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
     .lists > section { margin: 0; }
     ol.rank { list-style: none; display: grid; gap: 7px; }
+    ol.rank.scroll { max-height: 350px; overflow-y: auto; padding-right: 5px; }
+    ol.rank.scroll.loading::after { content: 'Loading more…'; color: var(--muted); font-size: 12px; padding: 4px 0; }
     ol.rank li { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; font-size: 13px; }
     ol.rank .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    ol.rank .name a { color: var(--text); text-decoration: none; }
+    ol.rank .name a:hover { color: var(--accent); text-decoration: underline; }
     ol.rank .name small { color: var(--muted); }
     ol.rank .n { font-family: var(--mono); color: var(--muted); }
     ol.rank .bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--border) 60%, transparent); }
     ol.rank .bar i { display: block; height: 100%; border-radius: 2px; background: color-mix(in srgb, var(--accent) 75%, var(--surface)); }
     .cols { display: flex; align-items: flex-end; gap: 3px; height: 90px; }
+    .with-y { display:grid; grid-template-columns:34px 1fr; gap:7px; }
+    .y-axis { height:90px; display:flex; flex-direction:column; justify-content:space-between; align-items:end; color:var(--muted); font:10px var(--mono); border-right:1px solid var(--border); padding-right:4px; }
+    .y-axis.tall { height:180px; }
     .cols.wide { gap: 6px; }
     .cols.wide .col, .axis.wide span { max-width: 56px; }
     .cols .col { flex: 1; min-width: 0; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; }
@@ -38,6 +53,14 @@
     .axis { display: flex; gap: 3px; font-size: 10px; color: var(--muted); margin-top: 4px; }
     .axis.wide { gap: 6px; }
     .axis span { flex: 1; text-align: center; overflow: hidden; }
+    .timeline { width: 100%; height: 180px; overflow: visible; }
+    .timeline .baseline { stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+    .timeline .tick { stroke: var(--muted); stroke-width: 1; vector-effect: non-scaling-stroke; }
+    .timeline polyline { fill: none; stroke: var(--accent); stroke-width: 2.5; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
+    .timeline-axis { position: relative; height: 18px; color: var(--muted); font-size: 10px; }
+    .timeline-axis span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+    .timeline-axis span.edge-start { transform: none; }
+    .timeline-axis span.edge-end { transform: translateX(-100%); }
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
     th { color: var(--muted); font-weight: 600; }
@@ -58,48 +81,57 @@
   <p class="refresh-note" id="refresh-note" data-generated="{{ summary.generated }}">Updated <time id="refresh-when" datetime="{{ summary.generated }}">{{ summary.generated[:16].replace('T', ' ') }} UTC</time><span id="refresh-ago"></span> · listening-tracker polls every 30 minutes; this page checks for a new summary every minute</p>
   <nav class="tabs" aria-label="Time window">
     {% for key, label in windows %}<a href="?window={{ key }}" {% if view.window == key %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
+    {% if view.custom_start %}<span class="active" aria-current="page">Custom</span>{% endif %}
   </nav>
+  <form class="range-form" method="get">
+    <input type="hidden" name="window" value="{{ view.summary_window }}">
+    <label>From <input type="date" name="start" value="{{ view.custom_start }}" required></label>
+    <label>To <input type="date" name="end" value="{{ view.custom_end }}" required></label>
+    <button type="submit">Custom timeline</button>
+    {% if view.custom_start %}<a href="?window={{ view.summary_window }}">Clear custom range</a>{% endif %}
+  </form>
+  {% if range_error %}<p class="muted" role="alert">{{ range_error }}</p>{% endif %}
   <section>
-    <h2>At a glance</h2>
+    <h2>At a glance · {{ view.metrics_label }}</h2>
     <div class="stats">
       <div class="stat"><b>{{ '{:,}'.format(view.plays) }}</b><span>plays</span></div>
       <div class="stat"><b>{{ '{:,.1f}'.format(view.hours) }}</b><span>hours listened</span></div>
       <div class="stat"><b>{{ '{:,}'.format(summary.plays) }}</b><span>plays on record{% if summary.first %} since {{ summary.first[:10] }}{% endif %}</span></div>
+      <div class="stat"><b>{% if now_playing %}<a href="{{ now_playing.url }}" target="_blank" rel="noopener noreferrer">▶ {{ now_playing.name }}</a>{% else %}—{% endif %}</b><span>{% if now_playing %}Now on Spotify · {{ now_playing.artist }}{% else %}Nothing currently playing on Spotify{% endif %}</span></div>
     </div>
     <p class="muted" style="margin-top:8px;font-size:12px">Last play {{ summary.last[:16].replace('T', ' ') }} UTC · summary updated {{ summary.generated[:16].replace('T', ' ') }} UTC
       · sources: {% for k, v in summary.sources.items() %}{{ k }} {{ '{:,}'.format(v) }}{% if not loop.last %}, {% endif %}{% else %}none{% endfor %}</p>
   </section>
   <div class="lists">
     <section>
-      <h2>Top artists</h2>
-      <ol class="rank">{% for r in view.artists %}<li><span class="name">{{ r.name }}</span><span class="n">{{ r.plays }}</span><span class="bar"><i style="width:{{ r.pct }}%"></i></span></li>{% else %}<li class="muted">Nothing in this window.</li>{% endfor %}</ol>
+      <h2>Top artists · {{ view.metrics_label }}</h2>
+      <ol class="rank scroll" data-top-kind="artists" data-window="{{ view.summary_window }}" data-start="{{ view.custom_start }}" data-end="{{ view.custom_end }}">{% for r in view.artists %}<li><span class="name">{{ loop.index }}. <a href="{{ r.spotify_url }}" target="_blank" rel="noopener noreferrer">{{ r.name }} ↗</a></span><span class="n">{{ r.plays }}</span><span class="bar"><i style="width:{{ r.pct }}%"></i></span></li>{% endfor %}</ol>
     </section>
     <section>
-      <h2>Top tracks</h2>
-      <ol class="rank">{% for r in view.tracks %}<li><span class="name">{{ r.name }} <small>{{ r.artist }}</small></span><span class="n">{{ r.plays }}</span><span class="bar"><i style="width:{{ r.pct }}%"></i></span></li>{% else %}<li class="muted">Nothing in this window.</li>{% endfor %}</ol>
+      <h2>Top tracks · {{ view.metrics_label }}</h2>
+      <ol class="rank scroll" data-top-kind="tracks" data-window="{{ view.summary_window }}" data-start="{{ view.custom_start }}" data-end="{{ view.custom_end }}">{% for r in view.tracks %}<li><span class="name">{{ loop.index }}. <a href="{{ r.spotify_url }}" target="_blank" rel="noopener noreferrer">{{ r.name }} ↗</a> <small>{{ r.artist }}</small></span><span class="n">{{ r.plays }}</span><span class="bar"><i style="width:{{ r.pct }}%"></i></span></li>{% endfor %}</ol>
     </section>
     <section>
-      <h2>Top albums</h2>
-      <ol class="rank">{% for r in view.albums %}<li><span class="name">{{ r.name }} <small>{{ r.artist }}</small></span><span class="n">{{ r.plays }}</span><span class="bar"><i style="width:{{ r.pct }}%"></i></span></li>{% else %}<li class="muted">Nothing in this window.</li>{% endfor %}</ol>
+      <h2>Top albums · {{ view.metrics_label }}</h2>
+      <ol class="rank scroll" data-top-kind="albums" data-window="{{ view.summary_window }}" data-start="{{ view.custom_start }}" data-end="{{ view.custom_end }}">{% for r in view.albums %}<li><span class="name">{{ loop.index }}. <a href="{{ r.spotify_url }}" target="_blank" rel="noopener noreferrer">{{ r.name }} ↗</a> <small>{{ r.artist }}</small></span><span class="n">{{ r.plays }}</span><span class="bar"><i style="width:{{ r.pct }}%"></i></span></li>{% endfor %}</ol>
     </section>
   </div>
   <section>
-    <h2>When you listen (all time, local time)</h2>
-    <div class="cols" role="img" aria-label="Plays by hour of day">{% for b in view.hours_of_day %}<div class="col" title="{{ b.label }}:00 — {{ b.value }} plays"><i style="height:{{ b.pct }}%"></i></div>{% endfor %}</div>
-    <div class="axis" aria-hidden="true">{% for b in view.hours_of_day %}<span>{{ b.label if (b.label | int) % 6 == 0 else '' }}</span>{% endfor %}</div>
-    <div class="cols wide" style="margin-top:14px" role="img" aria-label="Plays by weekday">{% for b in view.weekdays %}<div class="col" title="{{ b.label }} — {{ b.value }} plays"><i style="height:{{ b.pct }}%"></i></div>{% endfor %}</div>
-    <div class="axis wide" aria-hidden="true">{% for b in view.weekdays %}<span>{{ b.label }}</span>{% endfor %}</div>
+    <h2>When you listen ({{ view.metrics_label | lower }}, local time)</h2>
+    <div class="scale-toggle" role="group" aria-label="Chart vertical scale">Vertical scale: <button type="button" data-scale="linear" aria-pressed="true">Linear</button><button type="button" data-scale="log" aria-pressed="false">Log</button></div>
+    <div class="with-y"><div class="y-axis"><span>{{ view.hour_peak }}</span><span>{{ (view.hour_peak / 2)|round|int }}</span><span>0</span></div><div><div class="cols" role="img" aria-label="Plays by hour of day">{% for b in view.hours_of_day %}<div class="col" title="{{ b.label }}:00 — {{ b.value }} plays"><i style="height:{{ b.pct }}%"></i></div>{% endfor %}</div><div class="axis" aria-hidden="true">{% for b in view.hours_of_day %}<span>{{ b.label if (b.label | int) % 6 == 0 else '' }}</span>{% endfor %}</div></div></div>
+    <div class="with-y" style="margin-top:14px"><div class="y-axis"><span>{{ view.weekday_peak }}</span><span>{{ (view.weekday_peak / 2)|round|int }}</span><span>0</span></div><div><div class="cols wide" role="img" aria-label="Plays by weekday">{% for b in view.weekdays %}<div class="col" title="{{ b.label }} — {{ b.value }} plays"><i style="height:{{ b.pct }}%"></i></div>{% endfor %}</div><div class="axis wide" aria-hidden="true">{% for b in view.weekdays %}<span>{{ b.label }}</span>{% endfor %}</div></div></div>
     <details class="table-view"><summary>Table view</summary>
       <table><tr><th>Hour</th><th>Plays</th></tr>{% for b in view.hours_of_day %}<tr><td>{{ b.label }}:00</td><td>{{ b.value }}</td></tr>{% endfor %}</table>
       <table style="margin-top:8px"><tr><th>Weekday</th><th>Plays</th></tr>{% for b in view.weekdays %}<tr><td>{{ b.label }}</td><td>{{ b.value }}</td></tr>{% endfor %}</table>
     </details>
   </section>
   <section>
-    <h2>By month</h2>
-    <div class="cols wide" role="img" aria-label="Plays by month">{% for b in view.months %}<div class="col" title="{{ b.label }} — {{ b.value }} plays"><i style="height:{{ b.pct }}%"></i></div>{% endfor %}</div>
-    <div class="axis wide" aria-hidden="true">{% for b in view.months %}<span>{{ b.label[2:] if loop.first or b.label.endswith('-01') or b.label.endswith('-07') else '' }}</span>{% endfor %}</div>
+    <h2>{{ view.timeline_title }} · {{ view.custom_start ~ ' to ' ~ view.custom_end if view.custom_start else view.window_label }}</h2>
+    <div class="scale-toggle" role="group" aria-label="Chart vertical scale">Vertical scale: <button type="button" data-scale="linear" aria-pressed="true">Linear</button><button type="button" data-scale="log" aria-pressed="false">Log</button></div>
+    <div class="with-y"><div class="y-axis tall"><span>{{ view.timeline_peak }}</span><span>{{ (view.timeline_peak / 2)|round|int }}</span><span>0</span></div><div><svg class="timeline" viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="{{ view.timeline_title }} for the selected time window"><line class="baseline" x1="0" y1="100" x2="100" y2="100"></line>{% for tick in view.timeline_ticks %}<line class="tick" x1="{{ tick.x }}" y1="100" x2="{{ tick.x }}" y2="96"></line>{% endfor %}<polyline points="{{ view.timeline_points }}"></polyline></svg><div class="timeline-axis" aria-hidden="true">{% for tick in view.timeline_ticks %}<span class="edge-{{ tick.edge }}" style="left:{{ tick.x }}%">{{ tick.label }}</span>{% endfor %}</div></div></div>
     <details class="table-view"><summary>Table view</summary>
-      <table><tr><th>Month</th><th>Plays</th></tr>{% for b in view.months %}<tr><td>{{ b.label }}</td><td>{{ b.value }}</td></tr>{% endfor %}</table>
+      <table><tr><th>Period</th><th>Plays</th></tr>{% for b in view.timeline %}<tr><td>{{ b.label }}</td><td>{{ b.value }}</td></tr>{% endfor %}</table>
     </details>
   </section>
   <section>
@@ -114,6 +146,29 @@
 <script>
   // Keep the "Updated" note live and reload when a newer summary has been written.
   (function () {
+    const scaleButtons = [...document.querySelectorAll('[data-scale]')];
+    function setScale(scale) {
+      document.documentElement.dataset.chartScale = scale;
+      scaleButtons.forEach(function (button) { button.setAttribute('aria-pressed', String(button.dataset.scale === scale)); });
+      document.querySelectorAll('.cols .col i').forEach(function (bar) {
+        const linearHeight = Number(bar.dataset.linearHeight || parseFloat(bar.style.height) || 0);
+        bar.dataset.linearHeight = linearHeight;
+        bar.style.height = scale === 'log' ? (linearHeight ? 100 * Math.log1p(linearHeight) / Math.log(101) : 0) + '%' : linearHeight + '%';
+      });
+      document.querySelectorAll('.timeline').forEach(function (chart) {
+        const points = chart.querySelector('polyline');
+        if (!points.dataset.linearPoints) points.dataset.linearPoints = points.getAttribute('points') || '';
+        points.setAttribute('points', scale === 'linear' ? points.dataset.linearPoints : points.dataset.linearPoints.split(' ').map(function (point) {
+          const pair = point.split(','); const value = 100 - Number(pair[1]);
+          return pair[0] + ',' + (100 - (value ? 100 * Math.log1p(value) / Math.log(101) : 0));
+        }).join(' '));
+      });
+      try { localStorage.setItem('clockwork-listening-chart-scale', scale); } catch (err) { /* storage may be disabled */ }
+    }
+    scaleButtons.forEach(function (button) { button.addEventListener('click', function () { setScale(button.dataset.scale); }); });
+    let savedScale = 'linear';
+    try { savedScale = localStorage.getItem('clockwork-listening-chart-scale') || 'linear'; } catch (err) { /* keep linear */ }
+    setScale(savedScale);
     const note = document.getElementById('refresh-note');
     if (!note) return;
     let generated = new Date(note.dataset.generated);
@@ -141,6 +196,35 @@
     paint();
     setInterval(paint, 30000);
     setInterval(check, 60000);
+    document.querySelectorAll('[data-top-kind]').forEach(function (list) {
+      let loading = false, more = true;
+      async function load() {
+        if (loading || !more) return;
+        loading = true; list.classList.add('loading');
+        const p = new URLSearchParams({kind: list.dataset.topKind, offset: list.children.length, limit: 20, window: list.dataset.window});
+        if (list.dataset.start) p.set('start', list.dataset.start);
+        if (list.dataset.end) p.set('end', list.dataset.end);
+        try {
+          const result = await fetch('/api/listening/top?' + p, {cache: 'no-store'}).then(function (r) { return r.json(); });
+          const base = list.children.length;
+          result.rows.forEach(function (row, i) {
+            const li = document.createElement('li');
+            const name = document.createElement('span'); name.className = 'name';
+            const link = document.createElement('a'); link.target = '_blank'; link.rel = 'noopener noreferrer';
+            const query = list.dataset.topKind === 'artists' ? row.name : row.artist + ' ' + row.name;
+            link.href = 'https://open.spotify.com/search/' + encodeURIComponent(query); link.textContent = (base + i + 1) + '. ' + row.name + ' ↗';
+            name.append(link); if (row.artist) { const small = document.createElement('small'); small.textContent = ' ' + row.artist; name.append(small); }
+            const plays = document.createElement('span'); plays.className = 'n'; plays.textContent = row.plays;
+            const bar = document.createElement('span'); bar.className = 'bar';
+            const fill = document.createElement('i'); fill.style.width = row.pct + '%'; bar.append(fill);
+            li.append(name, plays, bar); list.append(li);
+          });
+          more = result.more;
+        } finally { loading = false; list.classList.remove('loading'); }
+      }
+      list.addEventListener('scroll', function () { if (list.scrollTop + list.clientHeight >= list.scrollHeight - 40) load(); });
+      load();
+    });
   })();
 </script>
 {% endif %}
