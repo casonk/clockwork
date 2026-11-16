@@ -655,3 +655,16 @@ def test_a_render_in_progress_can_be_watched(client, library, probed, ai_files, 
     playlist = client.get("/library/stream" + rel + "/index.m3u8?q=original&v=ai-4k")
     assert playlist.status_code == 200 and sources[-1] == directory / "chunks.ffconcat"
     assert playlist.get_data(as_text=True).count("seg/") == 10  # 60 s in 6 s segments
+
+
+def test_play_page_resumes_from_the_saved_position(client, probed):
+    html = client.get(
+        "/library/play/movies/Thriller/Seven (1995)/Seven_1995_1080p_David_Fincher.mp4"
+    ).get_data(as_text=True)
+
+    assert "clockwork-library-position:" in html
+    assert "video.currentTime = resumeTime" in html
+    assert '"pagehide", function () { savePosition(true)' in html
+    # Finishing clears it, and the pre-seek 0:00 never overwrites it.
+    assert "localStorage.removeItem(positionKey())" in html
+    assert "video.currentTime >= 10" in html

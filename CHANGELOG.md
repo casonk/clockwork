@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- The library player now resumes where playback stopped. Each episode's position is saved in the
+  browser every few seconds and on pause or page close, restored after a crash or reload ("Resuming
+  at 12:34"), and cleared once the episode is 90% watched.
 - Completed downloads are no longer stranded when their torrent leaves Transmission. **File
   completed episodes** now also reads the torrent directories on disk (not only Transmission's live
   list), and Magneto being down no longer blocks it. A new `scripts/file_completed_series.py` and
