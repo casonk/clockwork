@@ -434,3 +434,10 @@ should change how future sessions work in this repo.
 - Put each external service behind one small provider interface (`web/providers.py`: link, browse,
   write capabilities) so pages and flows ask what a provider can do instead of branching on its
   name. A link-only service then costs one class and needs no credentials.
+
+- A pipeline step that works from a service's *live* state (Transmission's torrent list) loses
+  work whenever the state is cleared first: Joe Pickett S02 finished, the torrent was removed with
+  its files kept, and the library never linked them. Drive filing from the files on disk and run it
+  on a timer; treat the live list as an optimisation, not the source of truth.
+- Before concluding data is gone, look at the ground truth with elevated read access (here the
+  torrent share is `transmission:snowbridge` mode 2770). An empty API list only meant "untracked".
