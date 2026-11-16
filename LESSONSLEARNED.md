@@ -14,6 +14,13 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
+- A range selector must drive every range-dependent visualization. Keep charts calendar-aligned and
+  zero-fill missing periods; otherwise sparse activity is displayed as consecutive dates and a
+  dashboard can silently render a different period than its selected summary.
+- Search inference across providers must remain user-triggered and non-mutating. YouTube search has
+  quota costs and a title is not a durable cross-service identity, so show a direct search link by
+  default, fetch only a small cached set of candidates on request, and never save or queue a result
+  until the user explicitly chooses it.
 - Never aim a working-tree-changing git command at a checkout that holds someone else's
   uncommitted work. `git apply` without `--cached` or `--check`, `reset --hard`,
   `checkout -- <path>`, `restore`, `clean -f` and `stash` all rewrite it, and `git -C <path>`

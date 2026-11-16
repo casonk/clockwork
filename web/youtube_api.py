@@ -362,6 +362,36 @@ def owned_playlists(settings: Settings) -> list[dict[str, str]]:
             return playlists
 
 
+def search_videos(settings: Settings, query: str, limit: int = 3) -> list[dict[str, str]]:
+    """Return a few read-only YouTube video candidates for an explicit user search."""
+
+    text = str(query or "").strip()
+    if not text:
+        raise YouTubeError("YouTube search query cannot be empty")
+    if not 1 <= limit <= 5:
+        raise YouTubeError("YouTube search limit must be between 1 and 5")
+    token = access_token(load_credentials(settings.oauth_file))
+    payload = _api_get("search", token, part="snippet", type="video", q=text, maxResults=limit)
+    matches: list[dict[str, str]] = []
+    for raw in payload.get("items", []):
+        if not isinstance(raw, dict):
+            continue
+        identifier = raw.get("id") if isinstance(raw.get("id"), dict) else {}
+        snippet = raw.get("snippet") if isinstance(raw.get("snippet"), dict) else {}
+        video_id = str(identifier.get("videoId") or "").strip()
+        title = str(snippet.get("title") or "").strip()
+        if video_id and title:
+            matches.append(
+                {
+                    "video_id": video_id,
+                    "title": title,
+                    "channel": str(snippet.get("channelTitle") or "").strip(),
+                    "url": video_url(video_id),
+                }
+            )
+    return matches
+
+
 def ensure_private_playlist(settings: Settings, title: str) -> tuple[str, bool]:
     """Return ``(playlist_id, created)`` for an exact private playlist title."""
 

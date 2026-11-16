@@ -88,7 +88,9 @@ def test_youtube_status_exposes_readiness_without_credential_path(client, tmp_pa
     assert "oauth_file" not in json.dumps(payload)
 
 
-def test_list_pages_link_to_configured_playlists_only_in_the_page(client, tmp_path, monkeypatch):
+def test_list_pages_use_one_playlist_browser_not_direct_playlist_links(
+    client, tmp_path, monkeypatch
+):
     accounts = [
         web_app.youtube_api.Settings(
             oauth_file=tmp_path / "a.json",
@@ -105,11 +107,11 @@ def test_list_pages_link_to_configured_playlists_only_in_the_page(client, tmp_pa
     watch = client.get("/to-watch").get_data(as_text=True)
     listen = client.get("/to-listen").get_data(as_text=True)
 
-    assert "https://www.youtube.com/playlist?list=PLwatch1" in watch
-    assert "https://www.youtube.com/playlist?list=PLwatch2" in watch
-    assert "PLlisten1" not in watch
-    assert "https://www.youtube.com/playlist?list=PLlisten1" in listen
-    assert "PLwatch1" not in listen
+    assert 'href="/to-watch/playlist"' in watch
+    assert 'href="/to-listen/playlist"' in listen
+    assert "PLwatch1" not in watch
+    assert "PLwatch2" not in watch
+    assert "PLlisten1" not in listen
     assert "PLwatch1" not in json.dumps(client.get("/api/youtube").get_json())
 
 

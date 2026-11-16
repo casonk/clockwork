@@ -352,8 +352,12 @@ def add_items(settings: Settings, uris: list[str], playlist_id: str = "") -> int
 
 
 def user_playlists(settings: Settings) -> list[dict[str, str]]:
-    """Every playlist the account owns or follows: id, title, track count and link."""
+    """Every playlist the account owns or follows, labelled by ownership."""
     token = access_token(settings)
+    profile = _get("me", token)
+    user_id = str(profile.get("id") or "").strip()
+    if not user_id:
+        raise SpotifyError("Spotify profile returned no user id")
     out: list[dict[str, str]] = []
     offset = 0
     while True:
@@ -363,6 +367,7 @@ def user_playlists(settings: Settings) -> list[dict[str, str]]:
                 continue
             counts = row.get("items") or row.get("tracks") or {}  # `tracks` before the 2026 rename
             owner = row.get("owner") if isinstance(row.get("owner"), dict) else {}
+            owner_id = str(owner.get("id") or "").strip()
             out.append(
                 {
                     "id": str(row["id"]),
@@ -370,6 +375,7 @@ def user_playlists(settings: Settings) -> list[dict[str, str]]:
                     "count": str(counts.get("total", "")) if isinstance(counts, dict) else "",
                     "url": f"https://open.spotify.com/playlist/{row['id']}",
                     "owner": str(owner.get("display_name") or ""),
+                    "ownership": "owned" if owner_id == user_id else "followed",
                     "private": "" if row.get("public") else "private",
                 }
             )
