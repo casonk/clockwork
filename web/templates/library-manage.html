@@ -42,6 +42,7 @@
     <span class="small muted">
       {{ ai.rendered }} rendered ({{ ai.rendered_size or "0 MB" }}){% if st.queued is defined %} · {{ st.queued }} queued{% endif %}{% if ai.failed %} · {{ ai.failed }} failed{% endif %}
       {% if st.free_gb is defined %} · {{ st.free_gb }} GB free, stops below {{ st.min_free_gb|int }} GB{% endif %}
+      {% if st.scratch_free_gb is defined %} · NVMe scratch {{ st.scratch_free_gb }} GB free, stops below {{ st.scratch_min_free_gb|int }} GB{% endif %}
     </span>
   </div>
   {% if st.state == "rendering" %}
@@ -60,6 +61,10 @@
       GPU {{ st.gpu_c|int if st.gpu_c is not none else "?" }} °C, CPU {{ st.cpu_c|int if st.cpu_c is not none else "?" }} °C.</p>
   {% elif st.state == "disk-floor" %}
     <p class="small" style="margin-top:8px">Paused: the next render ({{ st.next }}) would take free space below the floor. Checking again hourly.</p>
+  {% elif st.state == "scratch-floor" %}
+    <p class="small" style="margin-top:8px">Paused: the next render ({{ st.next }}) would take NVMe scratch space below its floor. Checking again hourly.</p>
+  {% elif st.state == "playback" %}
+    <p class="small" style="margin-top:8px">Paused while the library player is active, including direct play, to keep disk access responsive.</p>
   {% elif st.state == "gpu-unavailable" %}
     <p class="small" style="margin-top:8px">⚠ Paused: the GPU is not usable ({{ st.reason }}). No video was marked failed. Retrying{% if st.retry_at %} at {{ st.retry_at }}{% endif %}, backing off from 1 minute up to 1 hour; a reboot normally fixes a driver/library mismatch after an NVIDIA update.</p>
   {% elif st.state == "throttled" %}

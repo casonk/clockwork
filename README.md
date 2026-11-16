@@ -455,15 +455,21 @@ are listed in `config/media-library-upscale-failed.json` and skipped.
 
 Rendering is chunked. One decoder streams the whole video, and the output is
 encoded in chunks of whole 6-second streaming segments, each sized for about
-`CLOCKWORK_UPSCALE_CHUNK_WORK_SECONDS` (60) of GPU work, into
-`<render>.chunks/` with a manifest. A stop, restart or reboot loses at most the
-chunk in progress, and the next run resumes there. The resume point is found
-by the content of the last frames, because timestamp seeking lands a frame
+`CLOCKWORK_UPSCALE_CHUNK_WORK_SECONDS` (60) of GPU work. New chunks and their
+manifest live in `CLOCKWORK_UPSCALE_WORK_DIR` (default
+`~/.cache/clockwork/upscale-work`, normally NVMe); a small `<render>.chunks/`
+symlink lets the player find them. Legacy real chunk directories remain
+resumable. The worker preserves `CLOCKWORK_UPSCALE_WORK_MIN_FREE_GB` (default
+100), removes finished scratch data, and cleans old unreferenced scratch. A
+stop, restart or reboot loses at most the chunk in progress, and the next run
+resumes there. The resume point is found by the content of the last frames,
+because timestamp seeking lands a frame
 early or late depending on the container. Interrupted renders continue before
 new ones start. While a render is in progress, the player already offers the
 finished part ("✨ AI 4K (rendering: first 25:00)"); reload later for more.
-The finished chunks are joined and the audio encoded once from the source,
-because encoding it per chunk would add up to drift.
+The finished chunks are read from scratch while the joined `.part` file and
+final atomic rename stay on the HDD beside the destination. Audio is encoded
+once from the source, because encoding it per chunk would add up to drift.
 
 The worker is throttled so it does not run the machine hot or loud: it works
 only `CLOCKWORK_UPSCALE_DUTY` of the time (default 0.35) and rests the rest
@@ -489,6 +495,11 @@ work falls back to low OS priority.
 After a preemption the worker does not retry at once: it asks
 `ecu retry-after --json`, which rate limits preemptible leases with AIMD, and
 pauses (state `throttled`) until then, waking early for a render request.
+
+The browser also posts a playback heartbeat every 15 seconds. This covers
+direct-play files, which do not have an HLS `ffmpeg` process for the ECU to
+observe. A fresh heartbeat makes the worker yield after its current saved
+chunk and keeps it paused until playback has stopped for 45 seconds.
 
 To configure cooperative yielding, add a `pause-file` consumer to
 the ECU's `config.toml` (under `~/.config/` in the ECU's own directory):

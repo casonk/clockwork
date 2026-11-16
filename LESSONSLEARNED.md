@@ -14,6 +14,13 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
+- Keep bulk media and finished derivatives on the capacity disk, but put
+  resumable transcoding chunks and live HLS segments on fast scratch. Preserve
+  an HDD-local pointer so independent web and worker processes agree on partial
+  output, assemble the final file as a same-filesystem sibling before rename,
+  enforce separate free-space floors, and pause background I/O from an explicit
+  player heartbeat because direct play has no transcoder process to observe.
+
 - A range selector must drive every range-dependent visualization. Keep charts calendar-aligned and
   zero-fill missing periods; otherwise sparse activity is displayed as consecutive dates and a
   dashboard can silently render a different period than its selected summary.

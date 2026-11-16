@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- AI-upscale working chunks now live on NVMe scratch while canonical sources
+  and finished renders remain on the HDD. Scratch has its own free-space floor
+  and cleanup, and browser heartbeats pause background rendering during direct
+  play as well as HLS playback.
 - AI upscaling no longer blames videos for an unusable GPU. After an NVIDIA update left the
   userspace libraries newer than the loaded kernel module, every render failed instantly with a CUDA
   initialisation error and 510 videos were tagged "last attempt failed". That error now pauses the

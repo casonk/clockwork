@@ -32,6 +32,7 @@ the web app can read status and outputs.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import math
@@ -91,6 +92,19 @@ PRIORITY_FILE = Path(
         ml.BASE_DIR / "config" / "media-library-upscale-priority.json",
     )
 )
+WORK_DIR = Path(
+    os.environ.get(
+        "CLOCKWORK_UPSCALE_WORK_DIR", Path.home() / ".cache" / "clockwork" / "upscale-work"
+    )
+).expanduser()
+WORK_MIN_FREE_GB = float(os.environ.get("CLOCKWORK_UPSCALE_WORK_MIN_FREE_GB", "100"))
+PLAYBACK_FILE = Path(
+    os.environ.get(
+        "CLOCKWORK_LIBRARY_PLAYBACK_FILE",
+        Path.home() / ".cache" / "clockwork" / "library-playback",
+    )
+).expanduser()
+PLAYBACK_TIMEOUT_SECONDS = float(os.environ.get("CLOCKWORK_LIBRARY_PLAYBACK_TIMEOUT", "45"))
 MIN_FREE_GB = float(os.environ.get("CLOCKWORK_UPSCALE_MIN_FREE_GB", "1000"))
 SERVICE = "clockwork-upscale"
 
@@ -152,7 +166,123 @@ def output_path(root: Path, source: Path, height: int) -> Path:
 
 
 def chunk_dir(output: Path) -> Path:
+    """Stable library-side pointer to a render's resumable chunks."""
     return output.with_name(output.name + ".chunks")
+
+
+def scratch_chunk_dir(output: Path, work_root: Path = WORK_DIR) -> Path:
+    """Private scratch directory for ``output``, unique across library roots."""
+    digest = hashlib.sha256(str(output.resolve()).encode()).hexdigest()[:24]
+    return work_root / digest
+
+
+def _within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def prepare_chunk_dir(output: Path, work_root: Path = WORK_DIR) -> Path:
+    """Return the resumable chunk directory, placing new work on scratch storage.
+
+    A library-side symlink lets the web process find partial renders without
+    knowing the worker's scratch configuration. A real legacy ``*.chunks``
+    directory remains usable until that interrupted render finishes.
+    """
+    pointer = chunk_dir(output)
+    if pointer.is_symlink():
+        if pointer.is_dir() and _within(pointer.resolve(), work_root):
+            return pointer
+        pointer.unlink(missing_ok=True)
+    elif pointer.is_dir():
+        return pointer
+    elif pointer.exists():
+        pointer.unlink()
+
+    target = scratch_chunk_dir(output, work_root)
+    target.mkdir(parents=True, exist_ok=True, mode=0o700)
+    pointer.parent.mkdir(parents=True, exist_ok=True)
+    pointer.symlink_to(target, target_is_directory=True)
+    return pointer
+
+
+def _empty_directory(directory: Path) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    for child in directory.iterdir():
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink(missing_ok=True)
+
+
+def remove_chunk_dir(directory: Path, work_root: Path = WORK_DIR) -> None:
+    """Remove completed work without following an unexpected library symlink."""
+    if directory.is_symlink():
+        target = directory.resolve(strict=False)
+        directory.unlink(missing_ok=True)
+        if _within(target, work_root):
+            shutil.rmtree(target, ignore_errors=True)
+        return
+    shutil.rmtree(directory, ignore_errors=True)
+
+
+def cleanup_scratch(work_root: Path = WORK_DIR, max_age_seconds: float = 7 * 86400) -> int:
+    """Delete old unreferenced scratch directories; resumable renders stay."""
+    try:
+        entries = list(work_root.iterdir())
+    except OSError:
+        return 0
+    removed = 0
+    now = time.time()
+    for directory in entries:
+        if not directory.is_dir() or directory.is_symlink():
+            continue
+        try:
+            manifest = json.loads((directory / MANIFEST).read_text())
+            output = Path(manifest["output"])
+            pointer = chunk_dir(output)
+            referenced = pointer.is_symlink() and pointer.resolve() == directory.resolve()
+            finished = output.is_file()
+            age = now - directory.stat().st_mtime
+        except (OSError, ValueError, KeyError, TypeError):
+            referenced, finished = False, False
+            try:
+                age = now - directory.stat().st_mtime
+            except OSError:
+                continue
+        if finished or (not referenced and age > max_age_seconds):
+            if referenced:
+                pointer.unlink(missing_ok=True)
+            shutil.rmtree(directory, ignore_errors=True)
+            removed += 1
+    return removed
+
+
+def note_playback(path: Path | None = None, now: float | None = None) -> None:
+    """Refresh the heartbeat used to keep background disk work out of playback."""
+    path = path or PLAYBACK_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch(mode=0o600, exist_ok=True)
+    if now is not None:
+        os.utime(path, (now, now))
+
+
+def playback_active(
+    path: Path | None = None,
+    *,
+    now: float | None = None,
+    timeout: float = PLAYBACK_TIMEOUT_SECONDS,
+) -> bool:
+    path = path or PLAYBACK_FILE
+    try:
+        active = (time.time() if now is None else now) - path.stat().st_mtime < timeout
+    except OSError:
+        return False
+    if not active:
+        path.unlink(missing_ok=True)
+    return active
 
 
 def load_manifest(directory: Path, job: Job, rate: Fraction) -> dict[str, Any]:
@@ -163,6 +293,7 @@ def load_manifest(directory: Path, job: Job, rate: Fraction) -> dict[str, Any]:
     fresh = {
         "version": 1,
         "source": str(job.source),
+        "output": str(job.output),
         "target": job.target_height,
         "model": job.model,
         "rate": f"{rate.numerator}/{rate.denominator}",
@@ -172,11 +303,12 @@ def load_manifest(directory: Path, job: Job, rate: Fraction) -> dict[str, Any]:
         manifest = json.loads((directory / MANIFEST).read_text())
     except (OSError, ValueError):
         manifest = None
-    if manifest and all(manifest.get(k) == v for k, v in fresh.items() if k != "chunks"):
+    identity = ("version", "source", "target", "model", "rate")
+    if manifest and all(manifest.get(k) == fresh[k] for k in identity):
         chunks = [c for c in manifest.get("chunks", []) if (directory / c["file"]).is_file()]
         if len(chunks) == len(manifest.get("chunks", [])):
-            return manifest
-    shutil.rmtree(directory, ignore_errors=True)
+            return {**manifest, "output": str(job.output)}
+    _empty_directory(directory)
     return fresh
 
 
@@ -346,8 +478,42 @@ def free_bytes(path: Path) -> int:
     return shutil.disk_usage(path).free
 
 
+def existing_ancestor(path: Path) -> Path:
+    while not path.exists() and path != path.parent:
+        path = path.parent
+    return path
+
+
 def has_room(root: Path, job: Job, min_free_gb: float = MIN_FREE_GB, free=free_bytes) -> bool:
     return free(root) - job.estimated_bytes > min_free_gb * 1024**3
+
+
+def has_scratch_room(
+    work_root: Path,
+    job: Job,
+    min_free_gb: float = WORK_MIN_FREE_GB,
+    free=free_bytes,
+    completed_bytes: int = 0,
+) -> bool:
+    remaining = max(job.estimated_bytes - completed_bytes, 0)
+    return free(existing_ancestor(work_root)) - remaining > min_free_gb * 1024**3
+
+
+def chunk_bytes(job: Job) -> int:
+    directory = chunk_dir(job.output)
+    if not directory.is_dir():
+        return 0
+    total = 0
+    for path in directory.glob("*.mkv"):
+        with contextlib.suppress(OSError):
+            total += path.stat().st_size
+    return total
+
+
+def needs_scratch(job: Job) -> bool:
+    """Legacy real chunk directories finish in place; all new work uses scratch."""
+    directory = chunk_dir(job.output)
+    return not (directory.is_dir() and not directory.is_symlink())
 
 
 def read_status(path: Path = STATUS_FILE) -> dict[str, Any]:
@@ -597,6 +763,34 @@ def join_command(source: Path, chunks: Path, output: Path, start: float = 0.0) -
     ]  # fmt: skip
 
 
+def run_join(
+    command: list[str],
+    should_stop: Callable[[], bool],
+    should_yield: Callable[[], bool],
+    *,
+    popen: Callable[..., subprocess.Popen] = subprocess.Popen,
+    sleep: Callable[[float], Any] = time.sleep,
+) -> int:
+    """Run the HDD-local final join, aborting if playback needs the disk."""
+    process = popen(command)
+    try:
+        while process.poll() is None:
+            if should_stop():
+                raise InterruptedError("stopped")
+            if should_yield():
+                raise YieldToRequest
+            sleep(1.0)
+        return process.returncode
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+
+
 DUTY = float(os.environ.get("CLOCKWORK_UPSCALE_DUTY", "0.35"))
 MAX_GPU_C = float(os.environ.get("CLOCKWORK_UPSCALE_MAX_GPU_C", "72"))
 MAX_CPU_C = float(os.environ.get("CLOCKWORK_UPSCALE_MAX_CPU_C", "78"))
@@ -717,13 +911,14 @@ class Throttle:
 class Renderer:
     """Runs frames through a Real-ESRGAN model on the GPU. Needs torch and spandrel."""
 
-    def __init__(self, model_dir: Path = MODEL_DIR) -> None:
+    def __init__(self, model_dir: Path = MODEL_DIR, work_root: Path = WORK_DIR) -> None:
         import spandrel
         import torch
 
         self.torch = torch
         self.loader = spandrel.ModelLoader()
         self.model_dir = model_dir
+        self.work_root = work_root
         self.models: dict[str, Any] = {}
         self.stop_event = threading.Event()
         self.yield_requested: Callable[[Job], bool] = lambda _job: False
@@ -761,7 +956,7 @@ class Renderer:
     def render(self, job: Job, progress: Callable[[int, float], None]) -> None:
         width, height, rate, start = probe_video(job.source)
         out_w, out_h = output_size(width, height, job.target_height)
-        directory = chunk_dir(job.output)
+        directory = prepare_chunk_dir(job.output, self.work_root)
         manifest = load_manifest(directory, job, rate)
         save_manifest(directory, manifest)
         chunk_start = manifest["chunks"][-1]["end_s"] if manifest["chunks"] else 0.0
@@ -773,6 +968,10 @@ class Renderer:
         fps = None
         try:
             while True:
+                if directory.is_symlink() and not has_scratch_room(
+                    self.work_root, job, completed_bytes=chunk_bytes(job)
+                ):
+                    raise YieldToRequest
                 chunk_end = next_chunk_end(chunk_start, rate, fps)
                 want = frame_index(chunk_end, rate) - frame_index(chunk_start, rate)
                 name = f"{len(manifest['chunks']):06d}.mkv"
@@ -811,16 +1010,26 @@ class Renderer:
                 raise RuntimeError("ffmpeg decode failed")
             if not manifest["chunks"]:
                 raise RuntimeError("no frames decoded")
+            if self.yield_requested(job):
+                raise YieldToRequest
             partial = job.output.with_name(job.output.name + ".part")
-            joined = subprocess.run(
-                join_command(job.source, concat_list(directory, manifest, rate), partial, start),
-                check=False,
-            )
-            if joined.returncode != 0:
+            try:
+                joined = run_join(
+                    join_command(
+                        job.source, concat_list(directory, manifest, rate), partial, start
+                    ),
+                    lambda: self.stopping,
+                    lambda: self.yield_requested(job),
+                    sleep=self.stop_event.wait,
+                )
+            except (InterruptedError, YieldToRequest):
+                partial.unlink(missing_ok=True)
+                raise
+            if joined != 0:
                 partial.unlink(missing_ok=True)
                 raise RuntimeError("ffmpeg join failed")
             partial.replace(job.output)
-            shutil.rmtree(directory, ignore_errors=True)
+            remove_chunk_dir(directory, self.work_root)
         finally:
             if decoder.poll() is None:
                 decoder.kill()
@@ -981,6 +1190,8 @@ def render_one(root: Path, db: Path, min_free_gb: float, source: Path) -> int:
         return 0
     if not has_room(root, job, min_free_gb):
         return ecu.REQUEUED
+    if needs_scratch(job) and not has_scratch_room(WORK_DIR, job, completed_bytes=chunk_bytes(job)):
+        return ecu.REQUEUED
 
     renderer = Renderer()
     signal.signal(signal.SIGTERM, lambda _signum, _frame: renderer.stop())
@@ -1004,6 +1215,7 @@ def render_one(root: Path, db: Path, min_free_gb: float, source: Path) -> int:
     renderer.throttle.on_cooling = cooling
     renderer.yield_requested = lambda current: bool(
         PAUSE_FILE.exists()
+        or playback_active()
         or ((requests := load_priority()) and requests[0] != str(current.source))
     )
     try:
@@ -1073,6 +1285,22 @@ def wait_while_paused(
     return not should_stop()
 
 
+def wait_while_playing(
+    should_stop: Callable[[], bool],
+    status: dict[str, Any],
+    *,
+    active: Callable[[], bool] = playback_active,
+    sleep: Callable[[float], None] = time.sleep,
+) -> bool:
+    """Keep background rendering idle while a browser playback heartbeat is fresh."""
+    if not active():
+        return False
+    write_status({**status, "state": "playback"})
+    while active() and not should_stop():
+        sleep(2.0)
+    return not should_stop()
+
+
 def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
     stopping = threading.Event()
     signal.signal(signal.SIGTERM, lambda _signum, _frame: stopping.set())
@@ -1082,9 +1310,14 @@ def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
     forgiven = forgive_gpu_failures()
     if forgiven:
         print(f"forgave {forgiven} failure(s) caused by an unusable GPU", file=sys.stderr)
+    cleanup_scratch()
     while not stopping.is_set():
         base = {"state": "idle", "finished": finished}
         if not wait_while_paused(stopping.is_set, base) and stopping.is_set():
+            break
+        if wait_while_playing(stopping.is_set, base):
+            continue
+        if stopping.is_set():
             break
         conn = ml.connect(db)
         jobs = plan_jobs(root, conn, load_failed(), load_priority())
@@ -1092,6 +1325,8 @@ def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
         base = {"state": "idle", "queued": len(jobs), "finished": finished}
         base["free_gb"] = round(free_bytes(root) / 1024**3)
         base["min_free_gb"] = min_free_gb
+        base["scratch_free_gb"] = round(free_bytes(existing_ancestor(WORK_DIR)) / 1024**3)
+        base["scratch_min_free_gb"] = WORK_MIN_FREE_GB
         if not jobs:
             write_status({**base, "state": "done"})
             if once:
@@ -1101,6 +1336,14 @@ def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
         job = jobs[0]
         if not has_room(root, job, min_free_gb):
             write_status({**base, "state": "disk-floor", "next": job.title})
+            if once:
+                return 0
+            wait_for_request(3600, stopping.is_set)
+            continue
+        if needs_scratch(job) and not has_scratch_room(
+            WORK_DIR, job, completed_bytes=chunk_bytes(job)
+        ):
+            write_status({**base, "state": "scratch-floor", "next": job.title})
             if once:
                 return 0
             wait_for_request(3600, stopping.is_set)

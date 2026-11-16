@@ -74,6 +74,7 @@ def library(tmp_path, monkeypatch):
     monkeypatch.setattr(ml, "LIBRARY_ROOT", root)
     monkeypatch.setattr(ml, "CATALOG_DB", db)
     monkeypatch.setattr(ml, "RENAME_JOURNAL", tmp_path / "journal.jsonl")
+    monkeypatch.setattr(pages.upscale, "note_playback", lambda: None)
     monkeypatch.setattr(ml, "tracked_names", lambda _root: ({"Gran Torino (2008) [1080p]"}, None))
     return root
 
@@ -261,6 +262,25 @@ def test_media_supports_range_requests_and_downloads(client):
     assert "attachment" in download.headers["Content-Disposition"]
 
 
+def test_player_heartbeat_and_media_reads_pause_background_upscaling(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(pages.upscale, "note_playback", lambda: calls.append("active"))
+    rel = "movies/Thriller/Seven (1995)/Seven_1995_1080p_David_Fincher.mp4"
+
+    assert client.post(f"/library/play/{rel}/active").status_code == 403
+    assert (
+        client.post(
+            f"/library/play/{rel}/active",
+            headers={"X-CSRF-Token": _csrf(client)},
+        ).status_code
+        == 204
+    )
+    client.get(f"/library/media/{rel}", headers={"Range": "bytes=0-9"})
+    client.get(f"/library/media/{rel}?download=1")
+
+    assert calls == ["active", "active"]
+
+
 def test_subtitles_are_served_as_webvtt(client):
     resp = client.get(
         "/library/subtitle/movies/Thriller/Seven (1995)/Seven_1995_1080p_David_Fincher.en.srt"
@@ -307,6 +327,8 @@ def test_play_page_plays_mp4_directly_and_streams_mkv(client, probed):
     assert 'value="original">Original (1080p)' in mkv and 'value="720p">720p · ~4.2 Mb/s' in mkv
     assert "/sub/0.vtt" in mkv and "eng (embedded)" in mkv
     assert "Breaking Bad (2008)" in mkv
+    assert 'replace(/\\/$/, "") + "/active"' in html
+    assert "setInterval(reportPlaybackActive, 15000)" in html
 
 
 def test_play_page_fullscreens_the_stage_so_next_controls_stay_reachable(client, probed):
