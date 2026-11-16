@@ -428,7 +428,42 @@
   if (saved && [...select.options].some(function (o) { return o.value === saved; })) {
     select.value = saved;
   }
+  // Resume where playback stopped (crash, reload, closed tab). The position is kept per episode
+  // in this browser; finishing (90%) clears it. Autoplay-next swaps the URL, so the key follows it.
+  const positionPrefix = "clockwork-library-position:";
+  const positionKey = function () { return positionPrefix + window.location.pathname; };
+  let positionSavedAt = 0;
+  function savePosition(force) {
+    const now = Date.now();
+    if (!force && now - positionSavedAt < 5000) return;
+    if (!video.duration || !isFinite(video.duration)) return;
+    positionSavedAt = now;
+    try {
+      if (video.currentTime / video.duration >= 0.9) {
+        localStorage.removeItem(positionKey());
+      } else if (video.currentTime >= 10) {  // never overwrite with the pre-seek 0:00
+        localStorage.setItem(positionKey(), JSON.stringify({ t: video.currentTime, d: video.duration }));
+      }
+    } catch (_err) { /* private mode */ }
+  }
+  video.addEventListener("timeupdate", function () { savePosition(false); });
+  video.addEventListener("pause", function () { savePosition(true); });
+  window.addEventListener("pagehide", function () { savePosition(true); });
+  function savedPosition() {
+    try {
+      const raw = localStorage.getItem(positionKey());
+      const found = raw ? JSON.parse(raw) : null;
+      if (found && found.t >= 10 && found.d > 0 && found.t / found.d < 0.9) return found.t;
+    } catch (_err) { /* private mode or bad value */ }
+    return 0;
+  }
+  const resumeTime = savedPosition();
+  if (resumeTime) video.currentTime = resumeTime;  // before metadata: becomes the start position
   load(select.value, autoStartPending);
+  if (resumeTime) {
+    const m = Math.floor(resumeTime / 60), sec = String(Math.floor(resumeTime % 60)).padStart(2, "0");
+    show("Resuming at " + m + ":" + sec + ".");
+  }
 })();
 </script>
 {% include "_build_watch.html" %}
