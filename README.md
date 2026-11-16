@@ -271,6 +271,14 @@ Library pages (`web/library_pages.py`):
   the items needing attention (still seeding, duplicate copies, no metadata),
   and the recent rename batches with the undo command.
 
+`examples/clockwork/series-filing.toml` optionally runs
+`scripts/file_completed_series.py` every ten minutes. It supplements Magneto's
+live torrent list with completed entries still present in
+`CLOCKWORK_TORRENT_DIRS`, then links episodes only into show folders that
+already exist. This keeps files left behind by Magneto's remove-with-data-kept
+flow discoverable without guessing that an unknown download should create a
+new library title.
+
 ### Read and listen libraries
 
 Set `CLOCKWORK_READ_LIBRARY_DIR` and `CLOCKWORK_LISTEN_LIBRARY_DIR` in the
