@@ -60,6 +60,11 @@ should change how future sessions work in this repo.
 - A finished download that Transmission is still seeding is registered by
   linking episode files into `shows/<Title>/Season NN/`. Do not rename or move
   the torrent data. Skip any destination that already exists.
+- Transmission RPC is not an inventory of files left on disk: removing a
+  torrent while keeping its data makes that download invisible to RPC. For
+  repeatable filing, merge live torrent records with complete entries from the
+  configured download directories, reject partial-file suffixes, and only
+  auto-fill show folders whose library identity already exists.
 - Watch history must follow stable title and season/episode identity when an
   organizer changes an episode's path. Prefer an exact path match, then recover
   unmatched episodes by normalized show title and episode code so filing does

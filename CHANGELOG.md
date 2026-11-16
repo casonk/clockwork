@@ -1,6 +1,11 @@
 # Changelog
 
 ## Unreleased
+- Completed TV downloads can be filed even after their torrent is removed from
+  Transmission. The series builder supplements Magneto's live RPC list with
+  completed entries found in configured torrent directories, and the optional
+  `clockwork-series-filing` job periodically fills seasons for existing shows
+  without creating new show folders.
 - Listening now offers all time, 2-year, 1-year, 6-month, 90-day, 30-day and 7-day views. Its
   selected-window timeline is a calendar-aligned line graph (daily, weekly, or monthly as the range
   grows), zero-fills inactive periods, and uses tape-deck's complete private daily history instead
