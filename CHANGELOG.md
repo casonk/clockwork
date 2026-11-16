@@ -4,7 +4,7 @@
 - AI upscaling no longer blames videos for an unusable GPU. After an NVIDIA update left the
   userspace libraries newer than the loaded kernel module, every render failed instantly with a CUDA
   initialisation error and 510 videos were tagged "last attempt failed". That error now pauses the
-  queue (status "gpu-unavailable", rechecked every 15 minutes) and records nothing against the video;
+  queue (status "gpu-unavailable", retried after 1 minute, doubling to at most 1 hour, reset by a successful render) and records nothing against the video;
   failures it caused earlier are forgiven when the job next starts.
 - The library player now resumes where playback stopped. Each episode's position is saved in the
   browser every few seconds and on pause or page close, restored after a crash or reload ("Resuming

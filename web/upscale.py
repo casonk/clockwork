@@ -383,6 +383,15 @@ def record_failure(source: Path, reason: str, path: Path | None = None) -> None:
 # render-one exit status: the GPU itself is unusable (driver/library mismatch after an update,
 # no device). It is the machine's fault, not the video's, so nothing is recorded against the file.
 GPU_UNAVAILABLE = 76
+GPU_BACKOFF_MIN_S = 60.0
+GPU_BACKOFF_MAX_S = 3600.0
+
+
+def gpu_backoff(previous: float) -> float:
+    """Next wait after a consecutive GPU failure: 1 min, doubling each time, capped at 1 hour."""
+    return min(max(previous * 2, GPU_BACKOFF_MIN_S), GPU_BACKOFF_MAX_S)
+
+
 _GPU_UNAVAILABLE_MARKERS = (
     "cudagetdevicecount",
     "driver/library version mismatch",
@@ -1069,6 +1078,7 @@ def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
     signal.signal(signal.SIGTERM, lambda _signum, _frame: stopping.set())
     signal.signal(signal.SIGINT, lambda _signum, _frame: stopping.set())
     finished = 0
+    gpu_wait = 0.0  # seconds; grows on consecutive GPU failures, resets after a render succeeds
     forgiven = forgive_gpu_failures()
     if forgiven:
         print(f"forgave {forgiven} failure(s) caused by an unusable GPU", file=sys.stderr)
@@ -1106,21 +1116,24 @@ def run(root: Path, db: Path, min_free_gb: float, *, once: bool = False) -> int:
                 pause_after_requeue(base, job, stopping.is_set)
                 continue
             if result == GPU_UNAVAILABLE:
+                gpu_wait = gpu_backoff(gpu_wait)
                 write_status(
                     {
                         **base,
                         "state": "gpu-unavailable",
                         "next": job.title,
                         "reason": "CUDA cannot initialise (driver/library mismatch? reboot)",
+                        "retry_at": time.strftime("%H:%M", time.localtime(time.time() + gpu_wait)),
                     }
                 )
                 if once:
                     return 0
-                wait_for_request(900, stopping.is_set)
+                wait_for_request(gpu_wait, stopping.is_set)
                 continue
             if result != 0:
                 write_status({**base, "state": "ecu-error", "next": job.title})
                 return result
+            gpu_wait = 0.0
             if str(job.source) not in load_failed():
                 finished += 1
         except Exception as exc:  # noqa: BLE001 - a failed lease can be retried on restart
