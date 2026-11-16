@@ -123,10 +123,35 @@
   video.autoplay = autoStartPending;
   let hls = null;
   let countdown = null;
+  let playbackHeartbeat = null;
 
   function show(message, kind) {
     status.className = "flash " + (kind || "");
     status.textContent = message;
+  }
+
+  function activeUrl() {
+    return window.location.pathname.replace(/\/$/, "") + "/active";
+  }
+
+  function reportPlaybackActive() {
+    if (video.paused || video.ended) return;
+    fetch(activeUrl(), {
+      method: "POST",
+      credentials: "same-origin",
+      keepalive: true,
+      headers: { "X-CSRF-Token": {{ csrf_token|tojson }} },
+    }).catch(function () {});
+  }
+
+  function startPlaybackHeartbeat() {
+    reportPlaybackActive();
+    if (!playbackHeartbeat) playbackHeartbeat = setInterval(reportPlaybackActive, 15000);
+  }
+
+  function stopPlaybackHeartbeat() {
+    if (playbackHeartbeat) clearInterval(playbackHeartbeat);
+    playbackHeartbeat = null;
   }
 
   function remembered() {
@@ -396,7 +421,10 @@
     autoStartPending = false;
     video.autoplay = false;
     show("");
+    startPlaybackHeartbeat();
   });
+  video.addEventListener("pause", stopPlaybackHeartbeat);
+  video.addEventListener("ended", stopPlaybackHeartbeat);
   // Tell Clockwork when this video has (nearly) been watched, so the To Watch list can show it.
   // Autoplay swaps the page in place (see go()), so the URL and the "already sent" flag must follow
   // the video that is actually playing, not the one this page was first rendered for.
@@ -417,7 +445,10 @@
   }
   video.addEventListener("timeupdate", reportWatched);
   video.addEventListener("ended", reportWatched);
-  window.addEventListener("pagehide", reportWatched);
+  window.addEventListener("pagehide", function () {
+    stopPlaybackHeartbeat();
+    reportWatched();
+  });
   window.addEventListener("popstate", function () { window.location.reload(); });
   select.addEventListener("change", function () {
     remember(select.value);

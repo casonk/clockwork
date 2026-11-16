@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -102,6 +103,16 @@ def test_disk_floor_accounts_for_the_estimated_output(tmp_path):
     assert 10 * gib < estimate < 15 * gib
     assert upscale.has_room(root, job, 1000, free=lambda _p: 1100 * gib)
     assert not upscale.has_room(root, job, 1000, free=lambda _p: 1005 * gib)
+    scratch = tmp_path / "nvme" / "upscale-work"
+    assert upscale.has_scratch_room(scratch, job, 100, free=lambda _p: 200 * gib)
+    assert not upscale.has_scratch_room(scratch, job, 100, free=lambda _p: 105 * gib)
+    assert upscale.has_scratch_room(
+        scratch,
+        job,
+        100,
+        free=lambda _p: 105 * gib,
+        completed_bytes=job.estimated_bytes,
+    )
 
 
 def test_output_sizes_keep_aspect_and_even_width():
@@ -122,6 +133,39 @@ def test_chunks_are_video_only_and_the_join_encodes_audio_once(tmp_path):
     assert join[join.index("-f") + 1] == "concat"
     assert join[join.index("-c:v") + 1] == "copy" and join[join.index("-c:a") + 1] == "aac"
     assert "-hwaccel" not in upscale.decode_command(Path("/in.mp4"))
+
+
+def test_final_join_yields_to_playback():
+    class Process:
+        returncode = None
+        terminated = False
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.terminated = True
+            self.returncode = -15
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+    process = Process()
+
+    try:
+        upscale.run_join(
+            ["ffmpeg"],
+            lambda: False,
+            lambda: True,
+            popen=lambda _command: process,
+            sleep=lambda _seconds: None,
+        )
+    except upscale.YieldToRequest:
+        pass
+    else:
+        raise AssertionError("the final HDD join did not yield to playback")
+
+    assert process.terminated
 
 
 def test_decoder_seeks_roughly_and_keeps_source_timestamps():
@@ -181,10 +225,55 @@ def test_manifest_resumes_matching_chunks_and_discards_others(tmp_path):
 
     other = _job(tmp_path, model=upscale.ANIMATION_MODEL)
     assert upscale.load_manifest(directory, other, rate)["chunks"] == []
-    assert not directory.exists()  # stale chunks removed
+    assert directory.is_dir() and not list(directory.iterdir())  # stale chunks removed
 
     upscale.save_manifest(directory, manifest)  # chunk file missing: start over
     assert upscale.load_manifest(directory, job, rate)["chunks"] == []
+
+
+def test_new_chunks_live_in_scratch_behind_a_library_symlink(tmp_path):
+    output = tmp_path / "watch" / ".upscaled" / "movie.ai-4k.mkv"
+    work = tmp_path / "nvme" / "upscale-work"
+
+    directory = upscale.prepare_chunk_dir(output, work)
+    (directory / "chunk.mkv").write_bytes(b"video")
+
+    assert directory == upscale.chunk_dir(output)
+    assert directory.is_symlink()
+    assert directory.resolve() == upscale.scratch_chunk_dir(output, work)
+    assert (directory / "chunk.mkv").read_bytes() == b"video"
+
+    upscale.remove_chunk_dir(directory, work)
+    assert not directory.exists() and not directory.is_symlink()
+    assert not upscale.scratch_chunk_dir(output, work).exists()
+
+
+def test_legacy_library_chunks_resume_without_being_moved(tmp_path):
+    output = tmp_path / "watch" / ".upscaled" / "movie.ai-4k.mkv"
+    legacy = upscale.chunk_dir(output)
+    legacy.mkdir(parents=True)
+
+    assert upscale.prepare_chunk_dir(output, tmp_path / "nvme") == legacy
+    assert legacy.is_dir() and not legacy.is_symlink()
+
+
+def test_scratch_cleanup_removes_finished_and_old_orphans(tmp_path):
+    work = tmp_path / "work"
+    finished = tmp_path / "watch" / ".upscaled" / "done.mkv"
+    finished.parent.mkdir(parents=True)
+    finished.write_bytes(b"done")
+    finished_dir = upscale.prepare_chunk_dir(finished, work)
+    upscale.save_manifest(
+        finished_dir,
+        {"output": str(finished), "source": "/source.mkv", "chunks": []},
+    )
+    orphan = work / "orphan"
+    orphan.mkdir(parents=True)
+    (orphan / "junk").write_text("x")
+    os.utime(orphan, (1, 1))
+
+    assert upscale.cleanup_scratch(work, max_age_seconds=1) == 2
+    assert not finished_dir.exists() and not orphan.exists()
 
 
 def test_interrupted_renders_resume_before_new_ones(tmp_path):
@@ -593,6 +682,7 @@ def test_render_one_does_not_blame_the_video_for_an_unusable_gpu(tmp_path, monke
     failed = tmp_path / "failed.json"
     monkeypatch.setattr(upscale, "FAILED_FILE", failed)
     monkeypatch.setattr(upscale, "has_room", lambda *_args: True)
+    monkeypatch.setattr(upscale, "has_scratch_room", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(upscale, "write_status", lambda *_args, **_kw: None)
     monkeypatch.setattr(upscale, "progress_reporter", lambda *_args, **_kw: None)
 
@@ -644,8 +734,11 @@ def test_run_backs_off_while_the_gpu_is_down_and_resets_after_a_render(tmp_path,
     monkeypatch.setattr(upscale, "FAILED_FILE", tmp_path / "failed.json")
     monkeypatch.setattr(upscale, "load_priority", lambda *_a, **_k: [])
     monkeypatch.setattr(upscale, "has_room", lambda *_args: True)
+    monkeypatch.setattr(upscale, "has_scratch_room", lambda *_a, **_k: True)
+    monkeypatch.setattr(upscale, "cleanup_scratch", lambda *_a, **_k: 0)
     monkeypatch.setattr(upscale, "drop_request", lambda *_args: None)
     monkeypatch.setattr(upscale, "wait_while_paused", lambda *_a, **_k: False)
+    monkeypatch.setattr(upscale, "wait_while_playing", lambda *_a, **_k: False)
     monkeypatch.setattr(upscale, "wait_for_request", fake_wait)
     monkeypatch.setattr(upscale, "write_status", lambda status, *_a, **_k: statuses.append(status))
     monkeypatch.setattr(upscale.ecu, "run_render", lambda *_args: next(results))
@@ -661,3 +754,22 @@ def test_run_backs_off_while_the_gpu_is_down_and_resets_after_a_render(tmp_path,
     gpu_states = [s for s in statuses if s.get("state") == "gpu-unavailable"]
     assert len(gpu_states) == 3 and all("retry_at" in s for s in gpu_states)
     assert upscale.load_failed(tmp_path / "failed.json") == {}
+
+
+def test_playback_heartbeat_expires_and_background_waits(tmp_path, monkeypatch):
+    heartbeat = tmp_path / "playback"
+    upscale.note_playback(heartbeat, now=100.0)
+    assert upscale.playback_active(heartbeat, now=120.0, timeout=45)
+    assert not upscale.playback_active(heartbeat, now=146.0, timeout=45)
+    assert not heartbeat.exists()
+
+    states = []
+    active = iter([True, True, False])
+    monkeypatch.setattr(upscale, "write_status", lambda state: states.append(state))
+    assert upscale.wait_while_playing(
+        lambda: False,
+        {"queued": 2},
+        active=lambda: next(active),
+        sleep=lambda _seconds: None,
+    )
+    assert states == [{"queued": 2, "state": "playback"}]
