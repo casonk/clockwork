@@ -441,3 +441,7 @@ should change how future sessions work in this repo.
   on a timer; treat the live list as an optimisation, not the source of truth.
 - Before concluding data is gone, look at the ground truth with elevated read access (here the
   torrent share is `transmission:snowbridge` mode 2770). An empty API list only meant "untracked".
+- A batch worker that records "failed" per item must tell item faults from environment faults. A
+  GPU driver/library mismatch made every upscale fail in seconds and flagged 510 healthy videos.
+  Classify environment errors (CUDA init, no device) as "pause and retry", never as a mark on the
+  item, and self-heal marks that an earlier version wrongly wrote.
