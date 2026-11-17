@@ -10,6 +10,7 @@ Mark items `[x]` when complete and move them to Done.
 
 ## Pending
 
+- [ ] [codecov:2026-11-17] **Raise patch coverage on PR #218: 71.8391% patched, 49 changed lines have no test coverage.** Files: web/upscale.py (48 missing, 70.55%), web/library_pages.py (1 missing, 90.9%). Add tests for the uncovered lines. (codecov-pr:218, https://github.com/casonk/clockwork/pull/218#issuecomment-6931729597)
 - [ ] [manual:2026-11-16] **Enable the series-filing job and torrent-dir access** — the login user
   is not in the `snowbridge` group, so `/srv/snowbridge/share/torrents` (mode 2770) is unreadable
   and disk-based filing reports "Permission denied". Add the user to `snowbridge`, restart
