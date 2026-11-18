@@ -1440,6 +1440,49 @@ def test_watch_check_matches_titles_regardless_of_word_spacing(client, tmp_path,
     assert matches["Space"]["found"] is False
 
 
+def test_watch_check_suggests_near_misses_without_calling_them_found(client, tmp_path, monkeypatch):
+    (tmp_path / "movies" / "Comedy" / "Napoleon Dynamite (2004)").mkdir(parents=True)
+    (tmp_path / "movies" / "Thriller" / "Seven (1995)").mkdir(parents=True)
+    (tmp_path / "shows" / "Napoleon Show (2004)").mkdir(parents=True)
+    monkeypatch.setattr(web_app, "WATCH_DIR", tmp_path)
+    monkeypatch.setattr(web_app, "_EXTRA_WATCH_DIRS", [])
+
+    resp = client.post(
+        "/api/watch-check",
+        json={
+            "titles": [
+                {"title": "Napolean Dynamite"},
+                {"title": "Se7en", "year": 1995},
+                {"title": "Se7en", "year": 2010},
+                {"title": "Seven"},
+                {"title": "Unrelated Film"},
+            ]
+        },
+        headers={"X-CSRF-Token": _csrf(client, "/api/watch")},
+    )
+
+    results = resp.get_json()["results"]
+    typo, digit, wrong_year, exact, nothing = results
+    assert typo["found"] is False and typo["match"] is None and typo["url"] is None
+    assert [s["match"] for s in typo["suggestions"]] == ["Napoleon Dynamite (2004)"]
+    assert digit["found"] is False
+    assert [s["match"] for s in digit["suggestions"]] == ["Seven (1995)"]
+    assert "suggestions" not in wrong_year
+    assert exact["found"] is True and "suggestions" not in exact
+    assert nothing == {"found": False, "match": None, "url": None}
+
+
+def test_suggestions_never_feed_the_duplicate_download_check(tmp_path, monkeypatch):
+    (tmp_path / "movies" / "Thriller" / "Seven (1995)").mkdir(parents=True)
+    (tmp_path / "movies" / "Thriller" / "Seven (1995)" / "Seven.mkv").write_bytes(b"x")
+    monkeypatch.setattr(web_app, "WATCH_DIR", tmp_path)
+    monkeypatch.setattr(web_app, "_EXTRA_WATCH_DIRS", [])
+
+    with web_app.app.test_request_context():
+        assert web_app._watch_media_inventory("Se7en", "1995", "Movies")["has_video"] is False
+        assert web_app._watch_media_inventory("Seven", "1995", "Movies")["has_video"] is True
+
+
 def test_same_media_title_ignores_spacing_but_not_content():
     assert web_app._same_media_title("space balls", "spaceballs")
     assert web_app._same_media_title("spaceballs", "space balls")
