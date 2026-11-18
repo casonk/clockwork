@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- To Watch now matches library titles regardless of word spacing, so an entry typed as "space balls" is found as the library's "Spaceballs (1987)", and the already-in-library duplicate check sees it too.
 - AI-upscale working chunks now live on NVMe scratch while canonical sources
   and finished renders remain on the HDD. Scratch has its own free-space floor
   and cleanup, and browser heartbeats pause background rendering during direct

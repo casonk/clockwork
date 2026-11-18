@@ -4677,8 +4677,19 @@ def _normalize_media_title(s: str) -> str:
     return s
 
 
+def _same_media_title(norm_a: str, norm_b: str) -> bool:
+    """Two normalized titles are equal, ignoring where the spaces fall.
+
+    Lookups canonicalize titles ("Spaceballs") while a watch-list entry keeps
+    the spelling it was typed with ("space balls"), so exact equality misses.
+    """
+    return bool(norm_a) and norm_a.replace(" ", "") == norm_b.replace(" ", "")
+
+
 def _titles_match(norm_title: str, norm_entry: str) -> bool:
     """Return True if every significant word in norm_title appears in norm_entry."""
+    if _same_media_title(norm_title, norm_entry):
+        return True
     title_words = norm_title.split()
     sig = {w for w in title_words if len(w) >= 3}
     if not sig:
@@ -8307,7 +8318,7 @@ def _watch_media_inventory(title: str, year: str, category: str) -> dict:
                         organized_kind = media_library.MOVIES
                 parsed = media_library.parse_release_name(entry.name)
                 entry_title = entry.name if organized_kind else parsed.title
-                if _normalize_media_title(entry_title) != wanted:
+                if not _same_media_title(_normalize_media_title(entry_title), wanted):
                     continue
                 entry_year = parsed.year
                 if year and entry_year and str(entry_year) != year:
