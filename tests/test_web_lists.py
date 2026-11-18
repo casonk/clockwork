@@ -1241,6 +1241,23 @@ def test_to_watch_renders_torrent_and_library_controls(client, list_files):
     assert "link.href = match.url" in html
 
 
+def test_to_watch_page_renders_suggestions_as_unverified_hints(client, list_files):
+    list_files["WATCH_LIST_FILE"].write_text(
+        json.dumps({"categories": [{"name": "Movies", "items": [{"title": "Se7en"}]}]})
+    )
+
+    html = client.get("/to-watch").get_data(as_text=True)
+
+    assert ".lib-suggest" in html  # styled apart from the real ".lib-link"
+    assert "Possible match, please verify" in html
+    # Only entries that were not found get a hint, and only the best one.
+    assert "match.found ? null : (match.suggestions || [])[0]" in html
+    # Found-ness and the dot still come solely from match.found.
+    assert "if (match.found) found += 1;" in html
+    assert "dot.className = `lib-dot ${match.found ? 'found' : 'missing'}`;" in html
+    assert "suggestion.found" not in html and "suggestions.length" not in html
+
+
 def test_torrent_search_labels_episodes_and_season_packs():
     episode = web_app._series_release_details("Breaking.Bad.S01E02.1080p.mkv")
     pack = web_app._series_release_details("Breaking.Bad.S01.1080p")

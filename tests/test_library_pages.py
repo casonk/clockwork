@@ -702,3 +702,14 @@ def test_library_search_suggests_near_misses_only_when_nothing_matches(client):
 
     assert client.get("/api/library?q=Zzzzzz").get_json()["suggestions"] == []
     assert client.get("/api/library").get_json()["suggestions"] == []
+
+
+def test_library_page_offers_did_you_mean_buttons_that_only_fill_the_search(client):
+    html = client.get("/library").get_data(as_text=True)
+
+    assert "Did you mean: " in html
+    # Suggestions are shown only for an empty result set.
+    assert "!data.count && data.suggestions && data.suggestions.length" in html
+    # A click copies the title into the search box and searches; it does not navigate.
+    assert "form.elements.q.value = s.title;" in html
+    assert 'button.type = "button";' in html
