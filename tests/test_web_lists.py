@@ -1422,6 +1422,31 @@ def test_watch_check_finds_titles_filed_under_movies(client, tmp_path, monkeypat
     assert matches["Movies"]["found"] is False
 
 
+def test_watch_check_matches_titles_regardless_of_word_spacing(client, tmp_path, monkeypatch):
+    (tmp_path / "movies" / "Comedy" / "Spaceballs (1987)").mkdir(parents=True)
+    (tmp_path / "movies" / "Comedy" / "Hot Rod (2007)").mkdir(parents=True)
+    monkeypatch.setattr(web_app, "WATCH_DIR", tmp_path)
+    monkeypatch.setattr(web_app, "_EXTRA_WATCH_DIRS", [])
+
+    resp = client.post(
+        "/api/watch-check",
+        json={"titles": [{"title": "space balls"}, {"title": "Hotrod"}, {"title": "Space"}]},
+        headers={"X-CSRF-Token": _csrf(client, "/api/watch")},
+    )
+
+    matches = resp.get_json()["matches"]
+    assert matches["space balls"]["match"] == "Spaceballs (1987)"
+    assert matches["Hotrod"]["match"] == "Hot Rod (2007)"
+    assert matches["Space"]["found"] is False
+
+
+def test_same_media_title_ignores_spacing_but_not_content():
+    assert web_app._same_media_title("space balls", "spaceballs")
+    assert web_app._same_media_title("spaceballs", "space balls")
+    assert not web_app._same_media_title("", "")
+    assert not web_app._same_media_title("space", "spaceballs")
+
+
 def test_watch_check_links_same_named_movie_and_show_to_the_right_library_title(
     client, tmp_path, monkeypatch
 ):
