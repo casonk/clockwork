@@ -133,6 +133,8 @@
     .lib-dot.missing { background:var(--border); }
     .lib-link { color:var(--green); font-size:11px; font-weight:700; text-decoration:none; white-space:nowrap; }
     .lib-link:hover { text-decoration:underline; }
+    .lib-suggest { color:var(--muted); font-size:11px; font-style:italic; text-decoration:none; white-space:nowrap; }
+    .lib-suggest:hover { color:var(--text); text-decoration:underline; }
     .lib-check-btn:disabled { opacity:.5; cursor:progress; }
     .search-panel { padding:8px 14px 10px 48px; background:var(--surface3); border-bottom:1px solid var(--border); }
     .search-panel[hidden] { display:none; }
@@ -932,6 +934,16 @@
           link.title = `Open ${match.match} in Library`;
         } else if (link) {
           link.remove();
+        }
+        // Near-miss titles are suggestions only: the dot and the count stay "missing"
+        // until a person opens the title and decides.
+        item.querySelector('.lib-suggest')?.remove();
+        const suggestion = match.found ? null : (match.suggestions || [])[0];
+        if (suggestion && suggestion.url) {
+          const similar = el('a', 'lib-suggest', `≈ ${suggestion.match}?`);
+          similar.href = suggestion.url;
+          similar.title = `Possible match, please verify: ${suggestion.match}`;
+          item.querySelector('.item-body').append(similar);
         }
       }
       if (announce) flash(`Library: ${found} of ${titles.length} titles found in watch folder.`, found ? 'success' : 'error');

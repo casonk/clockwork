@@ -571,6 +571,50 @@ def title_similarity(left: str, right: str) -> float:
     return max(ratio, overlap, contained)
 
 
+def _suggestion_key(text: str) -> str:
+    """Compact comparison key: no year/bracket tags, articles, punctuation or spaces."""
+    text = re.sub(r"\(\s*\d{4}[^)]*\)|\[[^\]]*\]", " ", text)
+    return _norm(text).replace(" ", "")
+
+
+def similar_titles(
+    query: str,
+    candidates: Iterable[dict[str, Any]],
+    *,
+    year: int | None = None,
+    limit: int = 3,
+    cutoff: float = 0.74,
+) -> list[dict[str, Any]]:
+    """Rank near-miss titles for a human to confirm.
+
+    Suggestion-only: callers must never treat a result as a match. Each
+    candidate dict needs a ``name`` and may carry a ``year``; the results are
+    the candidates with an added ``score``, best first. Exact (spacing-
+    insensitive) matches are skipped because the strict matcher owns those.
+    A candidate whose year differs from ``year`` by more than one is skipped.
+    """
+    wanted = _suggestion_key(query)
+    if len(wanted) < 3:
+        return []
+    scored: list[dict[str, Any]] = []
+    for candidate in candidates:
+        key = _suggestion_key(str(candidate.get("name") or ""))
+        if not key or key == wanted:
+            continue
+        cand_year = candidate.get("year")
+        if year and cand_year:
+            try:
+                if abs(int(cand_year) - int(year)) > 1:
+                    continue
+            except (TypeError, ValueError):
+                pass
+        score = SequenceMatcher(None, wanted, key).ratio()
+        if score >= cutoff:
+            scored.append({**candidate, "score": round(score, 2)})
+    scored.sort(key=lambda c: (-c["score"], str(c.get("name"))))
+    return scored[:limit]
+
+
 def best_candidate(
     title: str, year: int | None, kind: str, candidates: Iterable[dict[str, Any]]
 ) -> dict[str, Any] | None:
