@@ -6439,6 +6439,19 @@ def library_search():
             sort=request.args.get("sort", "title"),
         )
         facets = media_library.catalog_facets(conn)
+        suggestions = []
+        query = request.args.get("q", "").strip()
+        if query and not items:
+            # Text search found nothing: offer near-miss titles to click. These are
+            # separate from `items` and only ever fill the search box.
+            catalog = [
+                {"name": r["title"], "year": r["year"], "kind": r["kind"]}
+                for r in conn.execute("SELECT title, year, kind FROM titles")
+            ]
+            suggestions = [
+                {"title": c["name"], "year": c["year"], "kind": c["kind"]}
+                for c in media_library.similar_titles(query, catalog, limit=5)
+            ]
     finally:
         conn.close()
     root = media_library.LIBRARY_ROOT
@@ -6454,7 +6467,15 @@ def library_search():
     if request.args.get("sort") == "watched":
         items.sort(key=lambda i: (i["watch"] or {}).get("ts", ""), reverse=True)
         items.sort(key=lambda i: i["watch"] is None)
-    return jsonify({"available": True, "count": len(items), "items": items, "facets": facets})
+    return jsonify(
+        {
+            "available": True,
+            "count": len(items),
+            "items": items,
+            "facets": facets,
+            "suggestions": suggestions,
+        }
+    )
 
 
 @app.get("/to-read")
@@ -8484,6 +8505,19 @@ def watch_check():
             "match": best["name"] if best else None,
             "url": best["url"] if best else None,
         }
+        if best is None:
+            # Near misses for a human to confirm. Never counted as a match and
+            # never used by the duplicate-download check.
+            suggestions = [
+                {"match": s["name"], "url": s["url"], "score": s["score"]}
+                for s in media_library.similar_titles(
+                    title,
+                    [e for e in entries if e["kind"] in (None, wanted_kind)],
+                    year=int(year) if year.isdigit() else None,
+                )
+            ]
+            if suggestions:
+                result["suggestions"] = suggestions
         matches[title] = result
         results.append(result)
 

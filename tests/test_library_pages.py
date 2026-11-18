@@ -690,3 +690,15 @@ def test_play_page_resumes_from_the_saved_position(client, probed):
     # Finishing clears it, and the pre-seek 0:00 never overwrites it.
     assert "localStorage.removeItem(positionKey())" in html
     assert "video.currentTime >= 10" in html
+
+
+def test_library_search_suggests_near_misses_only_when_nothing_matches(client):
+    missed = client.get("/api/library?q=Sevn").get_json()
+    assert missed["count"] == 0 and missed["items"] == []
+    assert [s["title"] for s in missed["suggestions"]] == ["Seven"]
+
+    hit = client.get("/api/library?q=Seven").get_json()
+    assert hit["count"] == 1 and hit["suggestions"] == []
+
+    assert client.get("/api/library?q=Zzzzzz").get_json()["suggestions"] == []
+    assert client.get("/api/library").get_json()["suggestions"] == []

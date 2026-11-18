@@ -997,3 +997,23 @@ def test_lookup_keeps_a_match_from_the_provider_that_answered(tmp_path):
 
     assert meta.sources == ["tmdb"]
     assert meta.title == "Joe Pickett"
+
+
+def test_similar_titles_ranks_near_misses_and_skips_exact_and_wrong_years():
+    cands = [
+        {"name": "Napoleon Dynamite (2004)", "year": 2004},
+        {"name": "Seven (1995)", "year": 1995},
+        {"name": "Spaceballs (1987)", "year": 1987},
+        {"name": "Hot Rod (2007)", "year": 2007},
+    ]
+    names = lambda q, **kw: [c["name"] for c in ml.similar_titles(q, cands, **kw)]  # noqa: E731
+
+    assert names("Napolean Dynamite") == ["Napoleon Dynamite (2004)"]
+    assert names("Se7en") == ["Seven (1995)"]
+    assert names("Se7en", year=2010) == []  # year more than one apart
+    assert names("space balls") == []  # exact once spacing is ignored: strict matcher's job
+    assert names("Hotrod") == []
+    assert names("ab") == []  # too short to suggest from
+    assert names("Completely Different") == []
+    scored = ml.similar_titles("Napolean Dynamite", cands)
+    assert 0.74 <= scored[0]["score"] <= 1.0

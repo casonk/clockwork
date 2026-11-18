@@ -232,6 +232,20 @@
       loadFacets(data.facets);
       status.textContent = data.count + (data.count === 1 ? " title" : " titles");
       if (!data.count) results.appendChild(el("div", "empty", "Nothing matches these filters."));
+      if (!data.count && data.suggestions && data.suggestions.length) {
+        const row = el("div", "empty", "Did you mean: ");
+        for (const s of data.suggestions) {
+          const button = el("button", "", s.title + (s.year ? " (" + s.year + ")" : ""));
+          button.type = "button";
+          button.addEventListener("click", function () {
+            form.elements.q.value = s.title;
+            search();
+          });
+          row.appendChild(button);
+          row.appendChild(document.createTextNode(" "));
+        }
+        results.appendChild(row);
+      }
       for (const item of data.items) results.appendChild(card(item));
     } catch (err) {
       status.textContent = "Search failed: " + err;
