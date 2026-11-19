@@ -16,6 +16,22 @@ _ARCHIVE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{2,99}\Z")
 _CACHE: dict[tuple[str, str], tuple[float, list[dict]]] = {}
 _CACHE_LOCK = threading.Lock()
 
+# arXiv asks for one API request every three seconds, whatever the title.
+ARXIV_MIN_INTERVAL = 3.0
+_ARXIV_LOCK = threading.Lock()
+_arxiv_next_call = 0.0
+
+
+def _wait_arxiv_turn() -> None:
+    """Block until three seconds have passed since the previous arXiv API call."""
+    global _arxiv_next_call
+    with _ARXIV_LOCK:
+        now = time.monotonic()
+        start = max(now, _arxiv_next_call)
+        _arxiv_next_call = start + ARXIV_MIN_INTERVAL
+    if start > now:
+        time.sleep(start - now)
+
 
 def _normalized(value: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", value.casefold()))
@@ -52,6 +68,7 @@ def search_arxiv(title: str) -> list[dict]:
         f"https://export.arxiv.org/api/query?{params}",
         headers={"User-Agent": "clockwork/1.0 (personal reading list)"},
     )
+    _wait_arxiv_turn()
     try:
         with urlopen(request, timeout=8) as response:
             root = ET.fromstring(response.read(2_000_000))

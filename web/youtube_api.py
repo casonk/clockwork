@@ -12,6 +12,8 @@ import os
 import re
 import stat
 import tempfile
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -257,17 +259,77 @@ def video_url(video_id: str) -> str:
     return f"https://www.youtube.com/watch?v={video_id}"
 
 
+# Pace calls per account (identified by its bearer token). A 429, a 503 or a 403 that reports an
+# exhausted quota pauses that account until Retry-After (60 s by default, at most one hour); calls
+# for a paused account fail at once without reaching the network, so a sync moves on to the next
+# account instead of burning requests on the one that is throttled.
+MIN_INTERVAL = 0.25
+DEFAULT_PAUSE = 60.0
+MAX_PAUSE = 3600.0
+_THROTTLE_REASONS = (
+    "quotaExceeded",
+    "rateLimitExceeded",
+    "userRateLimitExceeded",
+    "dailyLimitExceeded",
+)
+
+_pace_lock = threading.Lock()
+_next_call: dict[str, float] = {}
+_paused_until: dict[str, float] = {}
+
+
+def _account_key(request: urllib.request.Request) -> str:
+    return request.get_header("Authorization") or ""
+
+
+def _wait_turn(key: str, error_context: str) -> None:
+    if not key:
+        return
+    with _pace_lock:
+        now = time.monotonic()
+        if now < _paused_until.get(key, 0.0):
+            raise YouTubeError(
+                f"{error_context} paused after a rate limit; retry in "
+                f"{_paused_until[key] - now:.0f} s"
+            )
+        start = max(now, _next_call.get(key, 0.0))
+        _next_call[key] = start + MIN_INTERVAL
+    if start > now:
+        time.sleep(start - now)
+
+
+def _pause_account(key: str, exc: urllib.error.HTTPError, body: dict[str, Any]) -> None:
+    errors = body.get("error", {}).get("errors") if isinstance(body.get("error"), dict) else None
+    reasons = [str(e.get("reason")) for e in errors or [] if isinstance(e, dict)]
+    throttled = exc.code in (429, 503) or (
+        exc.code == 403 and any(reason in _THROTTLE_REASONS for reason in reasons)
+    )
+    if not key or not throttled:
+        return
+    try:
+        seconds = float(exc.headers.get("Retry-After", ""))
+    except (AttributeError, TypeError, ValueError):
+        seconds = DEFAULT_PAUSE
+    seconds = min(max(seconds, 1.0), MAX_PAUSE)
+    with _pace_lock:
+        _paused_until[key] = max(_paused_until.get(key, 0.0), time.monotonic() + seconds)
+
+
 def _json_request(request: urllib.request.Request, *, error_context: str) -> dict[str, Any]:
+    key = _account_key(request)
+    _wait_turn(key, error_context)
     try:
         with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
+        body: dict[str, Any] = {}
         detail = ""
         try:
             body = json.loads(exc.read().decode("utf-8"))
             detail = str(body.get("error", {}).get("message") or "").strip()
         except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
             pass
+        _pause_account(key, exc, body if isinstance(body, dict) else {})
         suffix = f": {detail}" if detail else ""
         raise YouTubeError(f"{error_context} failed with HTTP {exc.code}{suffix}") from exc
     except (OSError, urllib.error.URLError, UnicodeDecodeError, json.JSONDecodeError) as exc:
