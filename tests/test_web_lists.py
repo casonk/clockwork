@@ -1238,7 +1238,7 @@ def test_to_watch_renders_torrent_and_library_controls(client, list_files):
     assert "Add selected episodes" in html
     assert 'data-year="2004" data-category="Movies"' in html
     assert "checkLibrary(libBtn, false)" in html
-    assert "link.href = match.url" in html
+    assert "link.href = available.url" in html
 
 
 def test_to_watch_page_renders_suggestions_as_unverified_hints(client, list_files):
@@ -1439,21 +1439,59 @@ def test_watch_check_finds_titles_filed_under_movies(client, tmp_path, monkeypat
     assert matches["Movies"]["found"] is False
 
 
-def test_watch_check_matches_titles_regardless_of_word_spacing(client, tmp_path, monkeypatch):
-    (tmp_path / "movies" / "Comedy" / "Spaceballs (1987)").mkdir(parents=True)
-    (tmp_path / "movies" / "Comedy" / "Hot Rod (2007)").mkdir(parents=True)
+def test_watch_check_links_every_matching_seeding_movie(client, tmp_path, monkeypatch):
+    first = tmp_path / "Monty Python And The Holy Grail 1975 1080p.mkv"
+    second = tmp_path / "Monty Python Life of Brian 1979 1080p.mkv"
+    first.write_bytes(b"movie")
+    second.write_bytes(b"movie")
     monkeypatch.setattr(web_app, "WATCH_DIR", tmp_path)
     monkeypatch.setattr(web_app, "_EXTRA_WATCH_DIRS", [])
 
     resp = client.post(
         "/api/watch-check",
-        json={"titles": [{"title": "space balls"}, {"title": "Hotrod"}, {"title": "Space"}]},
+        json={"titles": [{"title": "monty python", "category": "Movies"}]},
+        headers={"X-CSRF-Token": _csrf(client, "/api/watch")},
+    )
+
+    result = resp.get_json()["results"][0]
+    assert result["found"] is True
+    assert result["url"].startswith("/library/play/Monty%20Python")
+    assert result["links"] == [
+        {
+            "match": first.name,
+            "url": "/library/play/Monty%20Python%20And%20The%20Holy%20Grail%201975%201080p.mkv",
+        },
+        {
+            "match": second.name,
+            "url": "/library/play/Monty%20Python%20Life%20of%20Brian%201979%201080p.mkv",
+        },
+    ]
+
+
+def test_watch_check_matches_titles_regardless_of_word_spacing(client, tmp_path, monkeypatch):
+    (tmp_path / "movies" / "Comedy" / "Spaceballs (1987)").mkdir(parents=True)
+    (tmp_path / "movies" / "Comedy" / "Hot Rod (2007)").mkdir(parents=True)
+    (tmp_path / "shows" / "House of the Dragon (2022)").mkdir(parents=True)
+    monkeypatch.setattr(web_app, "WATCH_DIR", tmp_path)
+    monkeypatch.setattr(web_app, "_EXTRA_WATCH_DIRS", [])
+
+    resp = client.post(
+        "/api/watch-check",
+        json={
+            "titles": [
+                {"title": "space balls"},
+                {"title": "Hotrod"},
+                {"title": "House of dragons", "category": "TV Shows"},
+                {"title": "Space"},
+            ]
+        },
         headers={"X-CSRF-Token": _csrf(client, "/api/watch")},
     )
 
     matches = resp.get_json()["matches"]
     assert matches["space balls"]["match"] == "Spaceballs (1987)"
     assert matches["Hotrod"]["match"] == "Hot Rod (2007)"
+    assert matches["House of dragons"]["match"] == "House of the Dragon (2022)"
     assert matches["Space"]["found"] is False
 
 
@@ -1503,8 +1541,34 @@ def test_suggestions_never_feed_the_duplicate_download_check(tmp_path, monkeypat
 def test_same_media_title_ignores_spacing_but_not_content():
     assert web_app._same_media_title("space balls", "spaceballs")
     assert web_app._same_media_title("spaceballs", "space balls")
+    assert web_app._same_media_title("house of dragons", "house of the dragon")
     assert not web_app._same_media_title("", "")
     assert not web_app._same_media_title("space", "spaceballs")
+
+
+def test_library_playback_completes_a_matching_movie_but_not_a_show(list_files):
+    list_files["WATCH_LIST_FILE"].write_text(
+        json.dumps(
+            {
+                "categories": [
+                    {"name": "Movies", "items": [{"title": "space balls", "watched": False}]},
+                    {
+                        "name": "TV Shows",
+                        "items": [{"title": "House of the Dragon", "watched": False}],
+                    },
+                ]
+            }
+        )
+    )
+
+    web_app._complete_watched_movie({"kind": "episode", "title": "House of the Dragon (2022)"})
+    web_app._complete_watched_movie({"kind": "movie", "title": "Spaceballs (1987)"})
+
+    saved = json.loads(list_files["WATCH_LIST_FILE"].read_text())
+    assert saved["categories"][0]["items"][0]["watched"] is True
+    assert saved["categories"][1]["items"][0]["watched"] is False
+    history = list_files["WATCH_LIST_HISTORY_FILE"].read_text()
+    assert '"detail": "library playback"' in history
 
 
 def test_watch_check_links_same_named_movie_and_show_to_the_right_library_title(

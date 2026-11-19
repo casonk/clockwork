@@ -4678,12 +4678,31 @@ def _normalize_media_title(s: str) -> str:
 
 
 def _same_media_title(norm_a: str, norm_b: str) -> bool:
-    """Two normalized titles are equal, ignoring where the spaces fall.
+    """Two normalized titles are equal across harmless spelling variants.
 
     Lookups canonicalize titles ("Spaceballs") while a watch-list entry keeps
     the spelling it was typed with ("space balls"), so exact equality misses.
+    Articles and a simple plural are also ignored, allowing a typed
+    ``House of dragons`` to resolve to ``House of the Dragon`` without using a
+    broad fuzzy-title match.
     """
-    return bool(norm_a) and norm_a.replace(" ", "") == norm_b.replace(" ", "")
+    if not norm_a or not norm_b:
+        return False
+    if norm_a.replace(" ", "") == norm_b.replace(" ", ""):
+        return True
+
+    def meaningful_words(value: str) -> tuple[str, ...]:
+        words = []
+        for word in value.split():
+            if word in {"a", "an", "the", "of"}:
+                continue
+            if len(word) > 4 and word.endswith("s") and not word.endswith(("ss", "us", "is")):
+                word = word[:-1]
+            words.append(word)
+        return tuple(words)
+
+    left, right = meaningful_words(norm_a), meaningful_words(norm_b)
+    return bool(left) and left == right
 
 
 def _titles_match(norm_title: str, norm_entry: str) -> bool:
@@ -5415,6 +5434,51 @@ def save_simple_list(key: str, data: dict, *, operation_id: str | None = None) -
     path.parent.mkdir(parents=True, exist_ok=True)
     _rotate_backup(path)
     path.write_text(json.dumps(_normalize_simple_list_data(data, cfg), indent=2))
+
+
+def _complete_watched_movie(event: dict) -> None:
+    """Complete an equivalent movie row after the library records playback.
+
+    Episodes deliberately do not complete their parent show. Movie matching is
+    limited to deterministic title equivalence plus a compatible year.
+    """
+    if event.get("kind") != "movie":
+        return
+    event_title = str(event.get("title") or "").strip()
+    event_norm = _normalize_media_title(event_title)
+    event_year_match = re.search(r"\b((?:19|20)\d{2})\b", event_title)
+    event_year = event_year_match.group(1) if event_year_match else ""
+    if not event_norm:
+        return
+
+    cfg = _simple_list_config("watch")
+    data = load_simple_list("watch")
+    completed: list[tuple[str, str]] = []
+    for category in data["categories"]:
+        if re.search(r"tv|show|series|anime", str(category["name"]), re.I):
+            continue
+        for item in category["items"]:
+            if item.get(cfg["status"]):
+                continue
+            item_year = str(item.get("year") or "").strip()
+            if item_year and event_year and item_year != event_year:
+                continue
+            item_title = str(item.get("title") or "").strip()
+            if not _same_media_title(_normalize_media_title(item_title), event_norm):
+                continue
+            item[cfg["status"]] = True
+            completed.append((str(category["name"]), item_title))
+    if not completed:
+        return
+    save_simple_list("watch", data)
+    for category, item_title in completed:
+        _log_event(
+            cfg["history_file"],
+            cfg["done_label"],
+            item=item_title,
+            category=category,
+            detail="library playback",
+        )
 
 
 def _find_simple_category(data: dict, name: str) -> dict | None:
@@ -6334,7 +6398,7 @@ def _render_simple_list(key: str):
         stats = watch_log.stats_by_title(watch_log.read())
         for category in data["categories"]:
             for item in category["items"]:
-                row = stats.get(watch_log.normalize_title(str(item.get("title", ""))))
+                row = watch_log.title_stats(stats, str(item.get("title", "")))
                 if row:
                     watch_badges[str(item["title"])] = watch_log.badge(row)
     invest_order = ""
@@ -6460,7 +6524,7 @@ def library_search():
         folder = Path(item.pop("folder"))
         item["folder_name"] = folder.name
         item["path"] = str(folder.relative_to(root)) if folder.is_relative_to(root) else None
-        row = watch_stats.get(watch_log.normalize_title(folder.name))
+        row = watch_log.title_stats(watch_stats, folder.name)
         item["watch"] = (
             {"badge": watch_log.badge(row), "ts": str(row["last"].get("ts", ""))} if row else None
         )
@@ -8460,6 +8524,16 @@ def watch_check():
                         kind = media_library.MOVIES
                     if kind:
                         url = url_for("library_pages.title_page", rel=str(rel))
+                elif (
+                    entry.is_file()
+                    and entry.suffix.lower() in media_library.VIDEO_EXTS
+                    and rel is not None
+                ):
+                    # Completed movies remain at the watch root while Transmission
+                    # seeds them. They are playable there even though the organizer
+                    # must not move them into movies/<genre>/<title> yet.
+                    kind = media_library.parse_release_name(entry.name).kind
+                    url = url_for("library_pages.play_page", rel=str(rel))
                 year_match = re.search(r"\((\d{4})\)$", entry.name)
                 entries.append(
                     {
@@ -8505,6 +8579,13 @@ def watch_check():
             "match": best["name"] if best else None,
             "url": best["url"] if best else None,
         }
+        playable = [
+            {"match": entry["name"], "url": entry["url"]}
+            for entry in sorted(candidates, key=lambda candidate: candidate["name"].casefold())
+            if entry["url"] and entry["kind"] in (None, wanted_kind)
+        ]
+        if len(playable) > 1:
+            result["links"] = playable
         if best is None:
             # Near misses for a human to confirm. Never counted as a match and
             # never used by the duplicate-download check.
@@ -9889,6 +9970,11 @@ if _autogenerate_cron_enabled():
     _cron_modified = ensure_cron_sections(EXAMPLES_DIR)
     if _cron_modified:
         print(f"clockwork-web  auto-generated cron sections in: {', '.join(_cron_modified)}")
+
+
+# Playback belongs to the library blueprint; personal-list persistence belongs
+# to this app. Inject the synchronization hook at that boundary.
+app.config["CLOCKWORK_WATCH_EVENT_HOOK"] = _complete_watched_movie
 
 
 if __name__ == "__main__":

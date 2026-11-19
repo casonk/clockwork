@@ -144,6 +144,17 @@ def stats_by_title(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return out
 
 
+def title_stats(stats: dict[str, dict[str, Any]], title: str) -> dict[str, Any] | None:
+    """Find statistics despite unambiguous word-boundary spelling differences."""
+    key = normalize_title(title)
+    exact = stats.get(key)
+    if exact is not None:
+        return exact
+    compact = key.replace(" ", "")
+    matches = [row for candidate, row in stats.items() if candidate.replace(" ", "") == compact]
+    return matches[0] if compact and len(matches) == 1 else None
+
+
 def badge(row: dict[str, Any], now: datetime.datetime | None = None) -> str:
     """One line for the To Watch page: ``▶ 3 episodes · last S01E03 · 2 days ago``."""
     now = now or datetime.datetime.now()

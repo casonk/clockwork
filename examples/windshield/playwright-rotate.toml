@@ -1,0 +1,26 @@
+[[jobs]]
+name = "windshield-playwright-rotate"
+description = "Rotate new Playwright versions (and Node LTS) into the windshield Playwright container, verified before promotion"
+scope = "user"
+service_type = "oneshot"
+working_directory = "%h/git/util-repos/windshield"
+exec_start = "/usr/bin/python3 -m windshield.container_rotation"
+after = ["network-online.target"]
+wants = ["network-online.target"]
+standard_output = "journal"
+standard_error = "journal"
+timer_description = "Weekly check for new Playwright releases"
+
+[jobs.environment]
+PYTHONPATH = "%h/git/util-repos/windshield/src"
+
+[jobs.timer]
+kind = "calendar"
+on_calendar = "Sun *-*-* 03:30:00"
+persistent = true
+randomized_delay_sec = "1800"
+
+[jobs.cron]
+expression = "30 3 * * 0"
+command = "cd $HOME/git/util-repos/windshield && PYTHONPATH=$HOME/git/util-repos/windshield/src /usr/bin/python3 -m windshield.container_rotation >> $HOME/.local/share/windshield-playwright-rotate/cron.log 2>&1"
+comments = ["Auto-generated from systemd timer: Sun *-*-* 03:30:00"]
