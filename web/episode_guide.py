@@ -5,6 +5,8 @@ from __future__ import annotations
 import datetime as dt
 import json
 import re
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -36,14 +38,57 @@ def plain_text(value: str | None) -> str:
     return " ".join(" ".join(parser.parts).split())
 
 
+# TVmaze allows about 20 calls per 10 seconds per address. Space calls 0.5 s apart, and after a
+# 429 or 503 stop calling the host until its Retry-After (default 30 s, at most 5 min) has passed.
+MIN_INTERVAL = 0.5
+DEFAULT_PAUSE = 30.0
+MAX_PAUSE = 300.0
+
+_pace_lock = threading.Lock()
+_next_call = 0.0
+_paused_until = 0.0
+
+
+def _retry_after(error: urllib.error.HTTPError) -> float:
+    try:
+        seconds = float(error.headers.get("Retry-After", ""))
+    except (TypeError, ValueError):
+        return DEFAULT_PAUSE
+    return min(max(seconds, 1.0), MAX_PAUSE)
+
+
+def _wait_turn() -> None:
+    """Reserve the next call slot; refuse at once while the host is paused."""
+    global _next_call
+    with _pace_lock:
+        now = time.monotonic()
+        if now < _paused_until:
+            raise GuideError(f"TVmaze asked us to slow down; retry in {_paused_until - now:.0f} s.")
+        start = max(now, _next_call)
+        _next_call = start + MIN_INTERVAL
+    if start > now:
+        time.sleep(start - now)
+
+
+def _pause_host(seconds: float) -> None:
+    global _paused_until
+    with _pace_lock:
+        _paused_until = max(_paused_until, time.monotonic() + seconds)
+
+
 def _fetch_json(path: str) -> object:
     request = urllib.request.Request(
         f"https://api.tvmaze.com{path}",
         headers={"User-Agent": "clockwork-library/1.0 (https://github.com/casonk/clockwork)"},
     )
+    _wait_turn()
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
             return json.load(response)
+    except urllib.error.HTTPError as exc:
+        if exc.code in (429, 503):
+            _pause_host(_retry_after(exc))
+        raise GuideError(f"TVmaze is unavailable: {exc}") from exc
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise GuideError(f"TVmaze is unavailable: {exc}") from exc
 
