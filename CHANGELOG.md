@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Pace arXiv and YouTube. arXiv reading-source lookups are three seconds apart whatever the title. YouTube calls are spaced 0.25 s apart per account, and an account that answers 429, 503 or a quota 403 is paused until its `Retry-After` (60 s by default, at most an hour) while the sync carries on with the next account.
 - Pace TVmaze: calls are spaced 0.5 s apart, and after a 429 or 503 the host is left alone until its `Retry-After` (30 s by default, at most 5 min), so opening the shows folder no longer hammers the API into a run of blank cards.
 - Browser smoke tests can run in windshield's pinned Playwright container: set `WINDSHIELD_PLAYWRIGHT_WS` (use `WINDSHIELD_CONTAINER_NETWORK=host` for tests that serve pages on loopback). Without it nothing changes; the Tradility and Finances UI smoke tests share `tests/browser_support.py` for the choice.
 - Add suggestion-only fuzzy title matching. To Watch shows a muted "≈ Title?" link beside entries that are not in the library but look like one that is (typos, `Se7en`/`Seven`), and an empty Library text search offers "Did you mean…" buttons. Suggestions never mark an entry as found, never count toward the library total, and never feed the already-in-library download check; a person has to open or click them to confirm.
