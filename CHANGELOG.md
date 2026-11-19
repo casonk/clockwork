@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Browser smoke tests can run in windshield's pinned Playwright container: set `WINDSHIELD_PLAYWRIGHT_WS` (use `WINDSHIELD_CONTAINER_NETWORK=host` for tests that serve pages on loopback). Without it nothing changes; the Tradility and Finances UI smoke tests share `tests/browser_support.py` for the choice.
 - Add suggestion-only fuzzy title matching. To Watch shows a muted "≈ Title?" link beside entries that are not in the library but look like one that is (typos, `Se7en`/`Seven`), and an empty Library text search offers "Did you mean…" buttons. Suggestions never mark an entry as found, never count toward the library total, and never feed the already-in-library download check; a person has to open or click them to confirm.
 - To Watch now matches library titles regardless of word spacing, so an entry typed as "space balls" is found as the library's "Spaceballs (1987)", and the already-in-library duplicate check sees it too.
 - AI-upscale working chunks now live on NVMe scratch while canonical sources

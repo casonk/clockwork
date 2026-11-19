@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-import shutil
-
 import pytest
 
 pytest.importorskip("playwright.sync_api")
 from playwright.sync_api import sync_playwright  # noqa: E402
 
+from tests.browser_support import launch_browser, requires_browser  # noqa: E402
 from web import app as web_app  # noqa: E402
 
-CHROMIUM = (
-    shutil.which("chromium-browser") or shutil.which("chromium") or shutil.which("google-chrome")
-)
-pytestmark = pytest.mark.skipif(CHROMIUM is None, reason="no Chromium for a browser test")
+pytestmark = requires_browser
 
 
 def record(ticker: str, rsi14: float, rsi7: float) -> dict:
@@ -53,7 +49,7 @@ def test_settings_panel_changes_what_the_cards_read_without_script_errors():
     html = web_app.app.test_client().get("/to-tradility").get_data(as_text=True)
     errors: list[str] = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+        browser = launch_browser(p)
         page = browser.new_page(viewport={"width": 1200, "height": 800})
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.route(
@@ -86,7 +82,7 @@ def test_indicator_strength_labels_do_not_overflow_a_phone_viewport():
     html = web_app.app.test_client().get("/to-tradility").get_data(as_text=True)
     errors: list[str] = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+        browser = launch_browser(p)
         page = browser.new_page(viewport={"width": 390, "height": 844})
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.route(
@@ -240,7 +236,7 @@ def test_a_confirmed_order_appears_even_while_the_broker_export_is_stale():
             route.fulfill(json={"ok": False})
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+        browser = launch_browser(p)
         page = browser.new_page(viewport={"width": 1200, "height": 900})
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.route("**/api/**", respond)
@@ -276,7 +272,7 @@ def test_accounts_panel_links_to_finances_for_net_worth_and_cash():
     }
     errors: list[str] = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+        browser = launch_browser(p)
         page = browser.new_page(viewport={"width": 1200, "height": 800})
         page.on("pageerror", lambda e: errors.append(str(e)))
 
@@ -335,7 +331,7 @@ def test_detail_and_chart_offer_full_screen_and_pop_out_as_separate_options():
     errors: list[str] = []
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+            browser = launch_browser(p)
             page = browser.new_page(viewport={"width": 1200, "height": 800})
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.route("**/api/**", _detail_route)

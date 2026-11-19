@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-import shutil
-
 import pytest
 
 pytest.importorskip("playwright.sync_api")
 from playwright.sync_api import sync_playwright  # noqa: E402
 
+from tests.browser_support import launch_browser, requires_browser  # noqa: E402
 from web import app as web_app  # noqa: E402
 
-CHROMIUM = (
-    shutil.which("chromium-browser") or shutil.which("chromium") or shutil.which("google-chrome")
-)
-pytestmark = pytest.mark.skipif(CHROMIUM is None, reason="no Chromium for a browser test")
+pytestmark = requires_browser
 
 POINTS = [
     {
@@ -229,7 +225,7 @@ def test_the_page_renders_on_a_phone_without_overflow_or_script_errors():
     html = web_app.app.test_client().get("/finances").get_data(as_text=True)
     errors: list[str] = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+        browser = launch_browser(p)
         page = browser.new_page(viewport={"width": 390, "height": 800})
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.route("**/api/finances/**", route)
@@ -361,7 +357,7 @@ def test_axis_ticks_are_round_and_evenly_spaced_and_cards_pop_out():
     base = f"http://127.0.0.1:{srv.server_port}"
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+            browser = launch_browser(p)
             page = browser.new_page(viewport={"width": 390, "height": 800})
             page.route("**/api/finances/**", route)
             page.goto(base + "/finances")
@@ -481,7 +477,7 @@ def test_daily_mode_draws_a_line_per_day_and_marks_only_real_points_on_an_accoun
     errors: list[str] = []
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(executable_path=CHROMIUM, headless=True)
+            browser = launch_browser(p)
             page = browser.new_page(viewport={"width": 390, "height": 900})
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.route("**/api/finances/**", route)
