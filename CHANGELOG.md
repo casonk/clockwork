@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- `/to-tradility` now serves Tradility's own page template with `embedded=True`, so the page is changed once, in the Tradility repository. `scripts/sync_tradility_template.py` copies it into `web/templates/to-tradility.html` (`--check` reports drift) and a test fails when the copy differs from a sibling Tradility checkout. The page gains Tradility's newer fixes it had missed.
 - Pace arXiv and YouTube. arXiv reading-source lookups are three seconds apart whatever the title. YouTube calls are spaced 0.25 s apart per account, and an account that answers 429, 503 or a quota 403 is paused until its `Retry-After` (60 s by default, at most an hour) while the sync carries on with the next account.
 - Pace TVmaze: calls are spaced 0.5 s apart, and after a 429 or 503 the host is left alone until its `Retry-After` (30 s by default, at most 5 min), so opening the shows folder no longer hammers the API into a run of blank cards.
 - Browser smoke tests can run in windshield's pinned Playwright container: set `WINDSHIELD_PLAYWRIGHT_WS` (use `WINDSHIELD_CONTAINER_NETWORK=host` for tests that serve pages on loopback). Without it nothing changes; the Tradility and Finances UI smoke tests share `tests/browser_support.py` for the choice.

@@ -6630,7 +6630,7 @@ def to_invest():
 def to_tradility():
     if TRADILITY_WEB_URL:
         return redirect(TRADILITY_WEB_URL)
-    return render_template("to-tradility.html")
+    return render_template("to-tradility.html", embedded=True)
 
 
 @app.get("/theme-assets/<name>")
