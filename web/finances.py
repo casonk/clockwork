@@ -1,4 +1,4 @@
-"""The /finances page and its read-only proxy to personal-finance's finance API.
+"""The /finances page and its read-only proxy to the local finance API.
 
 The browser never sees the API key: this blueprint reads it from an owner-only file and adds it
 to GET requests it forwards to the loopback service. Only the service's read routes are
@@ -6,7 +6,8 @@ forwardable, so the page cannot reach anything that trades or changes data (the 
 such routes and holds no broker credentials).
 
 Settings: ``CLOCKWORK_FINANCE_URL`` (default ``http://127.0.0.1:8769``) and
-``CLOCKWORK_FINANCE_API_KEY_FILE`` (default ``~/.config/personal-finance/finance-api.key``).
+``CLOCKWORK_FINANCE_API_KEY_FILE`` or ``[paths] finance_api_key`` in ``config/integrations.local.toml``
+(see ``web/integrations.py``).
 """
 
 from __future__ import annotations
@@ -21,6 +22,11 @@ import urllib.request
 from pathlib import Path
 
 from flask import Blueprint, Response, render_template, request
+
+try:
+    from web import integrations
+except ModuleNotFoundError:
+    import integrations
 
 bp = Blueprint("finances", __name__)
 
@@ -56,12 +62,9 @@ def service_url() -> str:
 
 
 def key_file() -> Path:
-    return Path(
-        os.environ.get(
-            "CLOCKWORK_FINANCE_API_KEY_FILE",
-            Path.home() / ".config" / "personal-finance" / "finance-api.key",
-        )
-    )
+    return integrations.configured_path(
+        "finance_api_key", "CLOCKWORK_FINANCE_API_KEY_FILE"
+    ) or Path("finance-api-key-not-configured")
 
 
 def read_key() -> str:

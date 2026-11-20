@@ -78,7 +78,7 @@
   {% if summary is none %}
   <section class="error" role="alert"><h2>Unavailable</h2>Your listening history is unavailable: {{ error }}</section>
   {% else %}
-  <p class="refresh-note" id="refresh-note" data-generated="{{ summary.generated }}">Updated <time id="refresh-when" datetime="{{ summary.generated }}">{{ summary.generated[:16].replace('T', ' ') }} UTC</time><span id="refresh-ago"></span> · tape-deck polls every 30 minutes; this page checks for a new summary every minute</p>
+  <p class="refresh-note" id="refresh-note" data-generated="{{ summary.generated }}">Updated <time id="refresh-when" datetime="{{ summary.generated }}">{{ summary.generated[:16].replace('T', ' ') }} UTC</time><span id="refresh-ago"></span> · the listening tracker polls every 30 minutes; this page checks for a new summary every minute</p>
   <nav class="tabs" aria-label="Time window">
     {% for key, label in windows %}<a href="?window={{ key }}" {% if view.window == key %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
     {% if view.custom_start %}<span class="active" aria-current="page">Custom</span>{% endif %}
@@ -183,7 +183,7 @@
       ago.textContent = ' (' + text + ')';
       const stale = minutes > STALE_MINUTES;
       note.classList.toggle('stale', stale);
-      ago.title = stale ? 'Older than ' + STALE_MINUTES + ' minutes: is the tape-deck poller running?' : '';
+      ago.title = stale ? 'Older than ' + STALE_MINUTES + ' minutes: is the listening poller running?' : '';
     }
     async function check() {
       try {

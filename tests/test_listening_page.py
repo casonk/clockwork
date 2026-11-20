@@ -1,4 +1,4 @@
-"""The /listening page and /api/listening render tape-deck's summary.json and fail soft."""
+"""The /listening page and /api/listening render the listening tracker's summary.json and fail soft."""
 
 from __future__ import annotations
 
@@ -163,7 +163,7 @@ def test_missing_summary_explains_how_to_make_one(client):
     client.summary_path.unlink()
     response = client.get("/listening")
     assert response.status_code == 200
-    assert "tape-deck poll --summary" in response.get_data(as_text=True)
+    assert "poll --summary" in response.get_data(as_text=True)
     assert client.get("/api/listening").status_code == 503
 
 
@@ -171,7 +171,7 @@ def test_a_corrupt_summary_fails_soft(client):
     client.summary_path.write_text("{not json")
     assert "could not be read" in client.get("/listening").get_data(as_text=True)
     client.summary_path.write_text(json.dumps({"hello": 1}))
-    assert "not a tape-deck summary" in client.get("/listening").get_data(as_text=True)
+    assert "not a listening-tracker summary" in client.get("/listening").get_data(as_text=True)
 
 
 def test_the_refresh_note_carries_the_summary_time_and_the_script_parses(client, tmp_path):
