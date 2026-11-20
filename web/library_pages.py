@@ -19,7 +19,9 @@ from flask import (
     Blueprint,
     Response,
     abort,
+    current_app,
     flash,
+    has_app_context,
     jsonify,
     redirect,
     render_template,
@@ -511,7 +513,7 @@ def _log_view(video: Path, position: float, duration: float, source: str = "view
     finally:
         if conn is not None:
             conn.close()
-    return watch_log.record(
+    event = watch_log.record(
         watch_log.default_file(),
         rel=_rel(video),
         title=_title_dir(video).name,
@@ -522,6 +524,13 @@ def _log_view(video: Path, position: float, duration: float, source: str = "view
         episode=info.get("episode"),
         source=source,
     )
+    hook = current_app.config.get("CLOCKWORK_WATCH_EVENT_HOOK") if has_app_context() else None
+    if event is not None and callable(hook):
+        try:
+            hook(event)
+        except (OSError, RuntimeError, ValueError):
+            current_app.logger.exception("could not synchronize watched movie to To Watch")
+    return event
 
 
 @library_pages.post("/library/play/<path:rel>/watched")

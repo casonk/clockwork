@@ -924,16 +924,14 @@
         }
         dot.className = `lib-dot ${match.found ? 'found' : 'missing'}`;
         dot.title = match.found ? `In library: ${match.match}` : 'Not in library';
-        let link = item.querySelector('.lib-link');
-        if (match.url) {
-          if (!link) {
-            link = el('a', 'lib-link', '▶ Library');
-            item.querySelector('.item-body').append(link);
-          }
-          link.href = match.url;
-          link.title = `Open ${match.match} in Library`;
-        } else if (link) {
-          link.remove();
+        item.querySelectorAll('.lib-link').forEach(link => link.remove());
+        const links = match.links || (match.url ? [{ match: match.match, url: match.url }] : []);
+        for (const available of links) {
+          const label = links.length > 1 ? `▶ ${available.match}` : '▶ Library';
+          const link = el('a', 'lib-link', label);
+          link.href = available.url;
+          link.title = `Open ${available.match} in Library`;
+          item.querySelector('.item-body').append(link);
         }
         // Near-miss titles are suggestions only: the dot and the count stay "missing"
         // until a person opens the title and decides.

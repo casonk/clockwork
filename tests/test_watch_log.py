@@ -119,6 +119,31 @@ def test_the_viewer_reports_a_watched_episode_and_to_watch_shows_it(
     assert "▶ 1 episode · last S01E01" in page
 
 
+def test_watched_movie_endpoint_completes_the_to_watch_item(client, library, tmp_path, monkeypatch):
+    log = tmp_path / "viewing.jsonl"
+    watch_list = tmp_path / "to-watch.json"
+    history = tmp_path / "to-watch-history.jsonl"
+    watch_list.write_text(
+        json.dumps(
+            {"categories": [{"name": "Movies", "items": [{"title": "seven", "watched": False}]}]}
+        )
+    )
+    monkeypatch.setenv("CLOCKWORK_WATCH_LOG_FILE", str(log))
+    monkeypatch.setattr(web_app, "WATCH_LIST_FILE", watch_list)
+    monkeypatch.setattr(web_app, "WATCH_LIST_HISTORY_FILE", history)
+
+    rel = "/movies/Thriller/Seven (1995)/Seven_1995_1080p_David_Fincher.mp4"
+    response = client.post(
+        "/library/play" + rel + "/watched",
+        json={"position": 1400, "duration": 1500},
+        headers={"X-CSRF-Token": _csrf(client)},
+    )
+
+    assert response.get_json() == {"logged": True}
+    assert json.loads(watch_list.read_text())["categories"][0]["items"][0]["watched"] is True
+    assert '"detail": "library playback"' in history.read_text()
+
+
 def test_the_report_rejects_unknown_files_and_bad_numbers(client, library, tmp_path, monkeypatch):
     monkeypatch.setenv("CLOCKWORK_WATCH_LOG_FILE", str(tmp_path / "w.jsonl"))
     headers = {"X-CSRF-Token": _csrf(client)}
@@ -167,6 +192,15 @@ def test_normalize_title_links_release_names_and_articles():
     assert key("Joe.Pickett.S01.1080p.BluRay.x265[eztv.re]") == key("Joe Pickett")
     assert key("A Clockwork Orange (1971)") == key("clockwork orange")
     assert key("Rick.and.Morty.S05E01.720p") == "rick and morty"
+
+
+def test_title_stats_tolerates_unambiguous_word_spacing():
+    spaceballs = {"views": 1}
+    stats = {"spaceballs": spaceballs, "hot rod": {"views": 2}}
+
+    assert watch_log.title_stats(stats, "space balls") is spaceballs
+    assert watch_log.title_stats(stats, "Hot Rod") == {"views": 2}
+    assert watch_log.title_stats({"ab c": {}, "a bc": {}}, "a b c") is None
 
 
 def test_next_episode_continues_after_the_latest_watched():
