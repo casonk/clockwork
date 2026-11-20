@@ -280,7 +280,10 @@ def test_the_page_renders_on_a_phone_without_overflow_or_script_errors():
         )
         SEEN.clear()
         page.click("#view button[data-v='account']")
-        page.wait_for_selector("#chart path.stk")
+        # The category view's bands are still on the page, so wait for the account view's own note.
+        page.wait_for_function(
+            "document.getElementById('chart-note').textContent.includes('Each band is one account')"
+        )
         assert any("by=account" in u for u in SEEN if "/networth" in u)
         assert page.locator("#chart path.stk").count() == 3
         assert "Each band is one account" in page.inner_text("#chart-note")
