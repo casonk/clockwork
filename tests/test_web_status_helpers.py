@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -33,7 +33,7 @@ def test_parse_systemd_timestamp_handles_utc():
     parsed = status_helpers.parse_systemd_timestamp("Thu 2026-04-09 12:00:00 UTC")
 
     assert parsed is not None
-    assert parsed.tzinfo == timezone.utc
+    assert parsed.tzinfo == UTC
     assert parsed.isoformat() == "2026-04-09T12:00:00+00:00"
 
 
