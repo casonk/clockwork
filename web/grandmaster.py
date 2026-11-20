@@ -10,7 +10,7 @@ import json
 import os
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 ACTIONS = ("enable", "disable", "restart")
@@ -147,7 +147,7 @@ def audit(entry: dict, path: Path | None = None) -> None:
     Never raises: a log that cannot be written must not stop the change being reported.
     """
     path = path or AUDIT_FILE
-    record = {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), **entry}
+    record = {"ts": datetime.now(UTC).isoformat(timespec="seconds"), **entry}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)

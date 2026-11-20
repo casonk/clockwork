@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import datetime, timedelta, timezone, tzinfo
+from datetime import UTC, datetime, timedelta, tzinfo
 from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -62,7 +62,7 @@ def parse_systemd_timestamp(value: str) -> datetime | None:
 
     tz_token = (match.group(3) or "").upper()
     if tz_token in {"UTC", "GMT"}:
-        tz = timezone.utc
+        tz = UTC
     else:
         tz = _local_tzinfo()
 
@@ -281,7 +281,7 @@ def _local_tzinfo() -> tzinfo:
             return ZoneInfo(candidate)
         except ZoneInfoNotFoundError:
             continue
-    return datetime.now().astimezone().tzinfo or timezone.utc
+    return datetime.now().astimezone().tzinfo or UTC
 
 
 def _timezone_name_from_localtime() -> str:

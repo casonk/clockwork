@@ -2121,10 +2121,10 @@ def _listening_custom_metrics(
 
 def _listening_custom_stats(start: datetime.date, end: datetime.date, limit: int = 10) -> dict:
     """Compute a custom slice directly from listening-tracker's owner-only SQLite history, read-only."""
-    start_at = datetime.datetime.combine(start, datetime.time.min).astimezone(datetime.timezone.utc)
+    start_at = datetime.datetime.combine(start, datetime.time.min).astimezone(datetime.UTC)
     end_at = datetime.datetime.combine(
         end + datetime.timedelta(days=1), datetime.time.min
-    ).astimezone(datetime.timezone.utc)
+    ).astimezone(datetime.UTC)
     uri = LISTENING_DB_FILE.resolve().as_uri() + "?mode=ro"
     with sqlite3.connect(uri, uri=True) as conn:
         conn.row_factory = sqlite3.Row
@@ -8270,10 +8270,10 @@ def api_tradility_analysis():
         try:
             generated = datetime.datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
             if generated.tzinfo is None:
-                generated = generated.replace(tzinfo=datetime.timezone.utc)
+                generated = generated.replace(tzinfo=datetime.UTC)
             age_seconds = max(
                 0,
-                int((datetime.datetime.now(datetime.timezone.utc) - generated).total_seconds()),
+                int((datetime.datetime.now(datetime.UTC) - generated).total_seconds()),
             )
         except ValueError:
             pass
