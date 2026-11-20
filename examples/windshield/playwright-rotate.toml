@@ -7,6 +7,8 @@ working_directory = "%h/git/util-repos/windshield"
 exec_start = "/usr/bin/python3 -m windshield.container_rotation"
 after = ["network-online.target"]
 wants = ["network-online.target"]
+# Alert recipients (WINDSHIELD_NOTIFY_{SIGNAL,TELEGRAM,GMAIL}_TARGET), owner-only; optional.
+environment_files = ["-%h/.config/windshield/notify.env"]
 standard_output = "journal"
 standard_error = "journal"
 timer_description = "Weekly check for new Playwright releases"
