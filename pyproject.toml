@@ -7,7 +7,7 @@ name = "casonk-clockwork"
 version = "0.1.0"
 description = "Shared cron, systemd, and macOS launchd manifest rendering for portfolio schedulers."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
   { name = "Cason Konzer", email = "casonk@umich.edu" },
@@ -50,11 +50,11 @@ pythonpath = ["src", "."]
 
 [tool.black]
 line-length = 100
-target-version = ["py310"]
+target-version = ["py311"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.format]
 quote-style = "double"

@@ -15,7 +15,7 @@ jobs:
       # installation, and the interesting install-time difference across that
       # range is the `tomli>=2; python_version < "3.11"` marker in
       # pyproject.toml -- 3.10 pulls the dependency, 3.14 must not.
-      python-versions: '["3.10", "3.14"]'
+      python-versions: auto-edges
       install-extra: dev
 
   ci:
@@ -26,7 +26,7 @@ jobs:
       # rooted-but-unqualified paths in 3.13, and a Windows path-validation bug
       # slipped through a 3.10-3.12 matrix because every tested interpreter
       # agreed with each other and disagreed with the developer's.
-      python-versions: '["3.10", "3.11", "3.12", "3.13", "3.14"]'
+      python-versions: auto
       coverage: true
       coverage-source: clockwork,web
     secrets:
