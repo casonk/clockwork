@@ -11,8 +11,10 @@ import datetime
 import json
 import mimetypes
 import re
+import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 from flask import (
@@ -71,6 +73,24 @@ def _resolve(rel: str) -> Path:
 
 def _rel(path: Path) -> str:
     return str(path.resolve().relative_to(_root().resolve()))
+
+
+def _delete_target(rel: str) -> Path:
+    """Resolve a visible library entry without following a symlink on deletion."""
+    rel = rel.strip("/")
+    parts = Path(rel).parts
+    if not parts or any(part in ("..", "") or part.startswith(".") for part in parts):
+        abort(404)
+    root = _root().resolve()
+    path = root.joinpath(*parts)
+    current = root
+    for part in parts:
+        current /= part
+        if current.is_symlink():
+            abort(404)
+    if not path.exists() or path == root:
+        abort(404)
+    return path
 
 
 def _catalog():
@@ -362,6 +382,55 @@ def title_page(rel: str):
         ),
         breadcrumbs=_breadcrumbs(_rel(folder)),
     )
+
+
+@library_pages.post("/library/delete/<path:rel>")
+def delete(rel: str):
+    path = _delete_target(rel)
+    conn = _catalog()
+    title_row = _title_row(conn, path) if path.is_dir() else None
+    file_row = (
+        conn.execute("SELECT folder FROM files WHERE path = ?", (str(path),)).fetchone()
+        if conn is not None and path.is_file()
+        else None
+    )
+    if path.is_dir():
+        if title_row is None:
+            if conn is not None:
+                conn.close()
+            abort(404)
+        target_name = title_row["title"]
+        parent_rel = _rel(path.parent)
+        try:
+            shutil.rmtree(path)
+            if conn is not None:
+                conn.execute("DELETE FROM titles WHERE folder = ?", (title_row["folder"],))
+                conn.commit()
+        finally:
+            if conn is not None:
+                conn.close()
+        flash(f"Deleted {target_name}.", "success")
+        return redirect(url_for("library_pages.browse", rel=parent_rel))
+    if not path.is_file():
+        if conn is not None:
+            conn.close()
+        abort(404)
+    target_name = path.name
+    try:
+        path.unlink()
+        if conn is not None:
+            conn.execute("DELETE FROM files WHERE path = ?", (str(path),))
+            if file_row:
+                folder = Path(file_row["folder"])
+                ml._summarize_title(conn, file_row["folder"], folder.name, time.time())
+            conn.commit()
+    finally:
+        if conn is not None:
+            conn.close()
+    flash(f"Deleted {target_name}.", "success")
+    if file_row:
+        return redirect(url_for("library_pages.title_page", rel=_rel(Path(file_row["folder"]))))
+    return redirect(url_for("library_pages.browse", rel=_rel(path.parent)))
 
 
 @library_pages.post("/library/title/<path:rel>/genre")

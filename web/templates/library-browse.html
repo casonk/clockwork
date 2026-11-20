@@ -27,7 +27,11 @@
           {% endif %}
         </td>
         <td class="small muted" style="white-space:nowrap">{{ d.count }} item{{ "" if d.count == 1 else "s" }}</td>
-        <td style="white-space:nowrap">{% if d.is_title %}<a class="btn" href="{{ url_for('library_pages.title_page', rel=d.rel) }}">Details</a>{% endif %}</td>
+        <td style="white-space:nowrap">{% if d.is_title %}<a class="btn" href="{{ url_for('library_pages.title_page', rel=d.rel) }}">Details</a>
+          <form method="post" action="{{ url_for('library_pages.delete', rel=d.rel) }}" style="display:inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="btn danger" type="button" data-double-delete aria-label="Delete {{ d.name }}" title="Double-click to delete this title and all of its files">Delete</button>
+          </form>{% endif %}</td>
       </tr>
     {% endfor %}
     {% for f in files %}
@@ -40,6 +44,10 @@
         <td style="white-space:nowrap">
           {% if f.video %}<a class="btn primary" href="{{ url_for('library_pages.play_page', rel=f.rel) }}">▶</a>{% endif %}
           <a class="btn" href="{{ url_for('library_pages.media_file', rel=f.rel, download=1) }}" title="Download">⬇</a>
+          <form method="post" action="{{ url_for('library_pages.delete', rel=f.rel) }}" style="display:inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="btn danger" type="button" data-double-delete aria-label="Delete {{ f.name }}" title="Double-click to delete">Delete</button>
+          </form>
         </td>
       </tr>
     {% endfor %}

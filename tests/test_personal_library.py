@@ -86,6 +86,33 @@ def test_browse_view_and_range_requests(client):
     assert partial.status_code == 206 and partial.data == b"aud"
 
 
+def test_media_entries_offer_double_click_delete_and_delete_files_and_folders(client):
+    browse = client.get("/media/read/").get_data(as_text=True)
+    assert "data-double-delete" in browse
+    assert "Click again to delete" in browse
+    assert client.post("/media/read/delete/paper.pdf").status_code == 403
+
+    deleted_file = client.post("/media/read/delete/paper.pdf", headers=_csrf(client))
+    assert deleted_file.status_code == 302
+    assert not (library.ROOTS["read"] / "paper.pdf").exists()
+
+    deleted_album = client.post("/media/listen/delete/Kind%20of%20Blue", headers=_csrf(client))
+    assert deleted_album.status_code == 302
+    assert not (library.ROOTS["listen"] / "Kind of Blue").exists()
+
+
+def test_folder_delete_refuses_content_the_library_does_not_show(client):
+    folder = library.ROOTS["read"] / "Novels"
+    (folder / "notes.docx").write_bytes(b"not a supported book")
+
+    response = client.post("/media/read/delete/Novels", headers=_csrf(client))
+
+    assert response.status_code == 302
+    assert folder.exists()
+    with client.session_transaction() as session:
+        assert session["_flashes"][-1][0] == "error"
+
+
 def test_hidden_and_outside_files_are_not_served(client, tmp_path, monkeypatch):
     root = library.ROOTS["read"]
     (root / ".secret.pdf").write_bytes(b"secret")

@@ -457,6 +457,35 @@ def test_change_genre_moves_folder_and_keeps_catalog(client, library):
     assert (library / "movies" / "Crime" / "Seven (1995)").exists()
 
 
+def test_watch_library_double_click_controls_delete_a_file_and_a_title(client, library):
+    title_url = "/library/title/movies/Thriller/Seven (1995)"
+    html = client.get(title_url).get_data(as_text=True)
+    assert "data-double-delete" in html
+    assert "Delete title" in html
+    assert "Click again to delete" in html
+
+    episode_rel = "shows/Breaking Bad (2008)/Season 01/Breaking_Bad_S01E01_1080p.mkv"
+    episode = library / episode_rel
+    assert client.post(f"/library/delete/{episode_rel}").status_code == 403
+    response = client.post(f"/library/delete/{episode_rel}", data={"csrf_token": _csrf(client)})
+    assert response.status_code == 302
+    assert not episode.exists()
+    conn = ml.connect(ml.CATALOG_DB)
+    assert conn.execute("SELECT 1 FROM files WHERE path = ?", (str(episode),)).fetchone() is None
+    conn.close()
+
+    folder = library / "movies" / "Thriller" / "Seven (1995)"
+    response = client.post(
+        "/library/delete/movies/Thriller/Seven (1995)",
+        data={"csrf_token": _csrf(client)},
+    )
+    assert response.status_code == 302
+    assert not folder.exists()
+    conn = ml.connect(ml.CATALOG_DB)
+    assert conn.execute("SELECT 1 FROM titles WHERE folder = ?", (str(folder),)).fetchone() is None
+    conn.close()
+
+
 def test_manage_page_lists_attention_and_starts_sync(client, monkeypatch):
     calls = []
 

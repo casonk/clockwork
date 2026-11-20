@@ -4,9 +4,20 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from pathlib import Path
 
-from flask import Blueprint, abort, jsonify, render_template, request, send_file, url_for
+from flask import (
+    Blueprint,
+    abort,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    url_for,
+)
 
 personal_library = Blueprint("personal_library", __name__)
 
@@ -47,6 +58,40 @@ def _resolve(kind: str, rel: str) -> Path:
     if root not in path.parents or not path.exists():
         abort(404)
     return path
+
+
+def _delete_target(kind: str, rel: str) -> Path:
+    """Resolve a visible library entry without following a symlink on deletion."""
+    root = root_for(kind)
+    if root is None:
+        abort(404)
+    parts = Path(rel).parts
+    if not parts or any(part in ("", ".", "..") or part.startswith(".") for part in parts):
+        abort(404)
+    root = root.resolve()
+    path = root.joinpath(*parts)
+    current = root
+    for part in parts:
+        current /= part
+        if current.is_symlink():
+            abort(404)
+    if not path.exists() or path == root:
+        abort(404)
+    return path
+
+
+def _directory_contains_only_media(kind: str, folder: Path) -> bool:
+    """Do not recursively delete content the library UI does not show."""
+    for base, dirs, files in os.walk(folder, followlinks=False):
+        entries = [Path(base) / name for name in [*dirs, *files]]
+        if any(path.name.startswith(".") or path.is_symlink() for path in entries):
+            return False
+        if any(
+            not path.is_file() or path.suffix.lower() not in EXTENSIONS[kind]
+            for path in (Path(base) / name for name in files)
+        ):
+            return False
+    return True
 
 
 def _relative(kind: str, path: Path) -> str:
@@ -144,7 +189,9 @@ def browse(kind: str, rel: str = ""):
             dirs.append({"name": child.name, "rel": child_rel})
         elif child.is_file() and child.suffix.lower() in EXTENSIONS[kind]:
             endpoint = "personal_library.play" if kind == "listen" else "personal_library.view"
-            files.append({"name": child.name, "url": url_for(endpoint, rel=child_rel)})
+            files.append(
+                {"name": child.name, "rel": child_rel, "url": url_for(endpoint, rel=child_rel)}
+            )
     return render_template(
         "personal-browse.html",
         kind=kind,
@@ -153,6 +200,38 @@ def browse(kind: str, rel: str = ""):
         dirs=dirs,
         files=files,
         playable=kind == "listen" and bool(_files("listen", folder)),
+    )
+
+
+@personal_library.post("/media/<kind>/delete/<path:rel>")
+def delete(kind: str, rel: str):
+    path = _delete_target(kind, rel)
+    if path.is_dir():
+        if not _directory_contains_only_media(kind, path):
+            flash(
+                "Could not delete: this folder contains hidden, linked, or unsupported files.",
+                "error",
+            )
+            return redirect(
+                url_for(
+                    "personal_library.browse",
+                    kind=kind,
+                    rel=str(Path(rel).parent) if Path(rel).parent != Path(".") else "",
+                )
+            )
+        shutil.rmtree(path)
+    elif path.is_file() and path.suffix.lower() in EXTENSIONS[kind]:
+        path.unlink()
+    else:
+        abort(404)
+    parent = Path(rel).parent
+    flash(f"Deleted {path.name}.", "success")
+    return redirect(
+        url_for(
+            "personal_library.browse",
+            kind=kind,
+            rel=str(parent) if parent != Path(".") else "",
+        )
     )
 
 
@@ -197,6 +276,7 @@ def view(rel: str):
         media_type=path.suffix.lower(),
         file_url=url_for("personal_library.media_file", kind="read", rel=rel),
         download_url=url_for("personal_library.media_file", kind="read", rel=rel, download=1),
+        delete_rel=rel,
         playlist=[],
     )
 
@@ -228,5 +308,6 @@ def play(rel: str):
             rel=_relative("listen", tracks[0]),
             download=1,
         ),
+        delete_rel=rel,
         playlist=playlist,
     )
