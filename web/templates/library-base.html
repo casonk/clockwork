@@ -31,6 +31,7 @@
     .btn { display:inline-flex; align-items:center; gap:5px; padding:6px 11px; border-radius:6px; border:1px solid var(--border); background:var(--surface2); color:var(--text); font:inherit; font-size:12px; font-weight:600; cursor:pointer; }
     .btn:hover { border-color:var(--muted); text-decoration:none; }
     .btn.primary { border-color:var(--accent); color:var(--accent); }
+    .btn.danger { border-color:var(--red); color:var(--red); }
     select { font:inherit; font-size:13px; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:6px 8px; color:var(--text); }
     table { width:100%; border-collapse:collapse; }
     td, th { text-align:left; padding:6px 8px; border-bottom:1px solid color-mix(in srgb, var(--border) 50%, transparent); vertical-align:top; overflow-wrap:anywhere; }
@@ -70,6 +71,7 @@
   {% endwith %}
   {% block content %}{% endblock %}
 </main>
+{% include "_double_delete.html" %}
 {% block scripts %}{% endblock %}
 </body>
 </html>

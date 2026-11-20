@@ -17,6 +17,7 @@
     .muted { color:var(--muted); }
     button { background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:7px 12px; cursor:pointer; }
     button:hover { border-color:var(--accent); }
+    button.danger { border-color:var(--red); color:var(--red); }
     iframe { width:100%; height:calc(100vh - 120px); min-height:480px; border:0; background:white; }
     #epub-area { width:100%; height:calc(100vh - 190px); min-height:480px; background:white; }
     audio { width:100%; margin:12px 0; }
@@ -36,6 +37,10 @@
   <a href="{{ url_for('personal_library.browse', kind=kind) }}">← Library</a>
   <h1>{{ '🎧' if kind == 'listen' else '📚' }} {{ title }}</h1>
   <a href="{{ download_url }}">⬇ Download</a>
+  <form method="post" action="{{ url_for('personal_library.delete', kind=kind, rel=delete_rel) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="danger" type="button" data-double-delete aria-label="Delete {{ title }}" title="Double-click to delete">Delete</button>
+  </form>
 </header>
 <main>
   {% if kind == 'listen' %}
@@ -85,5 +90,6 @@
     </script>
   {% endif %}
 </main>
+{% include "_double_delete.html" %}
 </body>
 </html>

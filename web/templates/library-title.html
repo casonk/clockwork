@@ -44,6 +44,10 @@
     <td style="white-space:nowrap">
       <a class="btn primary" href="{{ url_for('library_pages.play_page', rel=item.rel) }}" title="{% if item.playable %}Plays directly{% else %}Streams with on-the-fly conversion{% endif %}">▶ Play</a>
       <a class="btn" href="{{ url_for('library_pages.media_file', rel=item.rel, download=1) }}" title="Download">⬇</a>
+      <form method="post" action="{{ url_for('library_pages.delete', rel=item.rel) }}" style="display:inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="btn danger" type="button" data-double-delete aria-label="Delete {{ item.name }}" title="Double-click to delete">Delete</button>
+      </form>
     </td>
   </tr>
 {% endmacro %}
@@ -74,6 +78,10 @@
     {% if meta.wikidata_id %} · <a href="https://www.wikidata.org/wiki/{{ meta.wikidata_id|urlencode }}" target="_blank" rel="noopener noreferrer">Wikidata</a>{% endif %}
     {% if not meta.sources or meta.sources == "[]" %}<span class="muted">No online metadata found yet.</span>{% endif %}
   </p>
+  <form method="post" action="{{ url_for('library_pages.delete', rel=rel) }}" style="margin-top:10px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="btn danger" type="button" data-double-delete aria-label="Delete {{ title }}" title="Double-click to delete this title and all of its files">Delete title</button>
+  </form>
 </div>
 
 {% if kind == "movies" %}
@@ -127,7 +135,12 @@
   <h2>Extras <span class="muted">· {{ extras|length }}</span></h2>
   <div class="panel scroll"><table>
     {% for e in extras %}<tr><td class="small">{{ e.name }}</td><td class="small">{{ e.size }}</td>
-      <td style="white-space:nowrap"><a class="btn primary" href="{{ url_for('library_pages.play_page', rel=e.rel) }}">▶ Play</a></td></tr>{% endfor %}
+      <td style="white-space:nowrap"><a class="btn primary" href="{{ url_for('library_pages.play_page', rel=e.rel) }}">▶ Play</a>
+        <form method="post" action="{{ url_for('library_pages.delete', rel=e.rel) }}" style="display:inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="btn danger" type="button" data-double-delete aria-label="Delete {{ e.name }}" title="Double-click to delete">Delete</button>
+        </form>
+      </td></tr>{% endfor %}
   </table></div>
 {% endif %}
 {% endblock %}

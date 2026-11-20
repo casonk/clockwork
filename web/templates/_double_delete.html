@@ -1,0 +1,25 @@
+<script>
+(() => {
+  const resetAfterMs = 4000;
+  document.addEventListener('click', event => {
+    const button = event.target.closest('[data-double-delete]');
+    if (!button) return;
+    event.preventDefault();
+    if (button.dataset.armed === 'true') {
+      button.disabled = true;
+      button.closest('form').requestSubmit();
+      return;
+    }
+    button.dataset.armed = 'true';
+    button.dataset.label = button.textContent;
+    button.textContent = 'Click again to delete';
+    button.setAttribute('aria-label', 'Click again to confirm deletion');
+    window.setTimeout(() => {
+      if (!button.isConnected || button.disabled) return;
+      button.dataset.armed = 'false';
+      button.textContent = button.dataset.label;
+      button.setAttribute('aria-label', button.dataset.label);
+    }, resetAfterMs);
+  });
+})();
+</script>
