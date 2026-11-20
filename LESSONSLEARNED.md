@@ -458,3 +458,9 @@ should change how future sessions work in this repo.
   GPU driver/library mismatch made every upscale fail in seconds and flagged 510 healthy videos.
   Classify environment errors (CUDA init, no device) as "pause and retry", never as a mark on the
   item, and self-heal marks that an earlier version wrongly wrote.
+
+### 2026-11-20 — Scripts that call the `/to-code` API need the page's session token
+
+- The JSON API rejects cross-origin writes with 403. A script must first load the page (`GET /to-code`) with a cookie jar,
+  read the CSRF token, and send it as `X-CSRF-Token`; items are matched by exact title, repository and category.
+  The 403 is the guard working, not an outage.
