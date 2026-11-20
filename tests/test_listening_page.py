@@ -1,4 +1,4 @@
-"""The /listening page and /api/listening render listening-tracker's summary.json and fail soft."""
+"""The /listening page and /api/listening render the listening tracker's summary.json and fail soft."""
 
 from __future__ import annotations
 
@@ -163,7 +163,7 @@ def test_missing_summary_explains_how_to_make_one(client):
     client.summary_path.unlink()
     response = client.get("/listening")
     assert response.status_code == 200
-    assert "listening-tracker poll --summary" in response.get_data(as_text=True)
+    assert "poll --summary" in response.get_data(as_text=True)
     assert client.get("/api/listening").status_code == 503
 
 

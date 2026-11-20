@@ -413,9 +413,9 @@ item automatically, and it is saved through `POST /<page>/link-provider/<provide
 
 To Listen can link items to Spotify and keep a private **To Listen** playlist in sync.
 
-1. Run `scripts/setup_spotify.sh`. With no arguments it reuses the Spotify app listening-tracker already
-   uses (its client ID and registered loopback redirect URI are read from
-   `~/.config/listening-tracker/config.toml`), so nothing needs registering or typing: the PKCE login
+1. Run `scripts/setup_spotify.sh`. With `SPOTIFY_APP_CONFIG` pointing at the config of another local
+   Spotify app, it reuses that app (its client ID and registered loopback redirect URI are read from
+   that file), so nothing needs registering or typing: the PKCE login
    needs no client secret. For a different app, pass `CLIENT_ID [CLIENT_SECRET]` and register
    `http://127.0.0.1:8765/callback` on it first (Spotify rejects `localhost`).
 2. It opens the browser to approve access (read and `playlist-modify-private`), stores the grant

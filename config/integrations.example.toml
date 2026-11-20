@@ -1,0 +1,7 @@
+# Copy to config/integrations.local.toml (gitignored) and point each key at the file the
+# named local service writes. Environment variables of the same purpose take precedence.
+[paths]
+listening_summary = "~/.local/share/listening-tracker/summary.json"
+listening_token = "~/.config/listening-tracker/token.json"
+listening_app_config = "~/.config/listening-tracker/config.toml"
+finance_api_key = "~/.config/finance-service/api.key"

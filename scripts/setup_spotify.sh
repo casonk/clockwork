@@ -2,8 +2,8 @@
 # One-shot Spotify setup for Clockwork's To Listen page: authorize, create the playlist,
 # restart the web service and verify.        Run with no arguments:   scripts/setup_spotify.sh
 #
-# By default it reuses the Spotify app listening-tracker already uses (client ID and loopback redirect
-# URI read from ~/.config/listening-tracker/config.toml), so nothing needs registering or typing: the
+# When SPOTIFY_APP_CONFIG points at the config of another local Spotify app, it
+# reuses that app (client ID and loopback redirect URI), so nothing needs registering or typing: the
 # PKCE login needs no client secret. To use a different app:
 #   scripts/setup_spotify.sh CLIENT_ID [CLIENT_SECRET]    (or SPOTIFY_CLIENT_ID / _SECRET)
 # and register  http://127.0.0.1:8765/callback  on it first (SPOTIFY_CALLBACK_PORT changes the port).
@@ -11,13 +11,13 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 grant="${CLOCKWORK_SPOTIFY_OAUTH_FILE:-$HOME/.config/clockwork/spotify-oauth.json}"
-tape_config="${TAPE_DECK_CONFIG:-$HOME/.config/listening-tracker/config.toml}"
+tape_config="${SPOTIFY_APP_CONFIG:-}"
 client_id="${1:-${SPOTIFY_CLIENT_ID:-}}"
 export SPOTIFY_CLIENT_SECRET="${2:-${SPOTIFY_CLIENT_SECRET:-}}"
 port="${SPOTIFY_CALLBACK_PORT:-8765}"
 
-if [[ -z "$client_id" && -f "$tape_config" ]]; then
-  # Reuse listening-tracker's app: its client ID, and the port of the redirect URI it registered.
+if [[ -z "$client_id" && -n "$tape_config" && -f "$tape_config" ]]; then
+  # Reuse the other app: its client ID, and the port of the redirect URI it registered.
   read -r client_id port < <(python3 - "$tape_config" <<'PY'
 import sys, tomllib, urllib.parse
 cfg = tomllib.load(open(sys.argv[1], "rb"))
@@ -26,7 +26,7 @@ ok = parts.hostname == "127.0.0.1" and parts.path == "/callback" and parts.port
 print(str(cfg.get("client_id") or ""), parts.port if ok else 8765)
 PY
 )
-  echo "Reusing listening-tracker's Spotify app (redirect http://127.0.0.1:${port}/callback)."
+  echo "Reusing the existing Spotify app (redirect http://127.0.0.1:${port}/callback)."
 fi
 if [[ -z "$client_id" ]]; then
   echo "No Spotify client ID found. Run: scripts/setup_spotify.sh CLIENT_ID [CLIENT_SECRET]" >&2

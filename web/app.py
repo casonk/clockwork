@@ -56,6 +56,7 @@ try:
         finances,
         grandmaster,
         home_cards,
+        integrations,
         media_library,
         placeholders,
         providers,
@@ -87,6 +88,7 @@ except ModuleNotFoundError:
     import finances
     import grandmaster
     import home_cards
+    import integrations
     import media_library
     import personal_library as personal_media
     import placeholders
@@ -1910,14 +1912,11 @@ def ecu_page():
     return render_template("ecu.html", ecu=document, error=error)
 
 
-LISTENING_FILE = Path(
-    os.environ.get(
-        "CLOCKWORK_TAPE_DECK_FILE",
-        Path.home() / ".local" / "share" / "listening-tracker" / "summary.json",
-    )
-)
+LISTENING_FILE = integrations.configured_path(
+    "listening_summary", "CLOCKWORK_LISTENING_FILE"
+) or Path("listening-summary-not-configured.json")
 LISTENING_DB_FILE = Path(
-    os.environ.get("CLOCKWORK_TAPE_DECK_DB_FILE", LISTENING_FILE.with_name("plays.sqlite"))
+    os.environ.get("CLOCKWORK_LISTENING_DB_FILE", LISTENING_FILE.with_name("plays.sqlite"))
 )
 LISTENING_WINDOWS = (
     ("all", "All time"),
@@ -1934,13 +1933,13 @@ _WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 
 def _listening_summary() -> tuple[dict | None, str]:
-    """listening-tracker's summary.json as a document, or (None, why it is unavailable)."""
+    """the listening tracker's summary.json as a document, or (None, why it is unavailable)."""
     try:
         document = json.loads(LISTENING_FILE.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return (
             None,
-            "no summary yet: run `listening-tracker poll --summary` (see the listening-tracker repo)",
+            "no summary yet: run the listening tracker's `poll --summary`",
         )
     except (OSError, ValueError) as exc:
         return None, f"the summary could not be read ({type(exc).__name__})"
@@ -1950,8 +1949,10 @@ def _listening_summary() -> tuple[dict | None, str]:
 
 
 def _spotify_now_playing() -> dict | None:
-    """Read Spotify's current playback using listening-tracker's owner-only fresh token."""
-    token_file = Path.home() / ".config" / "listening-tracker" / "token.json"
+    """Read Spotify's current playback using the listening tracker's owner-only fresh token."""
+    token_file = integrations.configured_path("listening_token", "CLOCKWORK_LISTENING_TOKEN_FILE")
+    if token_file is None:
+        return None
     try:
         token = str(json.loads(token_file.read_text(encoding="utf-8")).get("access_token") or "")
         import urllib.request
@@ -1994,7 +1995,7 @@ def _listening_timeline(
 
     New listening-tracker summaries include sparse local ``by_day`` counts.  Zero-fill the selected range so
     the line's spacing reflects time rather than only the days on which the user listened.  The
-    month fallback keeps existing summaries readable until the next listening-tracker refresh.
+    month fallback keeps existing summaries readable until the next tracker refresh.
     """
 
     counts: dict[datetime.date, int] = {}
@@ -2101,7 +2102,7 @@ def _listening_timeline(
 def _listening_custom_metrics(
     document: dict, start: datetime.date, end: datetime.date
 ) -> tuple[int, float]:
-    """Count eligible plays and listened hours from listening-tracker's private daily aggregates."""
+    """Count eligible plays and listened hours from the listening tracker's private daily aggregates."""
 
     plays = milliseconds = 0
     for label, value in document.get("by_day", {}).items():
@@ -2120,7 +2121,7 @@ def _listening_custom_metrics(
 
 
 def _listening_custom_stats(start: datetime.date, end: datetime.date, limit: int = 10) -> dict:
-    """Compute a custom slice directly from listening-tracker's owner-only SQLite history, read-only."""
+    """Compute a custom slice directly from the listening tracker's owner-only SQLite history, read-only."""
     start_at = datetime.datetime.combine(start, datetime.time.min).astimezone(datetime.UTC)
     end_at = datetime.datetime.combine(
         end + datetime.timedelta(days=1), datetime.time.min
