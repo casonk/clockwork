@@ -4,6 +4,9 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from tests.tradility_page import PAGE as TRADILITY_PAGE
+from tests.tradility_page import rendered
+
 WEB = Path(__file__).resolve().parents[1] / "web"
 SCRIPT = WEB / "static" / "collapsible-cards.js"
 
@@ -20,7 +23,8 @@ class CollapsibleCardsTest(unittest.TestCase):
 
     def test_no_page_keeps_its_own_copy(self):
         for page in (WEB / "templates").glob("*.html"):
-            text = page.read_text()
+            # the shared Tradility template keeps the inline script for its standalone mode only
+            text = rendered() if page == TRADILITY_PAGE else page.read_text()
             self.assertNotIn("initCollapsibleCards", text, page.name)
             self.assertNotIn(".cc-collapsed", text, page.name)
 

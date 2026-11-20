@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from tests.test_web_lists import client, list_files, web_app  # noqa: F401
+from tests.tradility_page import rendered
 
 HTML = (Path(__file__).resolve().parents[1] / "web" / "templates" / "to-tradility.html").read_text(
     encoding="utf-8"
@@ -246,4 +247,4 @@ def test_a_tradility_target_that_cannot_be_placed_is_refused_without_saving(clie
 
 
 def test_the_target_card_links_to_its_own_row_in_to_invest():
-    assert "/to-invest#invest-item-${encodeURIComponent(r.ticker || ticker)}" in HTML
+    assert "/to-invest#invest-item-${encodeURIComponent(r.ticker || ticker)}" in rendered()
