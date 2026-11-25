@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- The index page's status freshness is configurable per service: `CLOCKWORK_STATUS_TTL`, `CLOCKWORK_STATUS_MAX_STALE` and `CLOCKWORK_STATUS_KEEPWARM` (seconds, defaults 5 / 60 / 30, `0` allowed). See the README.
 - Every page render re-parsed the wiring-harness registry (two `tomlkit` parses, ~50 ms) for the nav menus and portal cards; it is now re-read only when the registry file changes.
 - A background thread keeps the index page's unit statuses at most ~30 s old, so a page load (and the latency probe) does not wait for `systemctl`. Idle until the first page load.
 - The index page no longer re-parses every manifest or runs ~60 `systemctl show` calls per load: manifests are re-read only when their mtime or size changes, unit statuses come from one `systemctl show` per scope (read in parallel), and the answer is reused for 5 s and served stale for up to 60 s while a background thread refreshes it. Any write (POST) drops the cache so the page never shows the state from before your own click. Index load: ~0.9 s to ~15-30 ms warm, ~0.35 s cold.
