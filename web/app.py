@@ -1129,7 +1129,21 @@ _STATUS_WORKERS = 8
 _STATUS_PROPERTIES = "--property=Id,ActiveState,UnitFileState,NextElapseUSecRealtime"
 
 
-_STATUS_TTL_S = 5.0
+def _seconds_env(name: str, default: float) -> float:
+    """A non-negative number of seconds from the environment; anything unusable falls back."""
+    try:
+        value = float(os.environ.get(name, ""))
+    except ValueError:
+        return default
+    return value if value >= 0 else default
+
+
+# How fresh the index page's unit statuses are.  Each is seconds, set in the service's unit file:
+#   CLOCKWORK_STATUS_TTL        reuse an answer this long without refreshing it
+#   CLOCKWORK_STATUS_MAX_STALE  serve an older answer up to this long while a refresh runs
+#                               (0: never serve a cached answer; every load reads systemctl)
+#   CLOCKWORK_STATUS_KEEPWARM   background refresh interval (0: off)
+_STATUS_TTL_S = _seconds_env("CLOCKWORK_STATUS_TTL", 5.0)
 _status_cache: dict[tuple, tuple[float, list[dict]]] = {}
 
 
@@ -1145,7 +1159,7 @@ def _drop_cached_statuses_after_writes(response):
     return response
 
 
-_STATUS_MAX_STALE_S = 60.0
+_STATUS_MAX_STALE_S = _seconds_env("CLOCKWORK_STATUS_MAX_STALE", 60.0)
 _status_refreshing: set[tuple] = set()
 
 
@@ -1158,7 +1172,7 @@ def _refresh_statuses(key: tuple) -> None:
         _status_refreshing.discard(key)
 
 
-_STATUS_KEEPWARM_S = 30.0
+_STATUS_KEEPWARM_S = _seconds_env("CLOCKWORK_STATUS_KEEPWARM", 30.0)
 _keepwarm_started = False
 
 
@@ -1184,7 +1198,7 @@ def _keep_statuses_warm() -> None:
 
 def _start_keepwarm() -> None:
     global _keepwarm_started
-    if not _keepwarm_started:
+    if _STATUS_KEEPWARM_S > 0 and not _keepwarm_started:
         _keepwarm_started = True
         threading.Thread(target=_keep_statuses_warm, name="status-keepwarm", daemon=True).start()
 
@@ -1192,9 +1206,9 @@ def _start_keepwarm() -> None:
 def _batch_unit_statuses(units: list[tuple[str, str]]) -> list[dict]:
     """Like :func:`_batch_unit_statuses_uncached`, but a page load rarely waits for systemctl.
 
-    Fresh (under 5 s) answers are reused as they are.  Older ones, up to a minute, are served
-    while a background thread refreshes them, so the next load is current; anything older, or
-    anything after a write, is read inline.
+    Fresh answers (under ``CLOCKWORK_STATUS_TTL``, 5 s) are reused as they are.  Older ones, up to
+    ``CLOCKWORK_STATUS_MAX_STALE`` (60 s), are served while a background thread refreshes them, so
+    the next load is current; anything older, or anything after a write, is read inline.
     """
     key = tuple(units)
     cached = _status_cache.get(key)

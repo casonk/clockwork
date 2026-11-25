@@ -599,6 +599,18 @@ in the gitignored `config/placeholders.json` (`CLOCKWORK_PLACEHOLDERS_FILE`), sh
 kept out of the services menu. Registering one adds a To Code item for the repository group and repository
 you name. Removing the card leaves that backlog item.
 
+### Update rate of the index page
+
+The index page's unit statuses are cached so a load does not wait on `systemctl`. How fresh they are is set per service with environment variables in its unit file (seconds; `0` is allowed, an unusable value falls back to the default):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CLOCKWORK_STATUS_TTL` | 5 | reuse an answer this long without refreshing it |
+| `CLOCKWORK_STATUS_MAX_STALE` | 60 | serve an older answer up to this long while a background refresh runs; `0` reads `systemctl` on every load |
+| `CLOCKWORK_STATUS_KEEPWARM` | 30 | background refresh interval; `0` turns it off |
+
+Any change you make from the page (any POST) drops the cache, so it never shows the state from before your own click.
+
 ## mTLS and Caddy
 
 mTLS provisioning, Caddyfile generation, and DNS setup live in the

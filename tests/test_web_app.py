@@ -1847,3 +1847,33 @@ def test_registry_doc_reparses_only_when_the_file_changes(tmp_path, monkeypatch)
     path.write_text('[[services]]\nname = "a"\n[[services]]\nname = "b"\n', encoding="utf-8")
     assert len(web_app._registry_doc(path)["services"]) == 2 and len(parses) == 2
     assert web_app._registry_doc(tmp_path / "missing.toml") == {}
+
+
+def test_seconds_env_accepts_non_negative_numbers_and_ignores_the_rest(monkeypatch):
+    monkeypatch.setenv("CLOCKWORK_X", "12.5")
+    assert web_app._seconds_env("CLOCKWORK_X", 5.0) == 12.5
+    monkeypatch.setenv("CLOCKWORK_X", "0")
+    assert web_app._seconds_env("CLOCKWORK_X", 5.0) == 0.0
+    for bad in ("-1", "soon", ""):
+        monkeypatch.setenv("CLOCKWORK_X", bad)
+        assert web_app._seconds_env("CLOCKWORK_X", 5.0) == 5.0
+    monkeypatch.delenv("CLOCKWORK_X")
+    assert web_app._seconds_env("CLOCKWORK_X", 5.0) == 5.0
+
+
+def test_zero_max_stale_reads_systemctl_on_every_load_and_zero_keepwarm_starts_no_thread(
+    monkeypatch,
+):
+    web_app.clear_status_cache()
+    calls = []
+    monkeypatch.setattr(
+        web_app, "_batch_unit_statuses_uncached", lambda units: calls.append(1) or [{}]
+    )
+    monkeypatch.setattr(web_app, "_STATUS_MAX_STALE_S", 0.0)
+    monkeypatch.setattr(web_app, "_STATUS_KEEPWARM_S", 0.0)
+    monkeypatch.setattr(web_app, "_keepwarm_started", False)
+    units = [("a.timer", "user")]
+    web_app._batch_unit_statuses(units)
+    web_app._batch_unit_statuses(units)
+    assert len(calls) == 2
+    assert web_app._keepwarm_started is False
