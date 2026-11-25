@@ -1157,6 +1157,37 @@ def _refresh_statuses(key: tuple) -> None:
         _status_refreshing.discard(key)
 
 
+_STATUS_KEEPWARM_S = 30.0
+_keepwarm_started = False
+
+
+def _keep_statuses_warm() -> None:
+    """Refresh the last-requested unit list every 30 s so a page load is never the one to wait.
+
+    Statuses are therefore at most ~30 s old (the same bound the stale-while-revalidate path
+    gives), and the thread idles until a first page load tells it which units to read.
+    """
+    while True:
+        time.sleep(_STATUS_KEEPWARM_S)
+        try:
+            key = next(iter(list(_status_cache)), None)
+        except RuntimeError:  # the cache was being replaced; try again next round
+            continue
+        if key is None or key in _status_refreshing:
+            continue
+        _status_refreshing.add(key)
+        with contextlib.suppress(Exception):
+            _refresh_statuses(key)
+        _status_refreshing.discard(key)
+
+
+def _start_keepwarm() -> None:
+    global _keepwarm_started
+    if not _keepwarm_started:
+        _keepwarm_started = True
+        threading.Thread(target=_keep_statuses_warm, name="status-keepwarm", daemon=True).start()
+
+
 def _batch_unit_statuses(units: list[tuple[str, str]]) -> list[dict]:
     """Like :func:`_batch_unit_statuses_uncached`, but a page load rarely waits for systemctl.
 
@@ -1175,6 +1206,7 @@ def _batch_unit_statuses(units: list[tuple[str, str]]) -> list[dict]:
     results = _batch_unit_statuses_uncached(units)
     _status_cache.clear()
     _status_cache[key] = (time.monotonic(), copy.deepcopy(results))
+    _start_keepwarm()
     return results
 
 
