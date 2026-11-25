@@ -1832,3 +1832,18 @@ def test_keepwarm_refreshes_the_last_requested_units(monkeypatch):
     with pytest.raises(Stop):
         web_app._keep_statuses_warm()
     assert seen == [[("a.timer", "user")]]
+
+
+def test_registry_doc_reparses_only_when_the_file_changes(tmp_path, monkeypatch):
+    path = tmp_path / "services.toml"
+    path.write_text('[[services]]\nname = "a"\n', encoding="utf-8")
+    web_app._registry_cache.clear()
+    parses = []
+    real_loads = web_app.tomlkit.loads
+    monkeypatch.setattr(web_app.tomlkit, "loads", lambda text: parses.append(1) or real_loads(text))
+
+    first = web_app._registry_doc(path)
+    assert web_app._registry_doc(path) is first and len(parses) == 1
+    path.write_text('[[services]]\nname = "a"\n[[services]]\nname = "b"\n', encoding="utf-8")
+    assert len(web_app._registry_doc(path)["services"]) == 2 and len(parses) == 2
+    assert web_app._registry_doc(tmp_path / "missing.toml") == {}

@@ -28,6 +28,7 @@ import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import tomlkit
@@ -9814,12 +9815,34 @@ def _group_anchor(name: str) -> str:
     return name.lower().replace(" ", "-")
 
 
+_registry_cache: dict[str, tuple[tuple[int, int], Any]] = {}
+
+
+def _registry_doc(path: Path) -> Any:
+    """The parsed wiring-harness registry, re-read only when the file's mtime or size changes.
+
+    Every page render needs it (nav menus, portal cards) and tomlkit takes ~60 ms for it, which
+    was most of the index page's render time.  Callers only read it.
+    """
+    try:
+        info = path.stat()
+    except OSError:
+        return {}
+    signature = (info.st_mtime_ns, info.st_size)
+    cached = _registry_cache.get(str(path))
+    if cached and cached[0] == signature:
+        return cached[1]
+    doc = tomlkit.loads(path.read_text())
+    _registry_cache[str(path)] = (signature, doc)
+    return doc
+
+
 def _load_nav_categories() -> list[dict]:
     """Return {label, href} for non-empty portal groups shown in the global nav."""
     local = WIRING_HARNESS_DIR / "services.local.toml"
     base = WIRING_HARNESS_DIR / "services.toml"
     path = local if local.exists() else base
-    raw: list = list(tomlkit.loads(path.read_text()).get("services", [])) if path.exists() else []
+    raw: list = list(_registry_doc(path).get("services", [])) if path.exists() else []
     populated = {_REPO_GROUP.get(str(s.get("owner_repo", ""))) for s in raw}
     return [
         {"label": g, "href": f"/home#{_group_anchor(g)}"}
@@ -9898,7 +9921,7 @@ def _load_portal_groups(apply_labels: bool = True) -> list[tuple[str, list[dict]
     local = WIRING_HARNESS_DIR / "services.local.toml"
     base = WIRING_HARNESS_DIR / "services.toml"
     path = local if local.exists() else base
-    registry = tomlkit.loads(path.read_text()) if path.exists() else {}
+    registry = _registry_doc(path) if path.exists() else {}
     raw: list = list(registry.get("services", []))
     air_wireguard_ip = str(registry.get("wg_ip", ""))
     local_air = _request_uses_loopback()
