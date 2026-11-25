@@ -55,6 +55,7 @@
         <button data-all="enable" data-repo="{{ repo }}">Enable</button>
         <button data-all="disable" data-repo="{{ repo }}">Disable</button>
         <button data-all="restart" data-repo="{{ repo }}">Restart</button>
+        {% if repo in deployable %}<button data-deploy="{{ repo }}" title="Fast-forward this repo's checkout to origin/main, then restart its running apps. Refuses unless it is on main with no uncommitted changes.">Deploy</button>{% endif %}
       </div>
     </div>
     {% for a in apps %}
@@ -85,6 +86,28 @@
   {% else %}
   <section><p class="muted">No long-running apps found in the manifests.</p></section>
   {% endfor %}
+  {% if system_units %}
+  <section id="system-units">
+    <div class="group-head"><h2>🔐 System units</h2></div>
+    <p class="muted">System-scope services outside the scheduler manifests. Restart runs through a sudoers rule limited to exactly these units; critical ones need their name typed to confirm.</p>
+    {% for u in system_units %}
+    <div class="app" data-sys-unit="{{ u.name }}" data-critical="{{ 'true' if u.critical else 'false' }}">
+      <div>
+        <span class="name">{{ u.name }}</span>
+        <span class="badge {{ u.state }}" data-sys-state>{{ u.state }}</span>
+        <span class="muted">system</span>
+        {% if u.critical %}<span class="badge failed" title="Restart needs its name typed to confirm">critical</span>{% endif %}
+        {% if u.description %}<div class="desc">{{ u.description }}</div>{% endif %}
+        <a class="muted" href="/logs/{{ u.unit }}?scope=system">logs</a>
+      </div>
+      <div class="actions">
+        <button data-sys-restart>Restart</button>
+        {% if u.deployable %}<button data-deploy="{{ u.repo }}" title="Fast-forward {{ u.repo }} to origin/main. Restart afterwards from this row.">Deploy {{ u.repo }}</button>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
   <section id="home-cards">
     <div class="group-head"><h2>🏠 Home page cards</h2><span class="muted" id="hc-count"></span></div>
     <p class="muted">Hide a card to take it off Home (it stays in the Services menu). Link and placeholder cards can be removed outright; real services cannot.</p>
@@ -127,6 +150,10 @@
         e => e.dataset.manifest === a.manifest_path && e.dataset.name === a.name);
       const badge = row && row.querySelector('[data-state]');
       if (badge) { badge.textContent = a.state; badge.className = 'badge ' + a.state; }
+    }
+    for (const u of data.system_units || []) {
+      const badge = document.querySelector(`[data-sys-unit="${u.name}"] [data-sys-state]`);
+      if (badge) { badge.textContent = u.state; badge.className = 'badge ' + u.state; }
     }
   });
   const auditEl = document.getElementById('audit');
@@ -209,6 +236,38 @@
     toggle.textContent = hide ? 'Show on Home' : 'Hide from Home';
     say(`${hide ? 'hid' : 'showed'} ${row.dataset.name} on Home`);
     renderCards(res.cards);
+  });
+  document.addEventListener('click', async (event) => {
+    const button = event.target.closest('button');
+    if (!button || !(button.dataset.sysRestart !== undefined || button.dataset.deploy)) return;
+    busy(true);
+    try {
+      if (button.dataset.sysRestart !== undefined) {
+        const row = button.closest('[data-sys-unit]');
+        const name = row.dataset.sysUnit;
+        const body = {name};
+        if (row.dataset.critical === 'true') {
+          const typed = prompt(`${name} is a critical unit (gated sites fail closed while it restarts). Type its name to restart it:`);
+          if (typed !== name) { say(`restart ${name}: cancelled`); return; }
+          body.confirm = typed;
+        }
+        report('restart', await post('system/restart', body));
+      } else {
+        const repo = button.dataset.deploy;
+        if (!confirm(`Deploy ${repo}: fast-forward its checkout to origin/main and restart its running apps?`)) { say(`deploy ${repo}: cancelled`); return; }
+        const res = await post('deploy', {repo});
+        if (!res.ok) { say(`deploy ${repo}: refused (${res.detail})`, true); return; }
+        say(res.changed ? `deploy ${repo}: ${res.before} -> ${res.after}` : `deploy ${repo}: already at ${res.after}`);
+        (res.restarted || []).forEach(n => say(`restarted ${n}`));
+        if ((res.restart_needed || []).length) say(`${repo}: restart needed for ${res.restart_needed.join(', ')} (use its own Restart button)`);
+      }
+    } catch (error) {
+      say('request failed: ' + error, true);
+    } finally {
+      busy(false);
+      refresh();
+      loadAudit();
+    }
   });
   document.addEventListener('click', async (event) => {
     const button = event.target.closest('button');

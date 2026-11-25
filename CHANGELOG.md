@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Add Restart buttons for system-scope units on the Grandmaster Clock page (`config/system-units.toml`: the PIN gate and Auto Pass web), through a sudoers rule that allows exactly `systemctl restart` for each listed unit; critical units need their name typed. Add a per-repo Deploy button that fast-forwards a checkout on a clean `main` to `origin/main` and restarts its running user apps, never the web UI itself. Both are audited. Re-install `config/sudoers/clockwork-web` to enable the restart rules.
 - Read the unit statuses for the index page concurrently (eight at a time) instead of one `systemctl show` after another: with about 70 units the page took ~2.0 s and now takes ~0.3 s. Result order and per-unit behaviour are unchanged.
 - Add the `tachometer-service-latency` example manifest: a five-minute timer that probes each service's connect and reply latency (see tachometer `service-latency`).
 - The windshield Playwright rotation timer now runs daily (was weekly) so security patches and refreshed base images are picked up within a day; it only rebuilds when something changed.

@@ -65,6 +65,7 @@ try:
         release_sources,
         site_chrome,
         spotify_api,
+        system_units,
         themes_admin,
         tradility_orders,
         watch_log,
@@ -98,6 +99,7 @@ except ModuleNotFoundError:
     import release_sources
     import site_chrome
     import spotify_api
+    import system_units
     import themes_admin
     import tradility_orders
     import watch_log
@@ -2633,7 +2635,13 @@ def api_grandmaster_home_remove():
 
 @app.get("/api/grandmaster")
 def api_grandmaster():
-    return jsonify({"generated_at": time.time(), "apps": _grandmaster_rows()})
+    return jsonify(
+        {
+            "generated_at": time.time(),
+            "apps": _grandmaster_rows(),
+            "system_units": _system_unit_rows(),
+        }
+    )
 
 
 @app.get("/grandmaster")
@@ -2642,7 +2650,16 @@ def grandmaster_page():
     return render_template(
         "grandmaster.html",
         groups=groups,
+        system_units=_system_unit_rows(),
         home_groups=_placeholder_groups(),
+        deployable=sorted(
+            {
+                row["repo"]
+                for _, rows in groups
+                for row in rows
+                if system_units.find_checkout(row["repo"])
+            }
+        ),
     )
 
 
@@ -2715,6 +2732,122 @@ def api_grandmaster_action(action: str):
     finally:
         _GRANDMASTER_GATE.leave()
     return jsonify(result), (200 if result["ok"] else 409 if result.get("needs_confirm") else 502)
+
+
+def _system_unit_rows() -> list[dict]:
+    rows = []
+    for entry in system_units.load_units():
+        status = unit_status(entry["unit"], scope="system")
+        rows.append(
+            {
+                **entry,
+                "active_state": status.get("active_state", ""),
+                "state": grandmaster.state_label(status, True),
+                "deployable": bool(entry["repo"] and system_units.find_checkout(entry["repo"])),
+            }
+        )
+    return rows
+
+
+@app.post("/api/grandmaster/system/restart")
+def api_grandmaster_system_restart():
+    """Body: {"name", "confirm"}. Restarts one allowlisted system unit through the sudoers rule.
+
+    Only units listed in config/system-units.toml are accepted; a critical unit needs its name
+    sent back as ``confirm``; one change runs at a time; the result is written to the audit log."""
+    body = request.get_json(silent=True) or {}
+    name = str(body.get("name", ""))
+    entry = system_units.find_unit(system_units.load_units(), name)
+    if entry is None:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "name": name,
+                    "steps": [["lookup", 404, "not an allowlisted system unit"]],
+                }
+            ),
+            404,
+        )
+    if entry["critical"] and body.get("confirm") != name:
+        problem = f"{name} is a critical unit: send its name as confirm to restart it"
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "name": name,
+                    "needs_confirm": True,
+                    "steps": [["restart", 409, problem]],
+                }
+            ),
+            409,
+        )
+    entered, why = _GRANDMASTER_GATE.try_enter(bulk=False)
+    if not entered:
+        return jsonify({"ok": False, "name": name, "steps": [["restart", 429, why]]}), 429
+    try:
+        command = system_units.restart_command(entry["unit"])
+        rc, out = _run(*command, timeout=60)
+    finally:
+        _GRANDMASTER_GATE.leave()
+    ok = rc == 0
+    _grandmaster_audit("system-restart", name, ok, "" if ok else out)
+    return jsonify(
+        {"ok": ok, "name": name, "steps": [[f"systemctl restart {entry['unit']}", rc, out]]}
+    ), (200 if ok else 502)
+
+
+@app.post("/api/grandmaster/deploy")
+def api_grandmaster_deploy():
+    """Body: {"repo"}. Fast-forwards the repo's checkout to origin/main, then restarts its user apps.
+
+    Refuses unless the checkout is on main with a clean tree. System units and critical apps are
+    never restarted here: the result lists them as ``restart_needed`` for their own button. The web
+    UI itself is pulled but never restarted from its own page."""
+    body = request.get_json(silent=True) or {}
+    repo = str(body.get("repo", ""))
+    checkout = system_units.find_checkout(repo)
+    if checkout is None:
+        return jsonify({"ok": False, "repo": repo, "detail": "no such checkout"}), 404
+    entered, why = _GRANDMASTER_GATE.try_enter(bulk=False)
+    if not entered:
+        return jsonify({"ok": False, "repo": repo, "detail": why}), 429
+    try:
+        result = system_units.deploy(checkout)
+        restarted: list[str] = []
+        restart_needed = [u["name"] for u in system_units.load_units() if u["repo"] == repo]
+        if result["ok"] and result["changed"]:
+            critical, self_unit = grandmaster.critical_apps(), _self_unit()
+            for row in _grandmaster_rows():
+                if row["repo"] != repo or row["scope"] != "user":
+                    continue
+                if row["name"] in critical or (self_unit and row["unit"] == self_unit):
+                    restart_needed.append(row["name"])
+                    continue
+                if row["state"] != "running":
+                    continue
+                found = _find_job(row["manifest_path"], row["name"])
+                if found and _results_succeeded(do_restart(found[1])):
+                    restarted.append(row["name"])
+                else:
+                    restart_needed.append(row["name"])
+        elif not result["changed"]:
+            restart_needed = []
+    finally:
+        _GRANDMASTER_GATE.leave()
+    _grandmaster_audit(
+        "deploy",
+        repo,
+        result["ok"],
+        result["detail"] or f"{result['before']}..{result['after']} restarted {restarted}",
+    )
+    payload = {
+        **result,
+        "repo": repo,
+        "restarted": restarted,
+        "restart_needed": sorted(set(restart_needed)),
+    }
+    return jsonify(payload), (200 if result["ok"] else 409)
 
 
 @app.get("/api/grandmaster/audit")

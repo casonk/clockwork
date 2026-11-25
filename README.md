@@ -103,6 +103,18 @@ sudoers drop-in (`config/sudoers/clockwork-web`) and a wrapper script
 (`config/scripts/clockwork-system-install`) so only the specific commands needed
 run as root.
 
+The Grandmaster Clock page (`/grandmaster`) also has a **System units** section: a Restart button for each unit in
+`config/system-units.toml` (the PIN gate and Auto Pass web by default). The same sudoers drop-in allows exactly
+`systemctl restart <unit>` for those units and nothing broader, so keep the two lists in step (a test checks it).
+Critical units need their name typed to confirm. Each repo group (and each system unit with a checkout) has a
+**Deploy** button: it fast-forwards the checkout to `origin/main` and restarts the repo's running user apps. It
+refuses unless the checkout is on `main` with a clean tree, never restarts the web UI itself, and lists system and
+critical units as "restart needed" for their own button. After changing the drop-in, install it again:
+
+```bash
+sudo cp config/sudoers/clockwork-web /etc/sudoers.d/clockwork-web && sudo visudo -c
+```
+
 ### Investment allocation targets
 
 The `/to-invest` page can sync a private holdings aggregate selected with
