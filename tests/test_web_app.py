@@ -438,6 +438,7 @@ def test_fetch_all_statuses_uses_cron_status_for_cron_only_and_cron_selected_job
 
     monkeypatch.setattr(web_app, "build_cron_status", fake_cron_status)
     monkeypatch.setattr(web_app, "unit_status", fake_unit_status)
+    monkeypatch.setattr(web_app, "_scheduler_backend", lambda: "other")  # no batched systemctl
 
     statuses = web_app.fetch_all_statuses(
         {
@@ -1706,3 +1707,102 @@ def test_fetch_all_statuses_propagates_a_failing_unit_read(monkeypatch):
     repos = {"r": {"manifests": [{"path": "m.toml", "jobs": [_unit_job("ok"), _unit_job("bad")]}]}}
     with pytest.raises(RuntimeError, match="exploded"):
         web_app.fetch_all_statuses(repos)
+
+
+def test_batch_unit_statuses_asks_systemctl_once_per_scope(monkeypatch):
+    web_app.clear_status_cache()
+    calls: list[tuple] = []
+
+    def fake_systemctl(*args, scope="user"):
+        calls.append((scope, args))
+        return 0, (
+            "Id=a.timer\nActiveState=active\nUnitFileState=enabled\nNextElapseUSecRealtime=\n\n"
+            "Id=b.service\nActiveState=inactive\nUnitFileState=static\nNextElapseUSecRealtime=\n"
+        )
+
+    monkeypatch.setattr(web_app, "_scheduler_backend", lambda: "systemd")
+    monkeypatch.setattr(web_app, "_systemctl", fake_systemctl)
+    monkeypatch.setattr(
+        web_app,
+        "unit_status",
+        lambda unit, scope="user": {"active": None, "active_state": f"single {unit}"},
+    )
+
+    results = web_app._batch_unit_statuses(
+        [("a.timer", "user"), ("b.service", "user"), ("c.service", "user")]
+    )
+
+    assert len(calls) == 1 and calls[0][1][:3] == ("show", "a.timer", "b.service")
+    assert results[0]["active"] is True and results[1]["active_state"] == "inactive"
+    assert results[2]["active_state"] == "single c.service"  # missing from the answer: one-by-one
+
+
+def test_scan_repos_reparses_a_manifest_only_when_it_changes(tmp_path, monkeypatch):
+    repo_dir = tmp_path / "demo"
+    repo_dir.mkdir()
+    manifest = repo_dir / "demo.toml"
+    manifest.write_text('[[jobs]]\nname = "one"\nexec_start = "/bin/true"\n', encoding="utf-8")
+    monkeypatch.setattr(web_app, "EXAMPLES_DIR", tmp_path)
+    web_app._manifest_cache.clear()
+    parses = []
+    real_loads = web_app.tomlkit.loads
+    monkeypatch.setattr(web_app.tomlkit, "loads", lambda text: parses.append(1) or real_loads(text))
+
+    first = web_app.scan_repos()
+    first["demo"]["manifests"][0]["jobs"][0]["enabled"] = True  # callers mutate their copy
+    second = web_app.scan_repos()
+    assert len(parses) == 1
+    assert "enabled" not in second["demo"]["manifests"][0]["jobs"][0]
+
+    manifest.write_text(
+        '[[jobs]]\nname = "one"\nexec_start = "/bin/true"\n[[jobs]]\nname = "two"\nexec_start = "x"\n',
+        encoding="utf-8",
+    )
+    assert len(web_app.scan_repos()["demo"]["manifests"][0]["jobs"]) == 2
+    assert len(parses) == 2
+
+
+def test_unit_statuses_are_cached_briefly_and_dropped_after_a_write(monkeypatch):
+    web_app.clear_status_cache()
+    calls = []
+    monkeypatch.setattr(
+        web_app,
+        "_batch_unit_statuses_uncached",
+        lambda units: calls.append(1) or [{"n": len(calls)}],
+    )
+    units = [("a.timer", "user")]
+    assert web_app._batch_unit_statuses(units) == [{"n": 1}]
+    assert web_app._batch_unit_statuses(units) == [{"n": 1}]  # served from the cache
+    assert len(calls) == 1
+
+    class Response:
+        pass
+
+    monkeypatch.setattr(web_app, "request", type("R", (), {"method": "POST"})())
+    web_app._drop_cached_statuses_after_writes(Response())
+    assert web_app._batch_unit_statuses(units) == [{"n": 2}]
+
+
+def test_stale_statuses_are_served_while_a_refresh_runs(monkeypatch):
+    web_app.clear_status_cache()
+    answers = iter([[{"n": 1}], [{"n": 2}]])
+    monkeypatch.setattr(web_app, "_batch_unit_statuses_uncached", lambda units: next(answers))
+    units = [("a.timer", "user")]
+    assert web_app._batch_unit_statuses(units) == [{"n": 1}]
+    key = tuple(units)
+    stamp, value = web_app._status_cache[key]
+    web_app._status_cache[key] = (
+        stamp - web_app._STATUS_TTL_S - 1,
+        value,
+    )  # now stale, not expired
+
+    class Inline:
+        def __init__(self, target, args=(), daemon=None):
+            self.run = lambda: target(*args)
+
+        def start(self):
+            self.run()
+
+    monkeypatch.setattr(web_app.threading, "Thread", Inline)
+    assert web_app._batch_unit_statuses(units) == [{"n": 1}]  # stale answer, no waiting
+    assert web_app._batch_unit_statuses(units) == [{"n": 2}]  # the refresh landed
