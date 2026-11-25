@@ -20,3 +20,8 @@ user ALL=(root) NOPASSWD: /usr/bin/systemctl disable --now *
 
 # Rebuild the Guacamole remote-desktop gateway (render + install)
 user ALL=(root) NOPASSWD: /usr/local/bin/pit-box-rebuild-guacamole
+
+# Grandmaster Clock "Restart" buttons for the units in config/system-units.toml: exactly these
+# commands and nothing broader. Keep this list in step with that file.
+user ALL=(root) NOPASSWD: /usr/bin/systemctl restart wiring-harness-pin-gate.service
+user ALL=(root) NOPASSWD: /usr/bin/systemctl restart auto-pass-web.service

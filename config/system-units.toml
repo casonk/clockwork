@@ -1,0 +1,20 @@
+# System-scope units the Grandmaster Clock can restart with one button.
+#
+# Only units named here can be restarted, and the sudoers drop-in (config/sudoers/clockwork-web)
+# allows exactly `systemctl restart <unit>` for each of them: keep the two lists in step.
+# `critical` units need their name typed back before they restart.
+# `repo` names the portfolio checkout a Deploy button pulls before the restart is offered.
+
+[[units]]
+name = "wiring-harness-pin-gate"
+unit = "wiring-harness-pin-gate.service"
+repo = "wiring-harness"
+description = "PIN gate in front of the private sites; every gated site fails closed while it starts (about 25 s)"
+critical = true
+
+[[units]]
+name = "auto-pass-web"
+unit = "auto-pass-web.service"
+repo = "auto-pass"
+description = "Auto Pass credential administration UI (TPM-sealed bootstrap)"
+critical = true
