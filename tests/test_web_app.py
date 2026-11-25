@@ -1806,3 +1806,29 @@ def test_stale_statuses_are_served_while_a_refresh_runs(monkeypatch):
     monkeypatch.setattr(web_app.threading, "Thread", Inline)
     assert web_app._batch_unit_statuses(units) == [{"n": 1}]  # stale answer, no waiting
     assert web_app._batch_unit_statuses(units) == [{"n": 2}]  # the refresh landed
+
+
+def test_keepwarm_refreshes_the_last_requested_units(monkeypatch):
+    web_app.clear_status_cache()
+    web_app._status_refreshing.clear()
+    seen = []
+    monkeypatch.setattr(
+        web_app, "_batch_unit_statuses_uncached", lambda units: seen.append(list(units)) or [{}]
+    )
+    key = (("a.timer", "user"),)
+    web_app._status_cache[key] = (0.0, [{}])
+
+    class Stop(Exception):
+        pass
+
+    ticks = iter([None, Stop()])
+
+    def fake_sleep(_seconds):
+        step = next(ticks)
+        if step is not None:
+            raise step
+
+    monkeypatch.setattr(web_app.time, "sleep", fake_sleep)
+    with pytest.raises(Stop):
+        web_app._keep_statuses_warm()
+    assert seen == [[("a.timer", "user")]]
