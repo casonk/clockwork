@@ -10,6 +10,7 @@ Mark items `[x]` when complete and move them to Done.
 
 ## Pending
 
+- [ ] [codecov:2026-11-25] **Raise patch coverage on PR #239: 88.4615% patched, 15 changed lines have no test coverage.** Files: web/system_units.py (9 missing, 86.76%), web/app.py (6 missing, 90.32%). Add tests for the uncovered lines. (codecov-pr:239, https://github.com/casonk/clockwork/pull/239#issuecomment-7152377709)
 - [ ] [codecov:2026-11-20] **Raise patch coverage on PR #234: 57.1429% patched, 3 changed lines have no test coverage.** Files: web/app.py (2 missing, 0%), web/status_helpers.py (1 missing, 66.66%). Add tests for the uncovered lines. (codecov-pr:234, https://github.com/casonk/clockwork/pull/234#issuecomment-7048929628)
 - [ ] [codecov:2026-11-18] **Raise patch coverage on PR #221: 94.1176% patched, 2 changed lines have no test coverage.** Files: web/media_library.py (2 missing, 91.66%). Add tests for the uncovered lines. (codecov-pr:221, https://github.com/casonk/clockwork/pull/221#issuecomment-6970009577)
 - [ ] [codecov:2026-11-19] **Raise patch coverage on PR #226: 90.1409% patched, 7 changed lines have no test coverage.** Files: web/app.py (5 missing, 90.9%), web/library_pages.py (2 missing, 75%). Add tests for the uncovered lines. (codecov-pr:226, https://github.com/casonk/clockwork/pull/226#issuecomment-7014507269)
