@@ -14,6 +14,11 @@ should change how future sessions work in this repo.
 
 ## Lessons
 
+- A destructive library control must be limited to the same entries the page exposes. Resolve the
+  target under its configured root without following symlinks, refuse the root itself, and before
+  recursive deletion reject hidden, linked, special, or unsupported content the user could not
+  see. Make confirmation work for mouse, touch, and keyboard: arm on the first activation and
+  submit only on the second, with a short reset window and CSRF protection on the POST.
 - Keep bulk media and finished derivatives on the capacity disk, but put
   resumable transcoding chunks and live HLS segments on fast scratch. Preserve
   an HDD-local pointer so independent web and worker processes agree on partial

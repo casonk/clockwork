@@ -17,6 +17,10 @@
     .row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid var(--border); overflow-wrap:anywhere; }
     .row:last-child { border-bottom:0; }
     .muted { color:var(--muted); }
+    .delete { flex:none; padding:5px 8px; border:1px solid var(--red); border-radius:6px; background:var(--surface2); color:var(--red); cursor:pointer; }
+    .flash { padding:8px 12px; border:1px solid var(--border); border-radius:7px; margin-bottom:10px; }
+    .flash.success { background:var(--green-dim); color:var(--green); }
+    .flash.error { background:var(--red-dim); color:var(--red); }
   </style>
   {% include "_theme_head.html" %}
   <link rel="stylesheet" href="{{ url_for('static', filename='site-nav.css') }}">
@@ -28,6 +32,9 @@
   <h1>{{ '🎧' if kind == 'listen' else '📚' }} {{ 'Listen' if kind == 'listen' else 'Read' }} Library</h1>
 </header>
 <main>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}
+  {% endwith %}
   {% if not available %}
     <div class="panel muted">Set <code>CLOCKWORK_{{ kind|upper }}_LIBRARY_DIR</code> to a readable local folder to enable this library.</div>
   {% else %}
@@ -35,12 +42,25 @@
     <p class="muted">{{ rel or 'Library root' }}{% if playable and rel %} · <a href="{{ url_for('personal_library.play', rel=rel) }}">▶ Play folder</a>{% endif %}</p>
     <div class="panel">
       {% for dir in dirs %}
-        <div class="row"><a href="{{ url_for('personal_library.browse', kind=kind, rel=dir.rel) }}">📁 {{ dir.name }}</a></div>
+        <div class="row">
+          <a href="{{ url_for('personal_library.browse', kind=kind, rel=dir.rel) }}">📁 {{ dir.name }}</a>
+          <form method="post" action="{{ url_for('personal_library.delete', kind=kind, rel=dir.rel) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="delete" type="button" data-double-delete aria-label="Delete {{ dir.name }}" title="Double-click to delete this folder and its visible media">Delete</button>
+          </form>
+        </div>
       {% endfor %}
-      {% for file in files %}<div class="row"><a href="{{ file.url }}">{{ '🎵' if kind == 'listen' else '📄' }} {{ file.name }}</a></div>{% endfor %}
+      {% for file in files %}<div class="row">
+        <a href="{{ file.url }}">{{ '🎵' if kind == 'listen' else '📄' }} {{ file.name }}</a>
+        <form method="post" action="{{ url_for('personal_library.delete', kind=kind, rel=file.rel) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="delete" type="button" data-double-delete aria-label="Delete {{ file.name }}" title="Double-click to delete">Delete</button>
+        </form>
+      </div>{% endfor %}
       {% if not dirs and not files %}<p class="muted">No supported files in this folder.</p>{% endif %}
     </div>
   {% endif %}
 </main>
+{% include "_double_delete.html" %}
 </body>
 </html>
