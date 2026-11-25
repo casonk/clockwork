@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import csv
 import datetime
 import importlib
@@ -20,6 +21,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.parse
 import uuid
@@ -607,6 +609,62 @@ def _environment_key(environment: dict[str, str], suffix: str) -> str:
     return matches[0] if matches else ""
 
 
+_manifest_cache: dict[str, tuple[tuple[int, int], list[dict]]] = {}
+_manifest_cache_lock = threading.Lock()
+
+
+def _manifest_jobs(toml_file: Path) -> list[dict]:
+    """The parsed jobs of one manifest, re-read only when the file's mtime or size changes.
+
+    tomlkit keeps formatting and costs ~18 ms a file; the index page parsed ~50 of them on every
+    request.  Callers get the cached list and must copy it before changing it.
+    """
+    info = toml_file.stat()
+    signature = (info.st_mtime_ns, info.st_size)
+    key = str(toml_file)
+    with _manifest_cache_lock:
+        cached = _manifest_cache.get(key)
+    if cached and cached[0] == signature:
+        return cached[1]
+    doc = tomlkit.loads(toml_file.read_text())
+    jobs = []
+    for job in doc.get("jobs", []):
+        timer = job.get("timer")
+        cron = job.get("cron")
+        environment = _coerce_mapping(job.get("environment"))
+        environment_files = _coerce_list(job.get("environment_files"))
+        provider_env_key = _environment_key(environment, "_PROVIDER")
+        model_env_key = _environment_key(environment, "_MODEL")
+        jobs.append(
+            {
+                "name": _coerce(job.get("name")),
+                "description": _coerce(job.get("description")),
+                "scope": _coerce(job.get("scope")) or "user",
+                "service_type": _coerce(job.get("service_type")) or "oneshot",
+                "exec_start": _coerce(job.get("exec_start")),
+                "exec_start_then": _command_list(job.get("exec_start_then")),
+                "working_directory": _coerce(job.get("working_directory")),
+                "environment": environment,
+                "environment_files": environment_files,
+                "provider_env_key": provider_env_key,
+                "provider_value": environment.get(provider_env_key, ""),
+                "model_env_key": model_env_key,
+                "model_value": environment.get(model_env_key, ""),
+                "timer_name": _coerce(job.get("timer_name")),
+                "service_name": _coerce(job.get("service_name")),
+                "launchd_label": _coerce(job.get("launchd_label")) or None,
+                "poll_interval": _coerce(job.get("poll_interval")),
+                "timer": ({k: _coerce(v) for k, v in timer.items()} if timer else None),
+                "cron": {k: _coerce(v) for k, v in cron.items()} if cron else None,
+                # dual_target = has both systemd timer and cron, user can choose
+                "dual_target": bool(timer) and bool(cron),
+            }
+        )
+    with _manifest_cache_lock:
+        _manifest_cache[key] = (signature, jobs)
+    return jobs
+
+
 def scan_repos() -> dict[str, dict]:
     repos: dict[str, dict] = {}
     all_files = sorted(EXAMPLES_DIR.glob("**/*.toml"))
@@ -628,41 +686,7 @@ def scan_repos() -> dict[str, dict]:
         else:
             rel_path = str(rel_obj)
 
-        doc = tomlkit.loads(toml_file.read_text())
-
-        jobs = []
-        for job in doc.get("jobs", []):
-            timer = job.get("timer")
-            cron = job.get("cron")
-            environment = _coerce_mapping(job.get("environment"))
-            environment_files = _coerce_list(job.get("environment_files"))
-            provider_env_key = _environment_key(environment, "_PROVIDER")
-            model_env_key = _environment_key(environment, "_MODEL")
-            jobs.append(
-                {
-                    "name": _coerce(job.get("name")),
-                    "description": _coerce(job.get("description")),
-                    "scope": _coerce(job.get("scope")) or "user",
-                    "service_type": _coerce(job.get("service_type")) or "oneshot",
-                    "exec_start": _coerce(job.get("exec_start")),
-                    "exec_start_then": _command_list(job.get("exec_start_then")),
-                    "working_directory": _coerce(job.get("working_directory")),
-                    "environment": environment,
-                    "environment_files": environment_files,
-                    "provider_env_key": provider_env_key,
-                    "provider_value": environment.get(provider_env_key, ""),
-                    "model_env_key": model_env_key,
-                    "model_value": environment.get(model_env_key, ""),
-                    "timer_name": _coerce(job.get("timer_name")),
-                    "service_name": _coerce(job.get("service_name")),
-                    "launchd_label": _coerce(job.get("launchd_label")) or None,
-                    "poll_interval": _coerce(job.get("poll_interval")),
-                    "timer": ({k: _coerce(v) for k, v in timer.items()} if timer else None),
-                    "cron": {k: _coerce(v) for k, v in cron.items()} if cron else None,
-                    # dual_target = has both systemd timer and cron, user can choose
-                    "dual_target": bool(timer) and bool(cron),
-                }
-            )
+        jobs = copy.deepcopy(_manifest_jobs(toml_file))
 
         repos[repo_name]["manifests"].append(
             {
@@ -1101,6 +1125,94 @@ def unit_status(unit: str, scope: str = "user") -> dict:
 # Each unit is one `systemctl show` subprocess (~25 ms); with ~70 units the index page spent ~1.9 s
 # running them one after another. They are independent reads, so run a few at a time.
 _STATUS_WORKERS = 8
+_STATUS_PROPERTIES = "--property=Id,ActiveState,UnitFileState,NextElapseUSecRealtime"
+
+
+_STATUS_TTL_S = 5.0
+_status_cache: dict[tuple, tuple[float, list[dict]]] = {}
+
+
+def clear_status_cache() -> None:
+    """Forget cached unit statuses; called after anything that can change them."""
+    _status_cache.clear()
+
+
+@app.after_request
+def _drop_cached_statuses_after_writes(response):
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        clear_status_cache()
+    return response
+
+
+_STATUS_MAX_STALE_S = 60.0
+_status_refreshing: set[tuple] = set()
+
+
+def _refresh_statuses(key: tuple) -> None:
+    try:
+        results = _batch_unit_statuses_uncached(list(key))
+        _status_cache.clear()  # keep one entry: the page asks for the same list each time
+        _status_cache[key] = (time.monotonic(), results)
+    finally:
+        _status_refreshing.discard(key)
+
+
+def _batch_unit_statuses(units: list[tuple[str, str]]) -> list[dict]:
+    """Like :func:`_batch_unit_statuses_uncached`, but a page load rarely waits for systemctl.
+
+    Fresh (under 5 s) answers are reused as they are.  Older ones, up to a minute, are served
+    while a background thread refreshes them, so the next load is current; anything older, or
+    anything after a write, is read inline.
+    """
+    key = tuple(units)
+    cached = _status_cache.get(key)
+    age = time.monotonic() - cached[0] if cached else None
+    if cached and age is not None and age < _STATUS_MAX_STALE_S:
+        if age >= _STATUS_TTL_S and key not in _status_refreshing:
+            _status_refreshing.add(key)
+            threading.Thread(target=_refresh_statuses, args=(key,), daemon=True).start()
+        return copy.deepcopy(cached[1])
+    results = _batch_unit_statuses_uncached(units)
+    _status_cache.clear()
+    _status_cache[key] = (time.monotonic(), copy.deepcopy(results))
+    return results
+
+
+def _batch_unit_statuses_uncached(units: list[tuple[str, str]]) -> list[dict]:
+    """Statuses for ``(unit, scope)`` pairs, in order.
+
+    On systemd one ``systemctl show`` per scope answers for every unit (blocks separated by a
+    blank line), which is one subprocess instead of ~70.  A unit missing from the answer, any
+    other backend, and a failed call fall back to the one-at-a-time path.
+    """
+    results: list[dict | None] = [None] * len(units)
+    if _scheduler_backend() == "systemd":
+        scopes = sorted({scope for _, scope in units})
+
+        def ask(scope: str) -> tuple[str, str]:
+            names = sorted({unit for unit, unit_scope in units if unit_scope == scope})
+            return scope, _systemctl("show", *names, _STATUS_PROPERTIES, scope=scope)[1]
+
+        with ThreadPoolExecutor(max_workers=max(1, len(scopes))) as pool:
+            answers = list(pool.map(ask, scopes))
+        for scope, out in answers:
+            blocks = {}
+            for block in out.split("\n\n"):
+                block_id = parse_show_properties(block).get("Id")
+                if block_id:
+                    blocks[block_id] = block
+            for index, (unit, unit_scope) in enumerate(units):
+                if unit_scope == scope and unit in blocks:
+                    results[index] = build_unit_status(blocks[unit])
+    missing = [i for i, result in enumerate(results) if result is None]
+    if len(missing) > 1:
+        with ThreadPoolExecutor(max_workers=_STATUS_WORKERS) as pool:
+            filled = list(pool.map(lambda i: unit_status(units[i][0], scope=units[i][1]), missing))
+    else:
+        filled = [unit_status(units[i][0], scope=units[i][1]) for i in missing]
+    for i, status in zip(missing, filled, strict=True):
+        results[i] = status
+    return [r or {} for r in results]
 
 
 def fetch_all_statuses(repos: dict) -> dict[str, dict]:
@@ -1118,15 +1230,9 @@ def fetch_all_statuses(repos: dict) -> dict[str, dict]:
                 else:
                     statuses[key] = build_cron_status(job)
 
-    def probe(item: tuple[str, dict]) -> dict:
-        _, job = item
-        return unit_status(primary_unit(job), scope=job.get("scope", "user"))
-
-    if len(pending) > 1:
-        with ThreadPoolExecutor(max_workers=_STATUS_WORKERS) as pool:
-            results = list(pool.map(probe, pending))
-    else:
-        results = [probe(item) for item in pending]
+    results = _batch_unit_statuses(
+        [(primary_unit(job), job.get("scope", "user")) for _, job in pending]
+    )
     for (key, job), status in zip(pending, results, strict=True):
         if not status.get("next_run_iso") and job.get("cron"):
             cron_status = build_cron_status(job)
