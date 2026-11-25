@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- Read the unit statuses for the index page concurrently (eight at a time) instead of one `systemctl show` after another: with about 70 units the page took ~2.0 s and now takes ~0.3 s. Result order and per-unit behaviour are unchanged.
+- Add the `tachometer-service-latency` example manifest: a five-minute timer that probes each service's connect and reply latency (see tachometer `service-latency`).
 - The windshield Playwright rotation timer now runs daily (was weekly) so security patches and refreshed base images are picked up within a day; it only rebuilds when something changed.
 - `/to-tradility` now serves Tradility's own page template with `embedded=True`, so the page is changed once, in the Tradility repository. `scripts/sync_tradility_template.py` copies it into `web/templates/to-tradility.html` (`--check` reports drift) and a test fails when the copy differs from a sibling Tradility checkout. The page gains Tradility's newer fixes it had missed.
 - Pace arXiv and YouTube. arXiv reading-source lookups are three seconds apart whatever the title. YouTube calls are spaced 0.25 s apart per account, and an account that answers 429, 503 or a quota 403 is paused until its `Retry-After` (60 s by default, at most an hour) while the sync carries on with the next account.

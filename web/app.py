@@ -24,6 +24,7 @@ import time
 import urllib.parse
 import uuid
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -1095,8 +1096,14 @@ def unit_status(unit: str, scope: str = "user") -> dict:
     }
 
 
+# Each unit is one `systemctl show` subprocess (~25 ms); with ~70 units the index page spent ~1.9 s
+# running them one after another. They are independent reads, so run a few at a time.
+_STATUS_WORKERS = 8
+
+
 def fetch_all_statuses(repos: dict) -> dict[str, dict]:
     statuses: dict[str, dict] = {}
+    pending: list[tuple[str, dict]] = []
     for repo in repos.values():
         for manifest in repo["manifests"]:
             for job in manifest["jobs"]:
@@ -1104,14 +1111,26 @@ def fetch_all_statuses(repos: dict) -> dict[str, dict]:
                 if job.get("cron") and job.get("target") == "cron":
                     statuses[key] = build_cron_status(job)
                 elif not job.get("cron") or job.get("timer"):
-                    status = unit_status(primary_unit(job), scope=job.get("scope", "user"))
-                    if not status.get("next_run_iso") and job.get("cron"):
-                        cron_status = build_cron_status(job)
-                        status["next_run_text"] = cron_status.get("next_run_text", "")
-                        status["next_run_iso"] = cron_status.get("next_run_iso", "")
-                    statuses[key] = status
+                    statuses[key] = {}  # keeps the insertion order; filled below
+                    pending.append((key, job))
                 else:
                     statuses[key] = build_cron_status(job)
+
+    def probe(item: tuple[str, dict]) -> dict:
+        _, job = item
+        return unit_status(primary_unit(job), scope=job.get("scope", "user"))
+
+    if len(pending) > 1:
+        with ThreadPoolExecutor(max_workers=_STATUS_WORKERS) as pool:
+            results = list(pool.map(probe, pending))
+    else:
+        results = [probe(item) for item in pending]
+    for (key, job), status in zip(pending, results, strict=True):
+        if not status.get("next_run_iso") and job.get("cron"):
+            cron_status = build_cron_status(job)
+            status["next_run_text"] = cron_status.get("next_run_text", "")
+            status["next_run_iso"] = cron_status.get("next_run_iso", "")
+        statuses[key] = status
     return statuses
 
 

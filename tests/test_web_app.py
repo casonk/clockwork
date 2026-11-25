@@ -1649,3 +1649,60 @@ def test_site_navigation_groups_registry_services_and_keeps_pins_first(tmp_path,
     assert 'href="/groceries"' in nav
     assert 'href="/library"' in nav
     assert 'href="/to-code"' in nav
+
+
+def _unit_job(name: str) -> dict:
+    return {
+        "name": name,
+        "scope": "user",
+        "target": "systemd-user",
+        "timer": {"kind": "calendar"},
+        "cron": None,
+    }
+
+
+def test_fetch_all_statuses_reads_units_concurrently_and_keeps_manifest_order(monkeypatch):
+    import threading
+
+    barrier = threading.Barrier(2, timeout=10)  # passes only if two reads are in flight together
+
+    def fake_unit_status(unit, scope="user"):
+        barrier.wait()
+        return {
+            "active": True,
+            "enabled": True,
+            "active_state": unit,
+            "next_run_iso": "x",
+            "next_run_text": "",
+        }
+
+    monkeypatch.setattr(web_app, "unit_status", fake_unit_status)
+    monkeypatch.setattr(web_app, "primary_unit", lambda job: job["name"])
+    repos = {
+        "r": {
+            "manifests": [
+                {
+                    "path": "m.toml",
+                    "jobs": [_unit_job("b"), _unit_job("a"), _unit_job("c"), _unit_job("d")],
+                }
+            ]
+        }
+    }
+
+    statuses = web_app.fetch_all_statuses(repos)
+
+    assert list(statuses) == ["m.toml:b", "m.toml:a", "m.toml:c", "m.toml:d"]
+    assert [s["active_state"] for s in statuses.values()] == ["b", "a", "c", "d"]
+
+
+def test_fetch_all_statuses_propagates_a_failing_unit_read(monkeypatch):
+    def fake_unit_status(unit, scope="user"):
+        if unit == "bad":
+            raise RuntimeError("systemctl exploded")
+        return {"next_run_iso": "x"}
+
+    monkeypatch.setattr(web_app, "unit_status", fake_unit_status)
+    monkeypatch.setattr(web_app, "primary_unit", lambda job: job["name"])
+    repos = {"r": {"manifests": [{"path": "m.toml", "jobs": [_unit_job("ok"), _unit_job("bad")]}]}}
+    with pytest.raises(RuntimeError, match="exploded"):
+        web_app.fetch_all_statuses(repos)
