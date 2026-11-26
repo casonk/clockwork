@@ -1877,3 +1877,32 @@ def test_zero_max_stale_reads_systemctl_on_every_load_and_zero_keepwarm_starts_n
     web_app._batch_unit_statuses(units)
     assert len(calls) == 2
     assert web_app._keepwarm_started is False
+
+
+def test_zero_max_stale_starts_no_keepwarm_thread_even_with_an_interval(monkeypatch):
+    monkeypatch.setattr(web_app, "_STATUS_MAX_STALE_S", 0.0)
+    monkeypatch.setattr(web_app, "_STATUS_KEEPWARM_S", 30.0)
+    monkeypatch.setattr(web_app, "_keepwarm_started", False)
+    web_app._start_keepwarm()
+    assert web_app._keepwarm_started is False
+
+
+def test_update_rate_reports_the_values_in_effect(monkeypatch):
+    monkeypatch.setattr(web_app, "_STATUS_TTL_S", 5.0)
+    monkeypatch.setattr(web_app, "_STATUS_MAX_STALE_S", 60.0)
+    monkeypatch.setattr(web_app, "_STATUS_KEEPWARM_S", 30.0)
+    client = web_app.app.test_client()
+    response = client.get("/api/update-rate")
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.get_json() == {
+        "summary": "statuses ≤ 60 s old · refreshed every 30 s",
+        "settings": {
+            "CLOCKWORK_STATUS_TTL": 5.0,
+            "CLOCKWORK_STATUS_MAX_STALE": 60.0,
+            "CLOCKWORK_STATUS_KEEPWARM": 30.0,
+        },
+    }
+    monkeypatch.setattr(web_app, "_STATUS_KEEPWARM_S", 0.0)
+    assert client.get("/api/update-rate").get_json()["summary"] == "statuses ≤ 60 s old"
+    monkeypatch.setattr(web_app, "_STATUS_MAX_STALE_S", 0.0)
+    assert client.get("/api/update-rate").get_json()["summary"] == "statuses read on every load"

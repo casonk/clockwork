@@ -1198,9 +1198,33 @@ def _keep_statuses_warm() -> None:
 
 def _start_keepwarm() -> None:
     global _keepwarm_started
-    if _STATUS_KEEPWARM_S > 0 and not _keepwarm_started:
+    # With a max stale of 0 no cached answer is ever served, so there is nothing to keep warm.
+    if _STATUS_KEEPWARM_S > 0 and _STATUS_MAX_STALE_S > 0 and not _keepwarm_started:
         _keepwarm_started = True
         threading.Thread(target=_keep_statuses_warm, name="status-keepwarm", daemon=True).start()
+
+
+@app.get("/api/update-rate")
+def api_update_rate():
+    """The index page's effective update rate, for tachometer's latency page."""
+    if _STATUS_MAX_STALE_S <= 0:
+        summary = "statuses read on every load"
+    else:
+        summary = f"statuses ≤ {_STATUS_MAX_STALE_S:g} s old"
+        if _STATUS_KEEPWARM_S > 0:
+            summary += f" · refreshed every {_STATUS_KEEPWARM_S:g} s"
+    response = jsonify(
+        {
+            "summary": summary,
+            "settings": {
+                "CLOCKWORK_STATUS_TTL": _STATUS_TTL_S,
+                "CLOCKWORK_STATUS_MAX_STALE": _STATUS_MAX_STALE_S,
+                "CLOCKWORK_STATUS_KEEPWARM": _STATUS_KEEPWARM_S,
+            },
+        }
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def _batch_unit_statuses(units: list[tuple[str, str]]) -> list[dict]:

@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- `GET /api/update-rate` reports the index page's effective update rate (shown on tachometer's latency page). `CLOCKWORK_STATUS_MAX_STALE=0` no longer starts the keep-warm thread, which only refreshed a cache that was never served.
 - The index page's status freshness is configurable per service: `CLOCKWORK_STATUS_TTL`, `CLOCKWORK_STATUS_MAX_STALE` and `CLOCKWORK_STATUS_KEEPWARM` (seconds, defaults 5 / 60 / 30, `0` allowed). See the README.
 - Every page render re-parsed the wiring-harness registry (two `tomlkit` parses, ~50 ms) for the nav menus and portal cards; it is now re-read only when the registry file changes.
 - A background thread keeps the index page's unit statuses at most ~30 s old, so a page load (and the latency probe) does not wait for `systemctl`. Idle until the first page load.

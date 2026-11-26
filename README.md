@@ -609,7 +609,7 @@ The index page's unit statuses are cached so a load does not wait on `systemctl`
 | `CLOCKWORK_STATUS_MAX_STALE` | 60 | serve an older answer up to this long while a background refresh runs; `0` reads `systemctl` on every load |
 | `CLOCKWORK_STATUS_KEEPWARM` | 30 | background refresh interval; `0` turns it off |
 
-Any change you make from the page (any POST) drops the cache, so it never shows the state from before your own click.
+Any change you make from the page (any POST) drops the cache, so it never shows the state from before your own click. `GET /api/update-rate` reports the values in effect, which tachometer's Service latency page shows beside each service.
 
 ## mTLS and Caddy
 
